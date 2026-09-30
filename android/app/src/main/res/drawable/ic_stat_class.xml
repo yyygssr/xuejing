@@ -1,0 +1,11 @@
+<!-- 上课提醒用的通知小图标（Material「class」书本造型，与 ic_stat_timer 同一套 24 网格）。
+     通知小图标必须是纯白单色剪影，系统会把它当蒙版染色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18,2H6c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM6,4h5v8l-2.5,-1.5L6,12V4zM18,20H6v-2h12v2zM18,16H6v-2h12v2zM18,12h-5V4h5v8z" />
+</vector>

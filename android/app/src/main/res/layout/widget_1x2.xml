@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1×2：紧凑单行，下一节课 + 待办数 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_bg"
+    android:padding="10dp"
+    android:gravity="center_vertical">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/wTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="下一节课"
+            android:textColor="#7C8399"
+            android:textSize="10sp" />
+
+        <TextView
+            android:id="@+id/wName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="今天没有了"
+            android:textColor="#171A26"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/wMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#7C8399"
+            android:textSize="10sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/wTodo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:paddingStart="8dp"
+        android:paddingEnd="2dp"
+        android:text="0"
+        android:textColor="#5A5AD6"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+</LinearLayout>

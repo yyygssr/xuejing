@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg_accent"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/wTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="专注"
+        android:textColor="#E8EAFF"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/wName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="今日 0m"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:maxLines="2" />
+
+    <TextView
+        android:id="@+id/wMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="开始番茄"
+        android:textColor="#E8EAFF"
+        android:textSize="11sp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+</LinearLayout>

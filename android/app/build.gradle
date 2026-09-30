@@ -1,0 +1,93 @@
+plugins {
+    id 'com.android.application'
+}
+
+/*
+ * 签名信息从 local.properties 读，**不写进仓库**。
+ * 本地打包前在 android/local.properties 里补上（这个文件已被 .gitignore 排除）：
+ *
+ *   sdk.dir=...            （Android Studio 会自动写好）
+ *   storeFile=xuejing.jks   （相对于 android/app/）
+ *   storePassword=***
+ *   keyAlias=xuejing
+ *   keyPassword=***
+ *
+ * 没配就跳过签名，用默认 debug keystore 出 debug 包 —— 别人 clone 下来能直接编译，
+ * 不至于因为缺你的私钥而卡在 assembleRelease。
+ */
+def localProps = new Properties()
+def localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { localProps.load(it) }
+}
+def hasSigning = localProps.getProperty('storePassword') != null
+
+android {
+    namespace 'com.xuejing.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.xuejing.app"
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    signingConfigs {
+        release {
+            if (hasSigning) {
+                storeFile file(localProps.getProperty('storeFile', 'xuejing.jks'))
+                storePassword localProps.getProperty('storePassword')
+                keyAlias localProps.getProperty('keyAlias', 'xuejing')
+                keyPassword localProps.getProperty('keyPassword')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (hasSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+        debug {
+            if (hasSigning) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.core:core:1.17.0'
+}
+
+/* 打包前自动把 ..\index.html 同步进 assets，
+   避免「改了原型、忘了拷贝、装出来还是旧页面」这类坑 */
+tasks.register('syncPrototype', Copy) {
+    from rootProject.file('../index.html')
+    into layout.projectDirectory.dir('src/main/assets')
+    doLast {
+        def f = layout.projectDirectory.file('src/main/assets/index.html').asFile
+        println "[学径] 原型已同步 -> assets/index.html (" + f.length() + " bytes)"
+    }
+}
+
+afterEvaluate {
+    tasks.named('preBuild').configure { dependsOn(tasks.named('syncPrototype')) }
+}

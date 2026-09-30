@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/wTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="待办"
+        android:textColor="#7C8399"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/wName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="0 条未完成"
+        android:textColor="#171A26"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:maxLines="2" />
+
+    <TextView
+        android:id="@+id/wMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text=""
+        android:textColor="#7C8399"
+        android:textSize="11sp"
+        android:maxLines="2"
+        android:ellipsize="end" />
+</LinearLayout>

@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4×2：左四宫格 + 右问 AI / 课程 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:padding="10dp"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.15"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="学径"
+            android:textColor="#7C8399"
+            android:textSize="10sp"
+            android:layout_marginBottom="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/bCourse"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp"
+                android:background="@drawable/widget_cell"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="2dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="课" android:textSize="14sp" android:textStyle="bold" android:textColor="#5A5AD6" />
+                <TextView android:id="@+id/tCourse" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="课表" android:textSize="9sp" android:textColor="#171A26" android:maxLines="1" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/bNote"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp"
+                android:background="@drawable/widget_cell"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="2dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="记" android:textSize="14sp" android:textStyle="bold" android:textColor="#0E9F8F" />
+                <TextView android:id="@+id/tNote" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="笔记" android:textSize="9sp" android:textColor="#171A26" android:maxLines="1" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/bTodo"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp"
+                android:background="@drawable/widget_cell"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="2dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="办" android:textSize="14sp" android:textStyle="bold" android:textColor="#E07A1F" />
+                <TextView android:id="@+id/tTodo" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="待办" android:textSize="9sp" android:textColor="#171A26" android:maxLines="1" />
+            </LinearLayout>
+            <LinearLayout
+                android:id="@+id/bFocus"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:layout_margin="2dp"
+                android:background="@drawable/widget_cell"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="2dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="钟" android:textSize="14sp" android:textStyle="bold" android:textColor="#E0505A" />
+                <TextView android:id="@+id/tFocus" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="专注" android:textSize="9sp" android:textColor="#171A26" android:maxLines="1" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="8dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/bAskAi"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_bg_accent"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="问 AI"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="›"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/bClass"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/widget_cell"
+            android:orientation="vertical"
+            android:gravity="center_vertical"
+            android:padding="8dp">
+            <TextView
+                android:id="@+id/tClassTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="课程"
+                android:textColor="#7C8399"
+                android:textSize="10sp" />
+            <TextView
+                android:id="@+id/tClassName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="今天没有了"
+                android:textColor="#171A26"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:ellipsize="end" />
+            <TextView
+                android:id="@+id/tClassMeta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textColor="#7C8399"
+                android:textSize="10sp"
+                android:maxLines="2"
+                android:ellipsize="end" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

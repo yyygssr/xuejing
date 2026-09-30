@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- 节假日：从系统日历读法定节假日，用来隐藏放假当天的课 -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
+    <!-- 通知：Android 13+ 需要运行时申请 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 上岛：Android 15+ 的「实时动态 / Live Updates」权限。
+         不申请的话通知照发，但系统不会把它提升成灵动岛形态。 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- 专注计时期间挂前台服务，保证计时不被系统回收 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- 上课提醒要准点，需要精确闹钟。
+         SCHEDULE_EXACT_ALARM 在 Android 12/12L（31/32）是「特殊应用权限」，
+         要用户去系统设置里手动打开；Android 13+（33）起改用 USE_EXACT_ALARM，
+         装机即授予 —— 不声明它的话 canScheduleExactAlarms() 恒为 false，
+         排下去的闹钟会退化成 setAndAllowWhileIdle 的宽窗口（Doze 里可能晚十几分钟），
+         这正是「到时间提醒不及时」的主因。两者都声明，覆盖各自适用的版本区间。 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- 重启后恢复课表提醒 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!--
+      Android 11+ 的包可见性：页面里写 capture 的拍照入口要求我们自己去唤相机，
+      不声明这一段的话在某些 ROM 上会直接 ActivityNotFoundException。
+      用 ACTION_IMAGE_CAPTURE 不需要 CAMERA 权限（刻意不申请）。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.XueJing">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|uiMode|density|fontScale|navigation"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:resizeableActivity="true"
+            android:screenOrientation="fullUser"
+            android:theme="@style/Theme.XueJing"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 专注计时前台服务；Android 14+ 必须声明具体类型 -->
+        <service
+            android:name=".FocusService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="study_focus_timer" />
+        </service>
+
+        <!-- 上课 / 下课闹钟触发 -->
+        <receiver
+            android:name=".ClassAlarmReceiver"
+            android:exported="false" />
+
+        <!-- 岛上卡片的「关闭」按钮 + 到点自动下岛 -->
+        <receiver
+            android:name=".IslandActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.xuejing.app.ISLAND_CLOSE" />
+                <action android:name="com.xuejing.app.ISLAND_HIDE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 开机与应用更新后重排提醒 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 桌面小组件（1×2 / 2×2 / 4×2 + 旧版三个） -->
+        <receiver android:name=".Widget1x2Provider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_1x2_info" />
+        </receiver>
+        <receiver android:name=".Widget2x2Provider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_2x2_info" />
+        </receiver>
+        <receiver android:name=".Widget4x2Provider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_4x2_info" />
+        </receiver>
+        <receiver android:name=".NextClassWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_next_class_info" />
+        </receiver>
+        <receiver android:name=".TodoWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_todo_info" />
+        </receiver>
+        <receiver android:name=".FocusWidgetProvider" android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_focus_info" />
+        </receiver>
+        <receiver
+            android:name=".XueJingWidgetProvider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.xuejing.app.WIDGET_REFRESH" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          拍照用的输出通道：相机应用把照片写进我们的 cache 目录，
+          再以 content:// 交给页面。这样不需要任何存储权限，
+          也不用把 FileProvider 的权限范围开大。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+</manifest>

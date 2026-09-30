@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">学径</string>
+    <string name="widget_1x2_desc">下一节课与待办，点进完整课表</string>
+    <string name="widget_2x2_desc">课表、笔记、待办、专注四宫格快捷入口</string>
+    <string name="widget_4x2_desc">左侧四宫格，右侧问 AI 与当前/下一节课</string>
+    <string name="widget_class_name">学径 · 下一节</string>
+    <string name="widget_todo_name">学径 · 待办</string>
+    <string name="widget_focus_name">学径 · 专注</string>
+    <string name="widget_1x2_name">学径 · 紧凑</string>
+    <string name="widget_2x2_name">学径 · 四宫格</string>
+    <string name="widget_4x2_name">学径 · 全能</string>
+</resources>

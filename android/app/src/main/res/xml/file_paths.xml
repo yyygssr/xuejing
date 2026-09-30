@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 可对外暴露的路径。
+  只开一个 cache 子目录给相机写临时照片用 —— 范围越小越安全，
+  而且 cache 目录不需要任何存储权限（API 26 到 36 通吃）。
+-->
+<paths>
+    <cache-path name="capture" path="capture/" />
+</paths>
