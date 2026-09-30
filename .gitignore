@@ -1,0 +1,66 @@
+# ---------- 构建产物 ----------
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# ---------- 本机密钥与签名（绝对不能进仓库） ----------
+*.jks
+*.keystore
+*.p12
+local.properties
+keystore.properties
+signing.properties
+
+# ---------- Android / Gradle ----------
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/captures/
+android/.cxx/
+*.hprof
+.cxx/
+# 由 syncPrototype 从 ../index.html 生成的副本，不要入库（免得两份漂移）
+android/app/src/main/assets/index.html
+
+# ---------- IDE ----------
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# ---------- 系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 自测 / 调试临时文件 ----------
+tools/_check.js
+tools/_domtest.html
+tools/_domdump.html
+tools/_seg.txt
+tools/t.html
+tools/_edgeprofile/
+tools/__pycache__/
+tools/sse-parse-check/
+tools/shots/
+tools/shots2/
+tools/patch_*.py
+tools/fix_tests.py
+__pycache__/
+*.pyc
+
+# ---------- 内部验证截图与历史备份（不属于源码） ----------
+验证截图/
+index.backup-*.html
+图标设计/output/*.b64.txt
+
+# ---------- 发布包（用 GitHub Releases 分发，不要堆在仓库里） ----------
+学径-v*.apk
