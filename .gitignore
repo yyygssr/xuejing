@@ -50,8 +50,7 @@ tools/t.html
 tools/_edgeprofile/
 tools/__pycache__/
 tools/sse-parse-check/
-tools/shots/
-tools/shots2/
+tools/shots*/
 tools/patch_*.py
 tools/fix_tests.py
 __pycache__/

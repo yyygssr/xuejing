@@ -406,18 +406,20 @@ const ASSERTS = String.raw`
 
 
   // ---------- 关于页 ----------
-  T('隐私政策有正式版 + 说人话切换', function(){
+  T('隐私政策有正式版 + 简要版切换', function(){
     openSheet('privacy');
     var txt = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
     var hasFormal = /引言/.test(txt) && /我们收集的信息/.test(txt) && /您的权利/.test(txt);
-    var hasToggle = /省流/.test(txt) && /说人话/.test(txt);
+    /* 正式版上有「看简要版」入口 */
+    var hasToggle = /简要版/.test(txt);
     var before = txt.length;
     togglePrivacyPlain();
     var txt2 = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
-    var hasPlain = /没有服务器/.test(txt2) && /说人话/.test(txt2) && txt2.length < before;
+    /* 简要版：正文是正常总结（含「没有服务器」），且带「看正式版」回程入口、比正式版短 */
+    var hasPlain = /没有服务器/.test(txt2) && /正式版/.test(txt2) && txt2.length < before;
     togglePrivacyPlain();
     closeSheet();
-    return { ok: hasFormal && hasToggle && hasPlain, info: '正式=' + hasFormal + ' 切换=' + hasToggle + ' 说人话=' + hasPlain };
+    return { ok: hasFormal && hasToggle && hasPlain, info: '正式=' + hasFormal + ' 切换=' + hasToggle + ' 简要版=' + hasPlain };
   });
   T('特别鸣谢只留白皂与测试版用户', function(){
     openSheet('credits');
@@ -546,6 +548,128 @@ const ASSERTS = String.raw`
     var sched = document.getElementById('view-schedule');
     var inSched = sched && /节假日模式/.test(sched.textContent);
     return { ok: !!inMe && !inSched, info: '我的=' + !!inMe + ' 课表页仍有=' + !!inSched };
+  });
+
+  // ---------- 2026-10-01 修复 / 新增 ----------
+  T('行程规划偏好弹层能真正渲染出来（不再弹残留内容）', function(){
+    openSheet('planpref');
+    var kind = window.__sheetKind;
+    var txt = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
+    closeSheet();
+    var ok = kind === 'planpref' && /密度/.test(txt) && /时长取向/.test(txt)
+      && /忙碌时段/.test(txt) && /偏好空闲时段/.test(txt)
+      && /更满/.test(txt) && /更松/.test(txt) && /大段连续/.test(txt) && /零碎时间/.test(txt);
+    return { ok: ok, info: 'kind=' + kind + ' len=' + txt.length };
+  });
+  T('节假日功能已提供 AI 工具（查/增/删/同步/开关）', function(){
+    var ks = AI_TOOLS.map(function(t){ return t.k; });
+    var has = ['listHoliday','addHoliday','delHoliday','syncHoliday','toggleHolidayMode']
+      .every(function(k){ return ks.indexOf(k) >= 0; });
+    var snap = snapState();
+    var r1 = runOneTool('addHoliday', {from:'2027-01-01', to:'2027-01-03', name:'元旦测试'});
+    var listed = runOneTool('listHoliday', {});
+    var r2 = runOneTool('delHoliday', {name:'元旦测试'});
+    var after = runOneTool('listHoliday', {});
+    restoreState(snap);
+    return { ok: has && /已添加节假日/.test(r1) && /元旦测试/.test(listed)
+      && /已移除节假日/.test(r2) && !/元旦测试/.test(after),
+      info: 'tools=' + has + ' add=' + /已添加节假日/.test(r1) + ' del=' + /已移除节假日/.test(r2) };
+  });
+  T('用量提醒 / 达量停用：可配置且能拦截', function(){
+    var snap = snapState();
+    var hadLimit = ('aiLimit' in S), limSnap = hadLimit ? JSON.stringify(S.aiLimit) : null;
+    var st = usageStore();
+    var L = aiLimitStore();
+    L.warnOn = true; L.warnCost = 1; L.stopOn = true; L.stopCost = 2;
+    L.warned = false; L.stopped = false;
+    st.totalCost = 1.5;                       /* 越过提醒线、但未到上限 */
+    var notBlocked = aiUsageBlocked();
+    checkUsageLimits();
+    var warned = aiLimitStore().warned;
+    st.totalCost = 2.5;                       /* 越过上限 */
+    var blocked = aiUsageBlocked();
+    checkUsageLimits();
+    var stopped = aiLimitStore().stopped;
+    renderUsagePanel();
+    var panelTxt = (document.getElementById('usageBox') || {}).textContent || '';
+    var panelOk = /用量提醒/.test(panelTxt) && /达量停用/.test(panelTxt);
+    restoreState(snap);
+    if(limSnap === null){ try{ delete S.aiLimit; }catch(e){} } else { S.aiLimit = JSON.parse(limSnap); }
+    return { ok: notBlocked === '' && /已达用量上限/.test(blocked) && warned && stopped && panelOk,
+      info: '未达限="" ' + (notBlocked === '') + ' 拦=' + /已达用量上限/.test(blocked)
+        + ' warned=' + warned + ' stopped=' + stopped + ' 面板=' + panelOk };
+  });
+  T('关于页版本号已到 v0.1.1', function(){
+    var hero = document.querySelector('#view-about .about-ver');
+    var me = document.getElementById('page-me');
+    var ok = !!hero && /v0\.1\.1/.test(hero.textContent) && APP_VER === 'v0.1.1'
+      && !!me && /v0\.1\.1/.test(me.textContent);
+    return { ok: ok, info: 'hero=' + (hero ? hero.textContent.trim() : 'MISSING') + ' APP_VER=' + APP_VER };
+  });
+
+  // 放在最后：这条会触发一次异步（无 AI 时的本地兜底），别影响前面的用例
+  T('重新生成不再重复插入用户消息（send noPush）', function(){
+    var sendSrc = String(send), regenSrc = String(regenChat);
+    var guard = /opts\.noPush/.test(sendSrc) && /if\(!opts\.noPush\)/.test(sendSrc);
+    var regenOk = /send\(q, \{noPush:true\}\)/.test(regenSrc);
+    var before = msgs.length;
+    try{ send('__probe_noPush__', {noPush:true}); }catch(e){}
+    var added = msgs.length - before;
+    var pushed = msgs.some(function(m){ return m.t === '__probe_noPush__'; });
+    return { ok: guard && regenOk && added === 0 && !pushed,
+      info: 'guard=' + guard + ' regen=' + regenOk + ' 新增消息=' + added };
+  });
+
+  // ---------- 弹层渲染完备性（回归：曾有一批 sheet 只被 open、renderSheet 里没有分支） ----------
+  T('renderSheet 覆盖所有被打开的 kind（结构检查）', function(){
+    var src = document.documentElement.outerHTML;
+    var used = [], m;
+    var re = /(?:openSheet|renderSheet)\(\s*\\?'([A-Za-z0-9_]+)\\?'/g;
+    while((m = re.exec(src))){ if(used.indexOf(m[1]) < 0) used.push(m[1]); }
+    /* 用真实运行的函数源码取分支，避免读到注释或其它字符串里的假象 */
+    var fnsrc = String(renderSheet);
+    var branches = [], re2 = /kind === '([A-Za-z0-9_]+)'/g;
+    while((m = re2.exec(fnsrc))){ if(branches.indexOf(m[1]) < 0) branches.push(m[1]); }
+    var miss = used.filter(function(k){ return branches.indexOf(k) < 0; });
+    return { ok: used.length > 0 && miss.length === 0,
+      info: '被打开 ' + used.length + ' 种 / 分支 ' + branches.length + ' 个' + (miss.length ? '；缺失=[' + miss.join(' ') + ']' : '') };
+  });
+  T('相机等 8 个曾丢分支的弹层能真正渲染出内容', function(){
+    var cases = [
+      ['cam', '拍照给 AI', {}],
+      ['chathist', '聊天记录', {}],
+      ['todoform', '添加待办', {}],
+      ['tableform', '插入表格', {}],
+      ['skillform', '新建技能', { id: '' }],
+      ['memform', '添加记忆', {}],
+      ['memdel', '删除这条记忆', { id: '' }],
+      ['minutes', '分钟', {}]
+    ];
+    var bad = [], det = [];
+    cases.forEach(function(c){
+      var sheet = document.getElementById('sheet');
+      sheet.innerHTML = '<div id="__s__">SENTINEL</div>';
+      var err = '';
+      try{ openSheet(c[0], c[2]); }catch(e){ err = String(e && (e.message || e)); }
+      var txt = (sheet.textContent || '').replace(/\s+/g, ' ').trim();
+      var changed = sheet.innerHTML.indexOf('__s__') === -1;
+      var hit = changed && txt.indexOf(c[1]) >= 0;
+      det.push(c[0] + (hit ? '✓' : '✗'));
+      if(!hit) bad.push(c[0] + (changed ? ('(文案=' + txt.slice(0, 24) + ')') : '(未渲染)') + (err ? (' ERR=' + err) : ''));
+      try{ closeSheet(); }catch(e){}
+    });
+    return { ok: bad.length === 0, info: det.join(' ') + (bad.length ? ' | 异常: ' + bad.join(' ; ') : '') };
+  });
+  T('特别鸣谢：白皂头像 / 上岛逻辑 / 测试版用户寄语', function(){
+    openSheet('credits');
+    var sheet = document.getElementById('sheet');
+    var txt = (sheet.textContent || '').replace(/\s+/g, ' ');
+    var hasImg = /data:image\/jpeg;base64,/.test(sheet.innerHTML);
+    var hasLogic = /上岛逻辑/.test(txt);
+    var hasMsg = /感谢你愿意使用这个不完善的版本，请多提建议！/.test(txt);
+    closeSheet();
+    return { ok: hasImg && hasLogic && hasMsg && /白皂/.test(txt) && /每一位测试版用户/.test(txt),
+      info: '头像=' + hasImg + ' 上岛逻辑=' + hasLogic + ' 寄语=' + hasMsg };
   });
 
   return JSON.stringify(R);

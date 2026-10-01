@@ -1349,7 +1349,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.0 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.1 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1549,7 +1549,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.1.0 · 开源版</div>
+        <div class="about-ver">v0.1.1 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1808,7 +1808,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.1.0';
+var APP_VER = 'v0.1.1';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -1966,6 +1966,13 @@ function normalizeBaseUrl(){
 /* 把一次请求排进队列。cb(ok, payload) —— ok=false 时 payload 是给人看的错误说明。
    onDelta(kind, text) 只在流式下被调用：kind = 'c' 正文 / 'r' 思考过程。 */
 function aiRequest(body, cb, onDelta, creds){
+  /* 达量停用：入队前就拦住，别让它白白发出去 */
+  var blockedNow = aiUsageBlocked();
+  if(blockedNow){
+    try{ logIt('AI', '请求被拒（已停用）：' + blockedNow); }catch(e){}
+    setTimeout(function(){ try{ cb(false, blockedNow); }catch(e){} }, 0);
+    return;
+  }
   AI_WAITING.push({body:body, cb:cb, onDelta:onDelta, url: creds && creds.url, key: creds && creds.key,
     pid: (creds && creds.provider) || S.provider || ''});
   pumpAI();
@@ -1984,6 +1991,12 @@ function armAiTimeout(job){
 function pumpAI(){
   if(AI_PENDING || !AI_WAITING.length) return;
   var job = AI_WAITING.shift();
+  /* 队列里已经排着的任务：停用生效后同样不放过 */
+  var blockedQ = aiUsageBlocked();
+  if(blockedQ){
+    setTimeout(function(){ try{ job.cb(false, blockedQ); }catch(e){} }, 0);
+    return pumpAI();
+  }
   var url = job.url || apiEndpoint();
   var key = (job.key != null ? job.key : (S.apiKey || ''));
   if(!url){ setTimeout(function(){ job.cb(false, '还没配置接口地址 —— 去「我的 → AI 配置」填一下'); }, 0); return pumpAI(); }
@@ -2133,16 +2146,111 @@ function recordAiUsage(payload, body, pid){
   bm.in += tin; bm.out += tout; bm.cost += cost; bm.n++;
   st.byModel[model] = bm;
   try{ save(); }catch(e){}
+  /* 记完账立刻判阈值：提醒 / 停用 */
+  try{ checkUsageLimits(); }catch(e){}
 }
 function usageReset(){
   var st = usageStore();
   st.totalIn = 0; st.totalOut = 0; st.totalCost = 0; st.byModel = {};
+  /* 用量清零后，提醒/停用的「已触发」标记也要复位，否则再也提醒不了 */
+  var L0 = aiLimitStore(); L0.warned = false; L0.stopped = false;
   save();
   toast('用量统计已清零（余额保留）');
 }
 function fmtWan(n){
   if(n >= 10000) return (n/10000).toFixed(n>=100000?0:1) + ' 万';
   return String(n);
+}
+/* ---------- 用量提醒 / 达量停用 ----------
+   两条独立的线：
+   · 提醒：累计花费达到阈值时提示一次，不阻断；
+   · 停用：达到上限后直接拦住后续 AI 请求，避免不知不觉超支。
+   阈值按「累计花费（元）」算 —— 面板里本来就是用钱说话的。 */
+function aiLimitStore(){
+  if(!S.aiLimit || typeof S.aiLimit !== 'object') S.aiLimit = {};
+  var L = S.aiLimit;
+  if(typeof L.warnOn !== 'boolean') L.warnOn = false;
+  if(typeof L.stopOn !== 'boolean') L.stopOn = false;
+  if(!(L.warnCost > 0)) L.warnCost = 0;
+  if(!(L.stopCost > 0)) L.stopCost = 0;
+  if(typeof L.warned !== 'boolean') L.warned = false;
+  if(typeof L.stopped !== 'boolean') L.stopped = false;
+  return L;
+}
+function aiSpentNow(){ return usageStore().totalCost || 0; }
+/* 返回 '' 表示可以正常用；否则是给用户看的停用原因 */
+function aiUsageBlocked(){
+  var L = aiLimitStore();
+  if(!L.stopOn || !(L.stopCost > 0)) return '';
+  if(aiSpentNow() >= L.stopCost){
+    return '已达用量上限 ¥' + L.stopCost + '，AI 已自动停用。可在「我的 → AI 提供商 → Token 与资费」里调高或关闭上限。';
+  }
+  return '';
+}
+/* 每次记账后判一次：跨过阈值只提示一次 */
+function checkUsageLimits(){
+  var L = aiLimitStore();
+  var spent = aiSpentNow();
+  if(L.stopOn && L.stopCost > 0 && spent >= L.stopCost && !L.stopped){
+    L.stopped = true; try{ save(); }catch(e){}
+    logIt('AI', '达量停用：累计 ¥' + spent.toFixed(4) + ' ≥ ¥' + L.stopCost);
+    toast('AI 花费已达 ¥' + L.stopCost + '，已自动停用');
+    return;
+  }
+  if(L.warnOn && L.warnCost > 0 && spent >= L.warnCost && !L.warned){
+    L.warned = true; try{ save(); }catch(e){}
+    logIt('AI', '用量提醒：累计 ¥' + spent.toFixed(4) + ' ≥ ¥' + L.warnCost);
+    toast('用量提醒：AI 花费已到 ¥' + L.warnCost + '，去「Token 与资费」看看');
+  }
+}
+function usageLimitBlock(){
+  var L = aiLimitStore();
+  var spent = aiSpentNow();
+  var blocked = aiUsageBlocked();
+  var status;
+  if(!L.warnOn && !L.stopOn) status = '未开启：不会提醒，也不会自动停用。';
+  else if(blocked) status = '已停用 —— 累计 ¥' + spent.toFixed(2) + ' 已达到上限 ¥' + L.stopCost + '。';
+  else status = '当前累计花费 ¥' + spent.toFixed(2) + (L.stopOn ? ('，上限 ¥' + L.stopCost) : '') + '。';
+  return '<div class="li" style="flex-direction:column;align-items:stretch;gap:10px">'
+    + '<div style="display:flex;align-items:center;gap:12px">'
+    + '<div class="ic" data-i="bell"></div>'
+    + '<div class="tx"><b>用量提醒</b><small>累计花费达到设定值时提示你</small></div>'
+    + '<div class="switch ' + (L.warnOn?'on':'') + '" onclick="toggleUsageLimit(\'warnOn\')"></div></div>'
+    + (L.warnOn
+        ? '<div class="field" style="margin:0"><label>提醒阈值（元）</label>'
+          + '<input class="f" type="number" step="1" min="0" style="text-align:left" value="' + (L.warnCost||'') + '" '
+          + 'placeholder="例如 5" onchange="setUsageLimit(\'warnCost\',this.value)" /></div>'
+        : '')
+    + '</div>'
+    + '<div class="li" style="flex-direction:column;align-items:stretch;gap:10px">'
+    + '<div style="display:flex;align-items:center;gap:12px">'
+    + '<div class="ic" data-i="belloff"></div>'
+    + '<div class="tx"><b>达量停用</b><small>达到上限后自动停用 AI，避免超支</small></div>'
+    + '<div class="switch ' + (L.stopOn?'on':'') + '" onclick="toggleUsageLimit(\'stopOn\')"></div></div>'
+    + (L.stopOn
+        ? '<div class="field" style="margin:0"><label>停用阈值（元）</label>'
+          + '<input class="f" type="number" step="1" min="0" style="text-align:left" value="' + (L.stopCost||'') + '" '
+          + 'placeholder="例如 20" onchange="setUsageLimit(\'stopCost\',this.value)" /></div>'
+        : '')
+    + '</div>'
+    + '<div class="li" style="border-top:0"><div class="tx"><b style="font-size:12px;color:'
+    + (blocked?'var(--danger)':'var(--sub)') + '">' + esc(status) + '</b></div></div>';
+}
+function toggleUsageLimit(k){
+  var L = aiLimitStore();
+  L[k] = !L[k];
+  if(k === 'warnOn') L.warned = false;
+  if(k === 'stopOn') L.stopped = false;
+  save(); renderUsagePanel();
+  toast((k === 'warnOn' ? '用量提醒' : '达量停用') + (L[k] ? '已开启' : '已关闭'));
+}
+function setUsageLimit(k, v){
+  var L = aiLimitStore();
+  var n = parseFloat(v);
+  L[k] = (isNaN(n) || n <= 0) ? 0 : n;
+  L.warned = false; L.stopped = false;
+  save(); renderUsagePanel();
+  toast(L[k] ? ('阈值已设为 ¥' + L[k]) : '阈值已清空');
 }
 
 /* ============================================================
@@ -3694,15 +3802,15 @@ var PRIVACY_FULL = [
 
 var PRIVACY_PLAIN = [
   '<div class="muted" style="font-size:11.5px;margin-top:10px;line-height:1.95">',
-  '<b>省流版 · 说人话</b><br/><br/>',
-  '· <b>学径没有服务器。</b>课表、待办、笔记、专注记录、设置，全部只存在你这台手机里。开发者的电脑上看不到你的任何东西。<br/><br/>',
-  '· <b>不用 AI 时，完全离线。</b>手动记课表、番茄钟、上课提醒、节假日，都不联网。<br/><br/>',
-  '· <b>用 AI 时，内容会发给你自己配的服务商。</b>你填了谁家的 Key，对话和学习档案摘要就发给谁家。人家怎么用、留多久是人家说了算 —— 配之前先看一眼对方的隐私政策。<br/><br/>',
-  '· <b>API Key 只存在本机</b>，只用来向你填的那个地址鉴权，不会发给别的地方。<br/><br/>',
-  '· <b>日历只读</b>，用来知道哪天放假、把那天的课藏起来。不会改你的日历。<br/><br/>',
-  '· <b>不会卖你的数据</b> —— 也没得卖，数据不在我这儿。<br/><br/>',
-  '· <b>要删就删干净。</b>「关于 → 清空本机数据」一次全清，删完找不回来，所以会让你手打一个词确认。<br/><br/>',
-  '· 有事直接找作者，能回复。',
+  '<b>简要版</b><br/><br/>',
+  '· <b>数据保存在你自己的手机上。</b>课表、待办、笔记、专注记录与各项设置都只存储在本机；学径没有服务器，开发者无法访问你的任何内容。<br/><br/>',
+  '· <b>不使用 AI 时完全离线。</b>手动录入课表、番茄钟、上课提醒、节假日这些功能都不联网。<br/><br/>',
+  '· <b>使用 AI 时，相关内容会发送给你自行配置的服务商。</b>你在应用内填写了哪一家的密钥，对话内容与学习档案摘要就会发送给该服务商，如何处理由对方的隐私政策决定。建议配置前先了解对方的政策。<br/><br/>',
+  '· <b>API Key 只保存在本机</b>，仅用于向你填写的接口地址鉴权，不会发送到其它地方。<br/><br/>',
+  '· <b>日历权限为只读。</b>仅用于识别法定节假日、在放假当天隐藏课程，不会修改你的日历。<br/><br/>',
+  '· <b>不会出售你的数据。</b>数据不在开发者手中，也不会被用于广告或用户画像。<br/><br/>',
+  '· <b>你可以随时删除全部数据。</b>在「关于 → 清空本机数据」一键清除，删除后无法恢复，因此需要手动输入确认词。<br/><br/>',
+  '· 如有疑问，欢迎直接联系作者。',
   '</div>'
 ].join('');
 
@@ -3715,28 +3823,30 @@ function renderPrivacySheet(){
   return '<div class="sh"></div>'
     + '<div style="display:flex;align-items:center;gap:10px;margin-top:2px">'
     + '<div class="badge ' + (plain ? 'green' : 'plain') + '" style="cursor:pointer;flex:none" '
-    + 'onclick="togglePrivacyPlain()">' + (plain ? '看正式版' : '省流 · 说人话') + '</div>'
+    + 'onclick="togglePrivacyPlain()">' + (plain ? '看正式版' : '看简要版') + '</div>'
     + '<h3 style="margin:0;flex:1;min-width:0">隐私政策</h3>'
     + '</div>'
     + (plain ? PRIVACY_PLAIN : PRIVACY_FULL)
     + '<div class="btn primary" style="margin-top:16px" onclick="closeSheet()">知道了</div>';
 }
 
+/* 特别鸣谢里白皂的头像：源图由用户提供，居中裁剪成 128x128 的 JPEG 再转 base64 内联，
+   单文件应用不带外链，离线也能显示。 */
+var CREDITS_AVATAR_BAIZAO = 'data:image/jpeg;base64,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';
 function renderCreditsSheet(){
   return '<div class="sh"></div><h3>特别鸣谢</h3>'
+    + '<div class="muted" style="font-size:12px;margin-top:6px;line-height:1.9">'
+    + '感谢每一位帮助过学径的人。</div>'
     + '<div class="list" style="margin-top:14px">'
     + '<div class="li" style="align-items:flex-start">'
-    + '<div class="ic">' + icSvg('sparkle', 17) + '</div>'
-    + '<div class="tx"><b>白皂</b><small>上岛（灵动岛 / 实时动态）的实现思路来自他的分享。'
-    + '没有这条线索，专注计时的常驻提示大概还是老样子。</small></div></div>'
+    + '<div class="ic" style="background-image:url(' + CREDITS_AVATAR_BAIZAO + ');'
+    + 'background-size:cover;background-position:center;border-radius:11px"></div>'
+    + '<div class="tx"><b>白皂</b><small>上岛逻辑</small></div></div>'
     + '<div class="li" style="align-items:flex-start">'
     + '<div class="ic">' + icSvg('user', 17) + '</div>'
-    + '<div class="tx"><b>测试版用户</b><small>愿意装一个还没做完的东西，'
-    + '再把 bug、别扭的地方和想法一条条扔回来的人。'
-    + '你们提的每一条，都在把学径往好用的方向推。</small></div></div>'
+    + '<div class="tx"><b>每一位测试版用户</b>'
+    + '<small>感谢你愿意使用这个不完善的版本，请多提建议！</small></div></div>'
     + '</div>'
-    + '<div class="muted" style="font-size:11px;margin-top:14px;line-height:1.8">'
-    + '名字写漏了的话直接跟作者说，补上。</div>'
     + '<div class="btn primary" style="margin-top:14px" onclick="closeSheet()">关闭</div>';
 }
 
@@ -3827,6 +3937,71 @@ function renderSheet(kind, data){
   }
   if(kind === 'cpsettings'){
     sheet.innerHTML = renderCpSettings();
+    return;
+  }
+  if(kind === 'planpref'){
+    sheet.innerHTML = renderPlanPrefSheet();
+    return;
+  }
+  /* ----- 以下 8 个分支在 2026-09-22 的备份里都在，重构 renderSheet 时整块丢了 -----
+     丢了之后的症状：renderXxx() 还在文件里但没人调用，点开弹层看到的是上一次的残留内容。 */
+  if(kind === 'cam'){
+    /* 对话页相机：弹窗式拍照/相册 + 简易旋转缩放 */
+    sheet.innerHTML = renderCamSheet();
+    return;
+  }
+  if(kind === 'chathist'){
+    var hist = S.chatHistory || [];
+    sheet.innerHTML = '<div class="sh"></div><h3>聊天记录</h3>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:6px">自动保存最近会话；新对话会归档当前记录。</div>'
+      + '<div class="list" style="margin-top:12px">'
+      + (hist.length ? hist.map(function(h,i){
+          return '<div class="li tap" onclick="loadChatSession(' + i + ')">'
+            + '<div class="tx"><b>' + esc(h.title || '会话') + '</b><small>' + esc(h.when || '') + ' · ' + (h.msgs?h.msgs.length:0) + ' 条</small></div>'
+            + '<span class="arrow">›</span></div>';
+        }).join('') : '<div class="li"><div class="tx"><b style="font-size:12px">还没有归档会话</b></div></div>')
+      + '</div>'
+      + '<div class="row g6" style="margin-top:14px">'
+      + '<div class="btn ghost" onclick="newChatSession()">新对话</div>'
+      + '<div class="btn ghost" onclick="clearChat()">清空当前</div>'
+      + '<div class="btn primary" onclick="closeSheet()">完成</div></div>';
+    return;
+  }
+  if(kind === 'todoform'){
+    sheet.innerHTML = renderTodoForm();
+    setTimeout(function(){ var t = document.getElementById('todoTitle'); if(t) t.focus(); }, 50);
+    return;
+  }
+  if(kind === 'tableform'){
+    sheet.innerHTML = renderTableForm();
+    return;
+  }
+  if(kind === 'skillform'){
+    sheet.innerHTML = renderSkillForm(data && data.id ? data.id : '');
+    return;
+  }
+  if(kind === 'memform'){
+    /* 打开表单前重置分类草稿：编辑时用那条记忆自己的分类，新增时默认「其它」 */
+    var memIt = memEditingId ? memById(memEditingId) : null;
+    memDraftCat = memIt ? memIt.cat : 'other';
+    sheet.innerHTML = renderMemForm();
+    return;
+  }
+  if(kind === 'memdel'){
+    var memD = memById(data && data.id);
+    sheet.innerHTML = '<div class="sh"></div><h3>删除这条记忆？</h3>'
+      + '<div class="card" style="margin:12px 0 4px"><div style="font-size:13px;line-height:1.7">'
+      + esc(memD ? memD.text : '') + '</div></div>'
+      + '<div class="muted" style="font-size:11.5px;line-height:1.7">删掉后立即生效，之后 AI 不再看到这条；'
+      + '它仍可能从之后的对话里重新学到。</div>'
+      + '<div class="row g6" style="margin-top:14px">'
+      + '<div class="btn ghost" onclick="closeSheet()">取消</div>'
+      + '<div class="btn primary" onclick="memDel(\'' + String(data && data.id || '').replace(/[^a-z0-9]/gi,'') + '\');closeSheet()">删除</div></div>';
+    return;
+  }
+  if(kind === 'minutes'){
+    sheet.innerHTML = renderMinutes();
+    refreshMinute();
     return;
   }
   if(kind === 'privacy'){
@@ -5188,10 +5363,11 @@ function regenChat(idx){
   var q = '';
   for(var i = idx-1; i>=0; i--) if(msgs[i] && msgs[i].r === 'me'){ q = msgs[i].t; break; }
   if(!q){ toast('没有对应的提问'); return; }
-  /* 删掉该条 AI 回复后重发 */
+  /* 删掉该条 AI 回复后重发。必须带 noPush ——
+     这条提问已经躺在 msgs 里了，send 再 push 一次就会多出一条相同的用户消息。 */
   msgs.splice(idx, 1);
   renderMsgs();
-  send(q);
+  send(q, {noPush:true});
 }
 function rateChat(idx, vote){
   var m = msgs[idx];
@@ -5518,6 +5694,9 @@ function appStateSnapshot(what){
   if(what === 'prefs') return S.prefs;
   if(what === 'memory') return memItems().map(function(m){ return {id:m.id, text:m.text, cat:m.cat}; });
   if(what === 'skills') return skillsAll().filter(function(s){return s.on!==false;}).map(function(s){return s.name;});
+  if(what === 'holidays') return holidayAll().map(function(r){
+    return {from:r.from, to:(r.to||r.from), name:(r.name||'节假日'), src:(r.src||'sys')};
+  });
   if(what === 'all') return {overview:overview, courses:coursesBrief(), todos:overview.todos, plan:overview.plan, prefs:S.prefs};
   return overview;
 }
@@ -5535,7 +5714,7 @@ var AI_TOOLS = [
   {k:'openSkills', n:'打开技能', a:''},
   {k:'importCourse', n:'打开导入课表', a:''},
   /* —— 状态查询（知识库） —— */
-  {k:'getState', n:'读取应用状态', a:'what=overview|courses|todos|plan|notes|focus|prefs|memory|skills|all'},
+  {k:'getState', n:'读取应用状态', a:'what=overview|courses|todos|plan|notes|focus|prefs|memory|skills|holidays|all'},
   /* —— 专注 —— */
   {k:'startFocus', n:'开始专注', a:'mins=25 label=复习高数'},
   {k:'pauseFocus', n:'暂停/继续专注', a:''},
@@ -5566,6 +5745,12 @@ var AI_TOOLS = [
   {k:'delPlan', n:'删除行程', a:'idx=0 或 t=关键词'},
   {k:'donePlan', n:'勾选/取消行程', a:'idx=0'},
   {k:'replan', n:'按偏好重新规划行程', a:''},
+  /* —— 节假日 —— */
+  {k:'listHoliday', n:'查看节假日区间', a:''},
+  {k:'addHoliday', n:'添加节假日（放假当天课自动隐藏）', a:'from=2026-10-01 to=2026-10-07 name=国庆'},
+  {k:'delHoliday', n:'删除节假日', a:'name=国庆 或 id=xxx 或 from=2026-10-01'},
+  {k:'syncHoliday', n:'从系统日历同步节假日', a:''},
+  {k:'toggleHolidayMode', n:'开/关节假日模式', a:'on=true|false'},
   /* —— 记忆 / 技能 —— */
   {k:'addMemory', n:'添加 AI 记忆', a:'text=数学是弱项 cat=study'},
   {k:'delMemory', n:'删除记忆', a:'id=xxx 或 text=关键词'},
@@ -5712,6 +5897,64 @@ function runOneTool(name, args){
       var open = todosAll().filter(function(x){ return !x.done; });
       if(!open.length) return '目前没有未完成待办';
       return '未完成待办：' + open.slice(0,8).map(function(x){ return x.t||x.title; }).join('；');
+    }
+    if(name === 'listHoliday'){
+      var hArr0 = holidayAll();
+      if(!hArr0.length) return '还没有节假日记录，可用 syncHoliday 从系统日历同步，或 addHoliday 手动加';
+      return '节假日（共 ' + hArr0.length + ' 段）：' + hArr0.slice()
+        .sort(function(a,b){ return String(a.from).localeCompare(String(b.from)); })
+        .slice(0,12).map(function(r){
+          return fmtHolRange(r) + ' ' + (r.name||'节假日') + '（' + (r.src==='user'?'手动':'系统') + '）';
+        }).join('；');
+    }
+    if(name === 'addHoliday'){
+      var hf = String(args.from||'').trim().slice(0,10);
+      var ht = String(args.to||'').trim().slice(0,10) || hf;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(hf)) return '需要 from=YYYY-MM-DD（可选 to）';
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(ht)) ht = hf;
+      if(ht < hf){ var hsw = hf; hf = ht; ht = hsw; }
+      var hDays = Math.round((new Date(ht) - new Date(hf)) / 86400000) + 1;
+      if(!(hDays > 0) || hDays > 62) return '一段最长 62 天，请分几次添加';
+      holidayRanges().push({ id:'u_'+Date.now().toString(36), from:hf, to:ht,
+        name:String(args.name||'节假日').slice(0,12), src:'user' });
+      var hOff1 = S.holidayOff || {};
+      for(var hd1 = hf, hg1 = 0; hd1 <= ht && hg1 < 62; hd1 = dkAdd(hd1,1), hg1++) delete hOff1[hd1];
+      S.holidayOff = hOff1;
+      holidayInvalidate(); save();
+      renderSchedule(); renderWeek(); renderCourses(); renderHolidaySheetIfOpen(true);
+      return '已添加节假日：' + (hf===ht ? hf : (hf+' ~ '+ht)) + '（' + (args.name||'节假日') + '）'
+        + (holidayModeOn() ? '，放假当天课表已自动隐藏' : '，注意节假日模式当前是关的');
+    }
+    if(name === 'delHoliday'){
+      var hArr1 = holidayRanges(), hIdx1 = -1;
+      var hById = args.id ? String(args.id) : '';
+      var hByName = args.name ? String(args.name).toLowerCase() : '';
+      var hByFrom = args.from ? String(args.from).slice(0,10) : '';
+      if(!hById && !hByName && !hByFrom) return '需要 name、id 或 from 来指定要删的节假日';
+      for(var hi1 = 0; hi1 < hArr1.length; hi1++){
+        var h1 = hArr1[hi1]; if(!h1) continue;
+        if((hById && h1.id === hById)
+          || (hByName && String(h1.name||'').toLowerCase().indexOf(hByName) >= 0)
+          || (hByFrom && (h1.from === hByFrom || (h1.to||h1.from) === hByFrom))){ hIdx1 = hi1; break; }
+      }
+      if(hIdx1 < 0) return '没有找到匹配的节假日';
+      var hDel = hArr1.splice(hIdx1, 1)[0];
+      if(hDel.src === 'sys'){
+        var hOff2 = S.holidayOff || {};
+        for(var hd2 = hDel.from, hg2 = 0; hd2 <= (hDel.to||hDel.from) && hg2 < 62; hd2 = dkAdd(hd2,1), hg2++) hOff2[hd2] = 1;
+        S.holidayOff = hOff2;
+      }
+      holidayInvalidate(); save();
+      renderSchedule(); renderWeek(); renderCourses(); renderHolidaySheetIfOpen(true);
+      return '已移除节假日：' + fmtHolRange(hDel) + ' ' + (hDel.name||'');
+    }
+    if(name === 'syncHoliday'){ holidaySync(); return '正在从系统日历同步节假日（需在真机 App 里）'; }
+    if(name === 'toggleHolidayMode'){
+      S.prefs = S.prefs || {};
+      var hWant = !(args.on === 'false' || args.on === '0' || args.on === '关');
+      S.prefs.holidayMode = hWant; save();
+      renderSchedule(); renderWeek(); renderCourses(); renderHolidayRow();
+      return '节假日模式已' + (hWant ? '开启（放假当天的课自动隐藏）' : '关闭（放假当天的课照常显示）');
     }
     if(name === 'getState'){
       var w = args.what || 'overview';
@@ -6672,6 +6915,48 @@ function setPlanPref(k, v){
   toast('已设为：' + (PLAN_DENSITY[v]||CHUNK_MODE[v]||{}).n);
 }
 function openPlanPref(){ openSheet('planpref'); }
+/* 行程规划偏好弹层 —— 之前只有 openSheet('planpref')，却没写对应的 renderSheet 分支，
+   点「密度 · 时长 · 忙碌时段」只会弹出上一张残留的弹层（这就是那个 bug）。这里补上渲染。 */
+function renderPlanPrefSheet(){
+  var dens = S.prefs.planDensity || 'normal';
+  var ch = S.prefs.chunkMode || 'block';
+  return '<div class="sh"></div><h3>行程规划偏好</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:4px;line-height:1.75">'
+    + '这些偏好会写进 AI 的规划提示词；没配 AI 时，本机排程也按它来。改完即生效。</div>'
+    + '<div class="muted" style="font-size:11px;margin:16px 0 6px">密度（一天大概排几条）</div>'
+    + '<div class="list">'
+    + Object.keys(PLAN_DENSITY).map(function(k){
+        var D = PLAN_DENSITY[k];
+        return '<div class="li tap" onclick="setPlanPref(\'planDensity\',\'' + k + '\')">'
+          + '<div class="tx"><b>' + D.n + '</b><small>' + D.t + '</small></div>'
+          + '<div class="val"><span class="badge ' + (dens===k?'green':'plain') + '">'
+          + (dens===k?'使用中':'选择') + '</span></div></div>';
+      }).join('')
+    + '</div>'
+    + '<div class="muted" style="font-size:11px;margin:16px 0 6px">时长取向</div>'
+    + '<div class="list">'
+    + Object.keys(CHUNK_MODE).map(function(k){
+        var C = CHUNK_MODE[k];
+        return '<div class="li tap" onclick="setPlanPref(\'chunkMode\',\'' + k + '\')">'
+          + '<div class="tx"><b>' + C.n + '</b><small>' + C.t + '</small></div>'
+          + '<div class="val"><span class="badge ' + (ch===k?'green':'plain') + '">'
+          + (ch===k?'使用中':'选择') + '</span></div></div>';
+      }).join('')
+    + '</div>'
+    + '<div class="muted" style="font-size:11px;margin:16px 0 6px">自定义时段（选填，留空即不限制）</div>'
+    + '<div class="field"><label>忙碌时段（这段时间不排学习）</label>'
+    + '<input class="f" style="text-align:left" placeholder="如 周二 14:00-16:00、健身" '
+    + 'value="' + esc(S.prefs.busyRanges||'') + '" onchange="setPlanRange(\'busyRanges\',this.value)" /></div>'
+    + '<div class="field"><label>偏好空闲时段（优先排在这里）</label>'
+    + '<input class="f" style="text-align:left" placeholder="如 早上 8-10 点" '
+    + 'value="' + esc(S.prefs.freeRanges||'') + '" onchange="setPlanRange(\'freeRanges\',this.value)" /></div>'
+    + '<div class="btn ghost" style="margin-top:12px" onclick="closeSheet()">关闭</div>';
+}
+function setPlanRange(k, v){
+  S.prefs[k] = String(v||'').slice(0,80);
+  save();
+  toast('已保存');
+}
 /* AI 配置页的「系统提示 + 用户档案」面板 */
 function renderSysPanel(){
   var inp = document.getElementById('sysPromptInput');
@@ -6873,12 +7158,15 @@ function bindMdLinks(){
 }
 var CHAT_HISTORY_TURNS = 10;   // 回传给模型的历史轮数，多了浪费 token
 
-function send(preset){
+function send(preset, opts){
+  opts = opts || {};
   var input = document.getElementById('chatInput');
   var text = (typeof preset === 'string') ? preset : input.value.trim();
   if(!text) return;
   if(typeof preset !== 'string') input.value = '';
-  msgs.push({r:'me', t:text}); renderMsgs();
+  /* noPush：重新生成时复用已经存在的用户消息，不再插入一条新的 ——
+     否则 send 会把它再 push 一遍，页面上就出现两条一模一样的用户消息。 */
+  if(!opts.noPush){ msgs.push({r:'me', t:text}); renderMsgs(); }
 
   var box = document.getElementById('msgs');
   var ty = document.createElement('div');
@@ -7940,7 +8228,9 @@ function renderAiState(){
     ? ('已分别记住 ' + keys + ' 个渠道的密钥，来回切换不用重填。')
     : '每个渠道的密钥各自独立保存，切回来不用重新粘贴。';
   var el = document.getElementById('aiState'); if(el) el.textContent = msg;
-  var nb = document.getElementById('aiHubNote'); if(nb) nb.textContent = msg + ' ' + memo;
+  var nb = document.getElementById('aiHubNote');
+  var blockedHub = aiUsageBlocked();
+  if(nb) nb.textContent = msg + ' ' + memo + (blockedHub ? ('　已停用：' + blockedHub) : '');
 }
 /* ---------- 输出方式：流式 + 输出上限 ---------- */
 function renderAiStream(){
@@ -8308,6 +8598,7 @@ function renderUsagePanel(){
       '<div class="li" style="background:var(--brand-soft)"><div class="tx">'
       + '<b style="color:var(--brand)">剩余约 ¥' + left.toFixed(4) + '</b>'
       + '<small style="color:var(--brand)">余额 − 已消耗</small></div></div>')
+    + usageLimitBlock()
     + '<div class="li tap" onclick="openSheet(\'modelprice\',{pid:S.provider})"><div class="ic" data-i="sliders"></div>'
     + '<div class="tx"><b>模型定价</b><small>每个渠道、每个模型可单独定价，支持峰谷</small></div>'
     + '<div class="val"><span class="arrow">›</span></div></div>'
