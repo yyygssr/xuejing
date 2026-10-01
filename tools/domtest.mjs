@@ -712,6 +712,42 @@ const ASSERTS = String.raw`
     return { ok: hid && say, info: '课已隐藏=' + hid + ' 显示放假=' + say + ' | ' + txt.slice(0, 34) };
   });
 
+  // ---------- 回归：工具格式必须在提示词里钉死，且泄漏的协议块要清干净 ----------
+  T('系统提示把工具格式钉死，并点名禁止标签与 JSON 形态', function(){
+    var tb = toolsBlock();
+    var sys = sysPrompt(true);
+    var noTool = sysPrompt(false);
+    var exact = /TOOL:工具名\|参数=值/.test(tb);
+    var demo = /TOOL:addHoliday\|from=2026-10-01/.test(tb);
+    var ban = /OCML/.test(tb) && /parameter=TOOL_call/.test(tb) && /不要写成 JSON/.test(tb);
+    /* 铁律要在系统提示的最末尾再来一遍。按两段的实际长度算位置，
+       别写死一个字符数 —— 改文案就会让断言莫名其妙地红。 */
+    var lawN = toolFormatLaw().length + TOOL_BAN.length + 24;
+    var lawAt = sys.lastIndexOf('唯一允许的格式');
+    var endLaw = lawAt > sys.length - lawN && sys.lastIndexOf('禁止的写法') > lawAt;
+    var cleanNoTool = noTool.indexOf('OCML') < 0;
+    return { ok: exact && demo && ban && endLaw && cleanNoTool,
+      info: '唯一格式=' + exact + ' 正例=' + demo + ' 点名禁止=' + ban
+        + ' 提示末尾再钉=' + endLaw + ' 无工具角色干净=' + cleanNoTool };
+  });
+
+  T('正文与思考过程都能清掉标签式工具调用', function(){
+    var sample = '好的，这就加上～<OCML>\n<parameter=TOOL_call>addHoliday</parameter>\n'
+      + '<parameter=TOOL_args>{"from": "2026-10-01", "name": "国庆"}</parameter>\n</OCML>';
+    var out = stripToolLine(sample);
+    var tagOk = out.indexOf('OCML') < 0 && out.indexOf('parameter') < 0
+      && out.indexOf('addHoliday') < 0 && out.indexOf('好的，这就加上') === 0;
+    var out2 = stripToolLine('好的\nTOOL:addTodo|title=交作业\n');
+    var oldOk = out2.indexOf('TOOL') < 0 && out2.indexOf('好的') === 0;
+    var scripts = Array.prototype.map.call(document.scripts, function(s){ return s.textContent || ''; })
+      .filter(function(x){ return x.indexOf('__ASSERTS' + 'RC__') < 0; }).join('\n');
+    var thinkOk = /stripToolLine\(\s*meta\.reasoning\s*\)/.test(scripts)
+      && /stripToolLine\(\s*String\(meta\.reasoning\)\s*\)/.test(scripts);
+    return { ok: tagOk && oldOk && thinkOk,
+      info: '标签块清干净=' + tagOk + ' 原有TOOL行仍清=' + oldOk + ' 思考过程也清洗=' + thinkOk
+        + ' | ' + JSON.stringify(out).slice(0, 64) };
+  });
+
   return JSON.stringify(R);
 })()
 `;

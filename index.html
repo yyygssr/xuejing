@@ -1349,7 +1349,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.2 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.3 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1549,7 +1549,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.1.2 · 开源版</div>
+        <div class="about-ver">v0.1.3 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1808,7 +1808,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.1.2';
+var APP_VER = 'v0.1.3';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -5788,13 +5788,35 @@ var AI_TOOLS = [
   {k:'pushWidgets', n:'刷新桌面小组件', a:''}
 ];
 
+/* 工具调用的格式铁律。
+   踩过的坑：只在开头轻描淡写提一句「输出 TOOL:name|k=v」，碰到自带工具调用习惯的
+   模型（例如会吐 <OCML><parameter=TOOL_call>addHoliday</parameter>…）就完全失灵 ——
+   工具一个都没执行，整块协议还显示在思考过程和正文里。
+   所以这里把格式钉死：明确唯一写法、给能照抄的正例、把见过的错法逐条点名禁止。
+   同一段铁律在 toolsBlock 开头和 sysPrompt 末尾各放一次（末尾离生成最近，模型最认）。 */
+function toolFormatLaw(){
+  return '【工具调用 · 唯一允许的格式】\n'
+    + '需要操作应用时，在正文最后另起一行，照下面这样写，一字不差：\n'
+    + 'TOOL:工具名|参数=值|参数=值\n'
+    + '一行一个动作，可以连续写多行，按顺序执行。照抄这两个例子：\n'
+    + 'TOOL:addHoliday|from=2026-10-01|to=2026-10-07|name=国庆\n'
+    + 'TOOL:addTodo|title=交作业|due=2026-10-02|pri=urgent\n';
+}
+var TOOL_BAN =
+  '【禁止的写法】以下一律无效：工具不会被执行，用户还会看到一串乱码。\n'
+  + '· 不要用任何标签包裹：<OCML>、<parameter=TOOL_call>、<tool_call>、<function_call>、<invoke> 都不行；\n'
+  + '· 不要写成 JSON：{"name":"addHoliday","arguments":{...}}；\n'
+  + '· 不要包在代码块或反引号里；\n'
+  + '· 不要写进思考过程 —— 工具行只出现在正文末尾；\n'
+  + '· 不要把工具行夹在句子里，也不要省略 TOOL: 前缀。\n';
 function toolsBlock(){
-  return '【可用工具】可在正文后输出**一行或多行**：\n'
-    + 'TOOL:name|k=v|k=v\n'
-    + '可连续多条，按顺序执行（例如先 addTodo 再 goTab）。同一动作不要重复。\n'
+  return toolFormatLaw()
+    + '可连续多条（例如先 addTodo 再 goTab）。同一动作不要重复。\n'
+    + TOOL_BAN
     + APP_KB
     + AI_TOOLS.map(function(t){ return '· ' + t.k + ' — ' + t.n + (t.a ? ('，参数：' + t.a) : ''); }).join('\n')
-    + '\n约定：无必要不调用；参数里不要写换行。待办未说明 pri 用 normal。需要先知道现状时先 getState。\n';
+    + '\n约定：无必要不调用；参数里不要写换行。待办未说明 pri 用 normal。需要先知道现状时先 getState。\n'
+    + toolFormatLaw();
 }
 function styleBlock(){
   var s = REPLY_STYLES[S.prefs.replyStyle] || REPLY_STYLES.gentle;
@@ -6239,6 +6261,12 @@ function stripToolLine(s){
   t = t.replace(/\bTOOL\s*:[^\n]*/gi, '');
   /* 上一行只吃掉了 TOOL: 那一行，模型额外裹的 <tool_call> 之类会孤零零留在正文里 */
   t = t.replace(TOOL_TAG_RE, '');
+  /* 自带工具调用习惯的模型会整块吐协议，一个字都不该给用户看到：
+       <OCML><parameter=TOOL_call>addHoliday</parameter><parameter=TOOL_args>{…}</parameter></OCML>
+     先连容器一起删，再删裸露的 parameter 块，最后扫掉落单的标签。 */
+  t = t.replace(/<\s*(?:ocml|tool[_-]?call|tool[_-]?calls|function[_-]?call|invoke|tools?)\s*>[\s\S]*?<\s*\/\s*(?:ocml|tool[_-]?call|tool[_-]?calls|function[_-]?call|invoke|tools?)\s*>/gi, '');
+  t = t.replace(/<\s*parameter\b[^>]*>[\s\S]*?<\s*\/\s*parameter\s*>/gi, '');
+  t = t.replace(/<\/?\s*(?:ocml|parameter)\b[^>]*>/gi, '');
   t = t.replace(/```[ \t]*\n[ \t]*```/g, '');
   t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
   return t.trim();
@@ -6865,7 +6893,9 @@ function sysPrompt(tools){
     + (tools
         ? ('\n【实时状态·知识库摘要】先看这里再决定要不要调工具；要详情用 getState。\n'
            + JSON.stringify(appStateSnapshot('overview')).slice(0, 2800) + '\n')
-        : '');
+        : '')
+    /* 格式铁律放在系统提示的最后：离生成位置最近，自带工具调用习惯的模型才压得住 */
+    + (tools ? ('\n' + toolFormatLaw() + TOOL_BAN) : '');
 }
 /* 对话页顶部的状态条：一眼看出 AI 通没通，点进去看设定 */
 function renderChatAiBar(){
@@ -7309,7 +7339,7 @@ function send(preset, opts){
         r:'ai',
         t: renderAiText('这次没答上来。\n\n' + out
           + '\n\n（可以到「我的 → AI 配置」检查服务商、密钥和模型名。）'),
-        think: (meta && meta.reasoning) ? meta.reasoning : '',
+        think: (meta && meta.reasoning) ? stripToolLine(meta.reasoning) : '',
         thinkMs: thinkMs,
         src:[]
       });
@@ -7326,7 +7356,9 @@ function send(preset, opts){
       if(meta && meta.reasoningModel) srcs.push('推理模型');
       /* meta.fallback = 正文为空、只能拿思考过程顶上：这时别再把同一段文字
          折叠成「思考过程」，否则同一内容出现两遍 */
-      var think = (meta && meta.reasoning) ? String(meta.reasoning).trim() : '';
+      /* 思考过程也要过清洗：模型常把工具协议整块写进 reasoning，
+         不清就是让用户直接盯着 <OCML>…</OCML> 发呆。 */
+      var think = (meta && meta.reasoning) ? stripToolLine(String(meta.reasoning)) : '';
       if(think === String(body || '').trim()) think = '';
       msgs.push({
         r:'ai',
