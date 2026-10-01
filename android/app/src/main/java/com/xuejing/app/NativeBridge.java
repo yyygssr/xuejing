@@ -201,6 +201,30 @@ public class NativeBridge {
         act.saveBackup(name, text);
     }
 
+    /** 导出纯文本（笔记的「导出为文字」）：与备份同一条路，MIME 换成 text/plain */
+    @JavascriptInterface
+    public void saveText(String name, String text) {
+        act.saveText(name, text);
+    }
+
+    /** 导出图片（笔记的「导出为图片」）：页面传 dataURL，原生剥前缀解码后写盘 */
+    @JavascriptInterface
+    public void saveImage(String name, String dataUrl) {
+        act.saveImage(name, dataUrl);
+    }
+
+    /** 系统分享纯文本 */
+    @JavascriptInterface
+    public void shareText(String text) {
+        act.shareText(text);
+    }
+
+    /** 系统分享图片（写进 cache/share，再经 FileProvider 交给分享面板） */
+    @JavascriptInterface
+    public void shareImage(String name, String dataUrl) {
+        act.shareImage(name, dataUrl);
+    }
+
     static int parseInt(String s, int def) {
         try {
             return Integer.parseInt(String.valueOf(s).trim());

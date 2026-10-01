@@ -6,4 +6,6 @@
 -->
 <paths>
     <cache-path name="capture" path="capture/" />
+    <!-- 分享笔记图片时的中转目录：先写到这里，再以 content:// 交给其它应用 -->
+    <cache-path name="share" path="share/" />
 </paths>

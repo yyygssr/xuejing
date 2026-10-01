@@ -46,6 +46,7 @@ tools/_check.js
 tools/_domtest.html
 tools/_domdump.html
 tools/_seg.txt
+tools/_release-*.md
 tools/t.html
 tools/_edgeprofile/
 tools/__pycache__/

@@ -748,6 +748,320 @@ const ASSERTS = String.raw`
         + ' | ' + JSON.stringify(out).slice(0, 64) };
   });
 
+  /* ================= 笔记：图片导入 / 分享导出 ================= */
+  var _notesKeep = JSON.parse(JSON.stringify(S.notes || []));
+  var _TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  T('笔记能插入图片并立即落盘', function(){
+    openNotes(); noteNew();
+    var bd = document.getElementById('noteBody');
+    noteInsertImg(_TINY_PNG);
+    var n = noteById(noteCurId);
+    var domHas = bd ? /<img\b/i.test(bd.innerHTML) : false;
+    var savedHas = /<img\b/i.test(String(n.body || ''));
+    /* 同一张图重复选应被拦下：误触两次不该把同一张插两遍 */
+    noteInsertImg(_TINY_PNG);
+    var imgN = (String(document.getElementById('noteBody').innerHTML).match(/<img\b/gi) || []).length;
+    return { ok: domHas && savedHas && imgN === 1,
+      info: 'DOM含图=' + domHas + ' 已落盘=' + savedHas + ' 去重后图片数=' + imgN };
+  });
+
+  T('文字笔记改为全屏编辑，工具栏在底部', function(){
+    openNotes(); noteNew();
+    var h = (document.getElementById('notesBody') || {}).innerHTML || '';
+    var entry = h.indexOf('noteFullEnter()') >= 0;       /* 编辑页只剩「打开全屏编辑」 */
+    var hasShare = h.indexOf('noteOpenShare()') >= 0;
+    var prev = !!document.getElementById('notePreview'); /* 编辑页保留内容预览 */
+    var bodyInFull = !!document.querySelector('#noteFull #noteBody');
+    noteFullEnter();
+    var full = document.getElementById('noteFull');
+    var opened = !!full && full.classList.contains('show');
+    var kids = full ? [].slice.call(full.children).map(function(e){ return e.id || ''; }) : [];
+    var barAtBottom = kids[kids.length - 1] === 'noteBarFull';   /* 工具栏必须是最后一个子元素 */
+    var bar = (document.getElementById('noteBarFull') || {}).innerHTML || '';
+    var hasImg = bar.indexOf('notePickImg()') >= 0;
+    var hasTable = bar.indexOf("openSheet('tableform')") >= 0;
+    noteFullExit();
+    return { ok: entry && hasShare && prev && bodyInFull && opened && barAtBottom && hasImg && hasTable,
+      info: '入口=' + entry + ' 预览=' + prev + ' 正文在全屏层=' + bodyInFull + ' 能打开=' + opened
+        + ' 工具栏置底=' + barAtBottom + ' 插图=' + hasImg + ' 表格=' + hasTable + ' 分享=' + hasShare };
+  });
+
+  T('保存笔记后回到总览并给出反馈', function(){
+    openNotes(); noteNew();
+    noteFullEnter();
+    document.getElementById('noteBody').innerHTML = '<b>正文甲</b>';
+    document.getElementById('noteTitle').value = '标题甲';
+    noteSave();
+    var saved = noteById(S.notes[0].id) || {};
+    var tip = (document.getElementById('toast') || {}).textContent || '';
+    var bodyOk = String(saved.body).indexOf('正文甲') >= 0;
+    return { ok: noteMode === 'list' && bodyOk && saved.title === '标题甲' && tip.length > 0,
+      info: '回总览=' + (noteMode === 'list') + ' 正文已存=' + bodyOk
+        + ' 标题=' + JSON.stringify(saved.title) + ' 提示=' + JSON.stringify(tip) };
+  });
+
+  T('换一篇笔记不会串内容（全屏层每次重灌）', function(){
+    openNotes(); noteNew(); var a = noteCurId;
+    noteFullEnter(); document.getElementById('noteBody').innerHTML = 'AAA'; noteFullExit();
+    noteNew();                                          /* 此时全屏层里还是 A 的内容 */
+    var b = noteCurId;
+    noteFullEnter();
+    var shown = document.getElementById('noteBody').innerHTML;
+    noteFullExit();
+    return { ok: a !== b && shown.indexOf('AAA') < 0,
+      info: 'B 编辑区=' + JSON.stringify(shown.slice(0, 16)) };
+  });
+
+  T('笔记编辑页的删除按钮是危险色（红）', function(){
+    openNotes(); noteNew();
+    var host = document.getElementById('notesBody') || document.body;
+    var del = [].slice.call(host.querySelectorAll('.btn')).filter(function(b){
+      return String(b.textContent).trim() === '删除'; })[0];
+    var isDanger = !!del && del.classList.contains('danger');
+    /* 行为验证：挂两个探针，确认 .btn.danger 真的算出了和普通按钮不同的颜色 ——
+       只查类名会漏掉「类写了但 CSS 没生效」这种情况。 */
+    var p1 = document.createElement('div'); p1.className = 'btn';
+    var p2 = document.createElement('div'); p2.className = 'btn danger';
+    p1.style.position = p2.style.position = 'fixed';
+    document.body.appendChild(p1); document.body.appendChild(p2);
+    var c1 = getComputedStyle(p1).color, c2 = getComputedStyle(p2).color;
+    p1.remove(); p2.remove();
+    noteBack();
+    return { ok: isDanger && !!c2 && c1 !== c2,
+      info: '删除按钮类=' + (del ? del.className : '无') + ' 普通色=' + c1 + ' 危险色=' + c2 };
+  });
+
+  T('切换到手写模式仍可用（别被全屏文字改动带崩）', function(){
+    openNotes(); noteNew();
+    noteSetMode('ink');
+    var tw = document.getElementById('noteTextWrap');
+    var iw = document.getElementById('noteInkWrap');
+    var swap = tw.style.display === 'none' && iw.style.display === '';
+    inkEnterFull();
+    var ink = document.getElementById('inkFull');
+    var opened = !!ink && ink.classList.contains('show');
+    inkExitFull();
+    var closed = !document.getElementById('inkFull').classList.contains('show');
+    noteSave();
+    return { ok: swap && opened && closed,
+      info: '切到手写=' + swap + ' 全屏手写打开=' + opened + ' 退出=' + closed };
+  });
+
+  T('含图片的笔记只能导出为图片', function(){
+    openNotes(); noteNew();
+    noteInsertImg(_TINY_PNG);
+    var n = noteById(noteCurId);
+    var rich = noteHasRich(n);
+    noteOpenShare();
+    var txt = (document.getElementById('sheet') || {}).textContent || '';
+    var noTextItem = txt.indexOf('导出为文字') < 0 && txt.indexOf('分享文字') < 0;
+    var hasImgItem = txt.indexOf('导出为图片') >= 0 && txt.indexOf('分享图片') >= 0;
+    var explained = txt.indexOf('会丢掉它们') >= 0;
+    closeSheet();
+    return { ok: rich && noTextItem && hasImgItem && explained,
+      info: '含图=' + rich + ' 无文字项=' + noTextItem + ' 有图片项=' + hasImgItem + ' 有说明=' + explained };
+  });
+
+  T('纯文字笔记可导出文字，转换不留标签', function(){
+    openNotes(); noteNew();
+    var bd = document.getElementById('noteBody');
+    if(bd) bd.innerHTML = '<div>今天学了高数</div><div>还有线代</div>';
+    noteSyncEdit();
+    var n = noteById(noteCurId);
+    var pt = notePlainText(n);
+    var plainOk = pt.indexOf('今天学了高数') >= 0 && pt.indexOf('线代') >= 0
+      && pt.indexOf('<div>') < 0 && pt.indexOf('</div>') < 0;
+    noteOpenShare();
+    var txt = (document.getElementById('sheet') || {}).textContent || '';
+    var four = txt.indexOf('导出为文字') >= 0 && txt.indexOf('导出为图片') >= 0
+      && txt.indexOf('分享文字') >= 0 && txt.indexOf('分享图片') >= 0;
+    closeSheet();
+    return { ok: plainOk && four, info: '纯文本转换=' + plainOk + ' 四个入口=' + four };
+  });
+
+  /* 图片生成本身是异步的（要等离屏 img 解码完），先 await 出结果再同步断言 */
+  var _pngPlain = '', _pngImg = '';
+  await new Promise(function(res){
+    openNotes(); noteNew();
+    var bd = document.getElementById('noteBody');
+    if(bd) bd.innerHTML = '<div>第一段文字</div><div>第二段文字</div>';
+    noteSyncEdit();
+    noteRenderPng(noteById(noteCurId), function(u){ _pngPlain = u || ''; res(); });
+  });
+  await new Promise(function(res){
+    openNotes(); noteNew();
+    noteInsertImg(_TINY_PNG);
+    var bd2 = document.getElementById('noteBody');
+    if(bd2) bd2.innerHTML = '<div>带图的笔记</div>' + bd2.innerHTML;
+    noteSyncEdit();
+    noteRenderPng(noteById(noteCurId), function(u){ _pngImg = u || ''; res(); });
+  });
+  T('笔记能导出为长图（纯文字 / 含图都不炸）', function(){
+    var a = /^data:image\/png;base64,/.test(_pngPlain) && _pngPlain.length > 2000;
+    var b = /^data:image\/png;base64,/.test(_pngImg) && _pngImg.length > 2000;
+    return { ok: a && b, info: '纯文字图=' + _pngPlain.length + ' 字符 · 含图=' + _pngImg.length + ' 字符' };
+  });
+
+  /* ================= 聊天记录：删除 ================= */
+  T('聊天记录可以删除', function(){
+    var keep = JSON.parse(JSON.stringify(S.chatHistory || []));
+    S.chatHistory = [
+      { title:'测试会话A', when:'今天', msgs:[{r:'me', t:'hi'}] },
+      { title:'测试会话B', when:'昨天', msgs:[{r:'ai', t:'yo'}] }
+    ];
+    save();
+    openSheet('chathist');
+    var sheetTxt = (document.getElementById('sheet') || {}).textContent || '';
+    var hasDel = sheetTxt.indexOf('删') >= 0;
+    delChatSession(0);
+    var left = (S.chatHistory || []).map(function(h){ return h.title; });
+    var okDel = left.length === 1 && left[0] === '测试会话B';
+    S.chatHistory = keep; save();
+    closeSheet();
+    return { ok: hasDel && okDel, info: '列表有删除=' + hasDel + ' 删后剩余=' + left.join('|') };
+  });
+
+  /* ================= 联网搜索 ================= */
+  T('联网搜索：配置入口 + 三家服务 + 默认关闭', function(){
+    var c = webSearchCfg();
+    var defOff = c.on === false && webSearchReady() === false;
+    openAiConfig();
+    var v = document.getElementById('view-ai');
+    var hasEntry = !!v && v.textContent.indexOf('联网搜索') >= 0;
+    openSheet('websearch');
+    var st = (document.getElementById('sheet') || {}).textContent || '';
+    var three = st.indexOf('博查') >= 0 && st.indexOf('Tavily') >= 0 && st.indexOf('SearXNG') >= 0;
+    closeSheet();
+    return { ok: defOff && hasEntry && three,
+      info: '默认关=' + defOff + ' 配置页入口=' + hasEntry + ' 三家齐=' + three };
+  });
+
+  T('webSearch 已进工具表与系统提示', function(){
+    var inTools = false;
+    for(var i = 0; i < AI_TOOLS.length; i++) if(AI_TOOLS[i].k === 'webSearch') inTools = true;
+    var sys = sysPrompt(true);
+    var inPrompt = sys.indexOf('webSearch') >= 0;
+    var notReady = webSearchReady() === false;
+    return { ok: inTools && inPrompt && notReady,
+      info: '工具表=' + inTools + ' 提示词=' + inPrompt + ' 未开启时不可用=' + notReady };
+  });
+
+  T('能解析搜索请求与三家响应', function(){
+    var qs = webSearchQueries('好的\nTOOL:webSearch|q=高数 期末 复习方法');
+    var b = webSearchParse('bocha', JSON.stringify({data:{webPages:{value:[{name:'标题A',url:'http://a.com',snippet:'摘要A'}]}}}));
+    var tv = webSearchParse('tavily', JSON.stringify({answer:'直接答案', results:[{title:'T',url:'http://t',content:'C'}]}));
+    var sx = webSearchParse('searxng', JSON.stringify({results:[{title:'S',url:'http://s',content:'CS'}]}));
+    var okQ = qs.length === 1 && qs[0] === '高数 期末 复习方法';
+    var okB = b.indexOf('标题A') >= 0 && b.indexOf('http://a.com') >= 0;
+    var okT = tv.indexOf('直接答案') >= 0 && tv.indexOf('http://t') >= 0;
+    var okS = sx.indexOf('CS') >= 0 && sx.indexOf('http://s') >= 0;
+    return { ok: okQ && okB && okT && okS,
+      info: '搜索词=' + okQ + ' 博查=' + okB + ' Tavily=' + okT + ' SearXNG=' + okS };
+  });
+
+  T('未开启联网时明确回话，不空转', function(){
+    var ready = webSearchReady();
+    var r = runOneTool('webSearch', {q:'x'});
+    var said = (typeof r === 'string') && r.length > 0;
+    return { ok: ready === false && said,
+      info: '可搜=' + ready + ' 兜底回话=' + JSON.stringify(String(r).slice(0, 36)) };
+  });
+
+  T('GET 回调按 id 分发且一次性', function(){
+    var fnOk = typeof window.onHttpGet === 'function';
+    var got = '';
+    HTTP_GET_WAIT['__t'] = function(ok, body){ got = String(body); };
+    window.onHttpGet('__t', true, 'hello');
+    var once = (typeof HTTP_GET_WAIT['__t'] === 'undefined');
+    var noThrow = true;
+    try{ window.onHttpGet('never-registered', true, 'x'); }catch(e){ noThrow = false; }
+    return { ok: fnOk && got === 'hello' && once && noThrow,
+      info: '入口=' + fnOk + ' 收到=' + got + ' 一次性=' + once + ' 未知id不抛错=' + noThrow };
+  });
+
+  /* ================= 死代码清理 / 图标库 ================= */
+  function pageScripts(){
+    return Array.prototype.map.call(document.scripts, function(s){ return s.textContent || ''; })
+      .filter(function(x){ return x.indexOf('__ASSERTS' + 'RC__') < 0; }).join('\n');
+  }
+
+  T('已删除的小爱课表导入没留下死代码', function(){
+    var src = pageScripts();
+    /* 关键字拆开拼，免得断言脚本自己去匹配自己 */
+    var keys = ['xa' + 'oai', 'tryXiaoai' + 'Url', '__httpGet' + 'Fallback',
+                'xa' + 'Status', 'impOCRResult' + 'Preview'];
+    var left = keys.filter(function(k){ return src.indexOf(k) >= 0; });
+    var hook = src.indexOf('window.__httpGet' + 'Fallback =') >= 0;
+    return { ok: !left.length && !hook, info: '残留=' + (left.join(',') || '无') + ' 旧钩子=' + hook };
+  });
+
+  T('图标库：补绘的图标齐备且都有引用', function(){
+    var need = ['globe', 'align', 'layout', 'dynamic', 'wand', 'key', 'heart', 'smile',
+                'coin', 'target', 'pressure', 'chip', 'terminal', 'book', 'database',
+                'holiday', 'voice', 'speed', 'paper', 'puzzle', 'check'];
+    var missing = need.filter(function(k){ return !(k in ICON); });
+    var src = pageScripts();
+    /* 静态 HTML 里的图标不在 <script> 里，要连 DOM 一起看 */
+    var dom = [].slice.call(document.querySelectorAll('.ic[data-i]'))
+      .map(function(e){ return e.dataset.i; });
+    var unused = need.filter(function(k){
+      return src.indexOf('data-i="' + k + '"') < 0
+        && src.indexOf("icSvg('" + k + "'") < 0
+        && dom.indexOf(k) < 0;
+    });
+    return { ok: !missing.length && !unused.length,
+      info: '共 ' + need.length + ' 个 · 缺=' + (missing.join(',') || '无')
+        + ' 无人引用=' + (unused.join(',') || '无') };
+  });
+
+  T('重复借用的图标已按语义换开', function(){
+    /* 两种写法都要认：静态 HTML 用 data-i；render 出来的走 icSvg()、没有 data-i，
+       就拿 .ic 里的 SVG 路径去和 ICON 表比。
+       注意：innerHTML 序列化会把 <path .../> 写成 <path ...></path>，
+       所以整串比对必然失配，只能比 d="..." 这一段。 */
+    function icOf(label){
+      var lis = document.querySelectorAll('.li');
+      for(var i = 0; i < lis.length; i++){
+        if((lis[i].textContent || '').indexOf(label) < 0) continue;
+        var ic = lis[i].querySelector('.ic');
+        if(!ic) continue;
+        if(ic.dataset.i) return ic.dataset.i;
+        var html = ic.innerHTML || '';
+        for(var k in ICON){
+          var ds = ICON[k].match(/d="[^"]+"/g);
+          if(ds && ds.length){
+            var all = true;
+            for(var j = 0; j < ds.length; j++){ if(html.indexOf(ds[j]) < 0){ all = false; break; } }
+            if(all) return k;
+          }
+        }
+        return '';
+      }
+      return '';
+    }
+    var want = { '联网搜索': 'globe', '侧栏按钮对齐': 'align', '灵动岛上岛': 'dynamic',
+                 '管理技能': 'puzzle', '管理记忆': 'chip', '节假日模式': 'holiday',
+                 '让 AI 记住我': 'chip', '备份学习数据': 'database', '特别鸣谢': 'heart',
+                 '服务商与模型': 'sparkle',   /* 这个本来就该是 AI 星标，别换错 */
+                 '已消耗资费': 'coin', '累计 Token': 'gauge', '提前提醒': 'alarm',
+                 '准点提醒': 'target' };
+    renderProfile(); renderAiEntry();      /* 「我的」页入口卡是渲染出来的，先落地 */
+    openAiConfig(); openAiHub();           /* 资费面板在「AI 提供商」页里，也要先渲染 */
+    var got = {}, bad = [];
+    Object.keys(want).forEach(function(k){
+      got[k] = icOf(k);
+      if(got[k] !== want[k]) bad.push(k + '=' + (got[k] || '无') + '(应 ' + want[k] + ')');
+    });
+    var diag = 'li总数=' + document.querySelectorAll('.li').length
+      + ' aiEntry字节=' + (((document.getElementById('aiEntry') || {}).innerHTML) || '').length;
+    return { ok: !bad.length,
+      info: bad.length ? (bad.join(' ') + ' | ' + diag)
+                       : '全部对得上（' + Object.keys(want).length + ' 处）' };
+  });
+
+  S.notes = _notesKeep; save();
+
   return JSON.stringify(R);
 })()
 `;

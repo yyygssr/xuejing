@@ -82,6 +82,16 @@ public class MainActivity extends AppCompatActivity {
     private String pendingBackupName;
     private String pendingBackupText;
 
+    /* 笔记导出：文字与图片各一个 launcher —— CreateDocument 的 MIME 在注册时就固定了，
+       它决定系统给出的默认扩展名，所以 .txt 和 .png 没法共用一个。
+       真正的内容统一放 pendingDocBytes（图片是二进制，用字符串传会踩编码坑）。 */
+    private ActivityResultLauncher<String> createTextLauncher;
+    private ActivityResultLauncher<String> createImageLauncher;
+    private String pendingDocName;
+    private byte[] pendingDocBytes;
+    /* 分享图片的临时文件名计数：同名文件边写边被别的应用读，会读到半张图 */
+    private int shareSeq = 0;
+
     /* 页面推过来的课表与设置，用于排上课提醒 */
     String scheduleJson = "";
     String prefsJson = "";
@@ -288,6 +298,28 @@ public class MainActivity extends AppCompatActivity {
                     if (uri == null) return;          // 用户取消了
                     boolean ok = writeText(uri, text);
                     toast(ok ? ("已保存 " + name) : "保存失败，换个位置再试一次");
+                });
+
+        // 笔记导出：文字与图片各一条（MIME 决定系统给的默认扩展名，不能共用）
+        createTextLauncher = registerForActivityResult(
+                new ActivityResultContracts.CreateDocument("text/plain"),
+                uri -> {
+                    String name = pendingDocName;
+                    byte[] data = pendingDocBytes;
+                    clearPendingDoc();
+                    if (uri == null) return;              // 用户取消了
+                    boolean okW = writeBytes(uri, data);
+                    toast(okW ? ("已保存 " + name) : "保存失败，换个位置再试一次");
+                });
+        createImageLauncher = registerForActivityResult(
+                new ActivityResultContracts.CreateDocument("image/png"),
+                uri -> {
+                    String name = pendingDocName;
+                    byte[] data = pendingDocBytes;
+                    clearPendingDoc();
+                    if (uri == null) return;
+                    boolean okW = writeBytes(uri, data);
+                    toast(okW ? ("已保存 " + name) : "保存失败，换个位置再试一次");
                 });
 
         applyInsets();
@@ -976,6 +1008,136 @@ public class MainActivity extends AppCompatActivity {
         } finally {
             try { if (os != null) os.close(); } catch (Throwable ignored) { }
         }
+    }
+
+    private void clearPendingDoc() {
+        pendingDocName = null;
+        pendingDocBytes = null;
+    }
+
+    private boolean writeBytes(Uri uri, byte[] data) {
+        if (uri == null || data == null) return false;
+        java.io.OutputStream os = null;
+        try {
+            os = getContentResolver().openOutputStream(uri);
+            if (os == null) return false;
+            os.write(data);
+            os.flush();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            try { if (os != null) os.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    /**
+     * data:image/png;base64,xxxx → 字节数组。
+     * 页面传上来的可能是 dataURL，也可能是裸 base64，两种都认。
+     */
+    private static byte[] decodeDataUrl(String s) {
+        try {
+            String t = String.valueOf(s == null ? "" : s).trim();
+            int comma = t.indexOf(',');
+            if (t.startsWith("data:") && comma > 0) t = t.substring(comma + 1);
+            if (t.isEmpty()) return null;
+            return android.util.Base64.decode(t, android.util.Base64.DEFAULT);
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    /**
+     * 导出纯文本（笔记的「导出为文字」）。与 saveBackup 同一条路：
+     * 让用户自己挑保存位置，只是 MIME 换成 text/plain，扩展名才是 .txt。
+     */
+    void saveText(String name, String text) {
+        if (text == null) return;
+        pendingDocName = (name == null || name.trim().isEmpty()) ? "学径-笔记.txt" : name.trim();
+        pendingDocBytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        runOnUiThread(() -> {
+            try {
+                createTextLauncher.launch(pendingDocName);
+            } catch (Throwable t) {
+                clearPendingDoc();
+                toast("这个机型打不开文件选择器");
+            }
+        });
+    }
+
+    /**
+     * 导出图片（笔记的「导出为图片」）。页面给的是 dataURL，这里剥前缀解码写盘。
+     * 为什么不让页面直接传二进制：@JavascriptInterface 只可靠地传 String，
+     * 一整张图的 base64 走字符串反而是最不容易出错的方式。
+     */
+    void saveImage(String name, String dataUrl) {
+        byte[] bin = decodeDataUrl(dataUrl);
+        if (bin == null || bin.length == 0) {
+            toast("图片是空的，没东西可存");
+            return;
+        }
+        pendingDocName = (name == null || name.trim().isEmpty()) ? "学径-笔记.png" : name.trim();
+        pendingDocBytes = bin;
+        runOnUiThread(() -> {
+            try {
+                createImageLauncher.launch(pendingDocName);
+            } catch (Throwable t) {
+                clearPendingDoc();
+                toast("这个机型打不开文件选择器");
+            }
+        });
+    }
+
+    /** 系统分享纯文本（笔记的「分享文字」）—— 分享面板里发到哪儿由用户决定 */
+    void shareText(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            toast("内容是空的");
+            return;
+        }
+        final String body = text;
+        runOnUiThread(() -> {
+            try {
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("text/plain");
+                i.putExtra(Intent.EXTRA_SUBJECT, "学径笔记");
+                i.putExtra(Intent.EXTRA_TEXT, body);
+                startActivity(Intent.createChooser(i, "分享笔记"));
+            } catch (Throwable e) {
+                toast("这台设备上没有可分享的应用");
+            }
+        });
+    }
+
+    /**
+     * 系统分享图片（笔记的「分享图片」）。
+     * 写进私有 cache/share 再经 FileProvider 交出去 —— 不需要任何存储权限，
+     * 也不用把 FileProvider 的可暴露范围开大（file_paths.xml 只开了这一个子目录）。
+     */
+    void shareImage(String name, String dataUrl) {
+        byte[] bin = decodeDataUrl(dataUrl);
+        if (bin == null || bin.length == 0) {
+            toast("图片是空的，没东西可分享");
+            return;
+        }
+        final String fn = (name == null || name.trim().isEmpty()) ? "学径-笔记.png" : name.trim();
+        runOnUiThread(() -> {
+            try {
+                File dir = new File(getCacheDir(), "share");
+                if (!dir.exists()) dir.mkdirs();
+                File f = new File(dir, "s" + (++shareSeq) + "-" + fn);
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+                fo.write(bin);
+                fo.close();
+                Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("image/png");
+                i.putExtra(Intent.EXTRA_STREAM, uri);
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(i, "分享笔记"));
+            } catch (Throwable e) {
+                toast("分享失败了，可以先导出成图片再发");
+            }
+        });
     }
 
     /** 深色模式：同步系统栏图标颜色，避免白底白字 */

@@ -11,7 +11,7 @@
     --brand:#5a5ad6; --brand-2:#8b7bf0; --brand-soft:#eeedfd; --brand-rgb:90,90,214;
     --accent:#0fb8a5; --accent-soft:#e2f7f4;
     --warn:#f08c3a; --warn-soft:#fdf1e4;
-    --danger:#e0505a;
+    --danger:#e0505a; --danger-soft:#fdecee;
     --c1:#5a5ad6; --c2:#0fb8a5; --c3:#f08c3a; --c4:#e0508a;
     --shadow:0 6px 22px rgba(23,26,38,.07);
     --chat-ai:#ffffff;
@@ -23,7 +23,7 @@
     --brand:#7f7ff2; --brand-2:#a58cff; --brand-soft:#22243c; --brand-rgb:127,127,242;
     --accent:#2dd4bf; --accent-soft:#12302f;
     --warn:#f5a45c; --warn-soft:#33261a;
-    --danger:#f2747c;
+    --danger:#f2747c; --danger-soft:#3a2026;
     --c1:#7f7ff2; --c2:#2dd4bf; --c3:#f5a45c; --c4:#f274a9;
     --shadow:0 6px 24px rgba(0,0,0,.45);
     --chat-ai:#212533;
@@ -100,6 +100,10 @@
   .btn.primary:active{transform:scale(.98)}
   .btn.ghost{background:var(--bg);border:1px solid var(--line);color:var(--text)}
   .btn.ghost:active{background:var(--brand-soft)}
+  /* 危险操作（删除这类）：红字 + 红边 + 淡红底。
+     和 .btn.ghost 长得太像就成了「不起眼」，用户会误以为它是个普通次要按钮。 */
+  .btn.danger{background:var(--danger-soft);border:1px solid var(--danger);color:var(--danger)}
+  .btn.danger:active{background:var(--danger);color:#fff}
 
   /* ---------- 空状态 ---------- */
   .empty{background:var(--card);border:1px dashed var(--line);border-radius:18px;padding:24px 18px;text-align:center}
@@ -321,7 +325,7 @@
   input.f:focus,textarea.f:focus{border-color:var(--brand)}
   /* 搜索类/多行仍左对齐，避免长文本难读 */
   #chatInput,#pkInput,#impInput,#sysPromptInput,#skName,#skBody,#todoTitle,#todoBody,
-  #xaLink,#xaJson,#noteTitle,.note-body,#planBusy,#planFree{text-align:left}
+  #noteTitle,.note-body,#planBusy,#planFree{text-align:left}
   /* 「我的」页资料/密钥等一律居中（个别页签样式可能覆盖） */
   #nickInput,#aiNameInput,#callInput,#baseUrl,#apiKey,#termStartInput{
     text-align:center!important;text-align-last:center}
@@ -860,6 +864,31 @@
   .note-body ul{padding-left:1.3em;margin:6px 0}
   .note-body table{border-collapse:collapse;margin:8px 0;width:100%}
   .note-body td,.note-body th{border:1px solid var(--line);padding:6px 8px;font-size:12px;min-width:48px}
+  /* 插图：单文件应用里图片是 dataURL，宽度一律收在正文内，避免撑破编辑区 */
+  .note-body img{max-width:100%;height:auto;display:block;margin:8px 0;border-radius:10px}
+  /* 全屏文字笔记：和全屏手写同一套结构（顶栏 / 撑满的正文 / 底部工具栏）。
+     层级刻意低于 .mask(40) 与 .pickmask(60) —— 底部工具栏里的「表格」要弹出通用弹层，
+     全屏层若盖在最上面，弹层就会被挡住。 */
+  #noteFull{position:fixed;inset:0;z-index:35;background:var(--bg);display:none;flex-direction:column}
+  #noteFull.show{display:flex}
+  #noteFull .viewhead{flex:none;background:var(--bg);border-bottom:1px solid var(--line);
+    gap:10px;padding:0 14px}
+  #noteFull .viewhead .f{flex:1;min-width:0;height:38px;margin:0;font-size:15px;font-weight:700}
+  #noteFullBody{flex:1;min-height:0;overflow:auto;padding:12px 16px;background:var(--bg)}
+  #noteFull #noteBody{min-height:100%;max-height:none;border:0;border-radius:0;
+    background:transparent;padding:0;resize:none}
+  #noteBarFull{flex:none;background:var(--card);border-top:1px solid var(--line);
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  /* 编辑页里的内容预览：只读，点一下直接进全屏 */
+  .note-prev{min-height:150px;max-height:46vh;overflow-y:auto;border:1px solid var(--line);
+    border-radius:14px;background:var(--card);padding:12px;font-size:14px;line-height:1.7;
+    white-space:pre-wrap;word-break:break-word;cursor:text}
+  .note-prev:empty::before{content:attr(data-ph);color:var(--sub)}
+  .note-prev img{max-width:100%;height:auto;display:block;margin:8px 0;border-radius:10px}
+  .note-prev ul{padding-left:1.3em;margin:6px 0}
+  .note-prev table{border-collapse:collapse;margin:8px 0;width:100%}
+  .note-prev td,.note-prev th{border:1px solid var(--line);padding:6px 8px;font-size:12px;min-width:48px}
   .pen-size{width:100%;accent-color:var(--brand)}
   .color-dots{display:flex;gap:6px;flex-wrap:wrap}
   .color-dots i{width:22px;height:22px;border-radius:8px;cursor:pointer;border:2px solid transparent;display:block}
@@ -948,12 +977,12 @@
   .ikrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .ikgrp{display:flex;align-items:center;gap:6px;flex:none}
   .iksp{flex:1 1 auto;min-width:2px}
-  #inkBar button.ibt, #inkFull .viewhead button.ibt{flex:none;border:1px solid var(--line);background:var(--card);color:var(--text);
+  #inkBar button.ibt, #inkFull .viewhead button.ibt, #noteFull .viewhead button.ibt{flex:none;border:1px solid var(--line);background:var(--card);color:var(--text);
     border-radius:10px;min-width:40px;height:38px;padding:0 10px;font-size:12.5px;font-weight:700;
     cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .1s}
-  #inkBar button.ibt.on, #inkFull .viewhead button.ibt.on{background:var(--brand);border-color:var(--brand);color:#fff}
-  #inkBar button.ibt:active, #inkFull .viewhead button.ibt:active{transform:scale(.95)}
-  #inkBar button.ibt[disabled], #inkFull .viewhead button.ibt[disabled]{opacity:.32;pointer-events:none}
+  #inkBar button.ibt.on, #inkFull .viewhead button.ibt.on, #noteFull .viewhead button.ibt.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  #inkBar button.ibt:active, #inkFull .viewhead button.ibt:active, #noteFull .viewhead button.ibt:active{transform:scale(.95)}
+  #inkBar button.ibt[disabled], #inkFull .viewhead button.ibt[disabled], #noteFull .viewhead button.ibt[disabled]{opacity:.32;pointer-events:none}
   #inkFull .viewhead .ikgrp{gap:8px}
   /* 工具按钮：图标为主，选中态在底下点一个小圆点提示「再点一下能调」 */
   #inkBar button.ibt.ikk{min-width:46px;padding:0 8px;position:relative}
@@ -1265,12 +1294,12 @@
           <div class="switch" id="swFocusNotify" onclick="togglePref('focusNotify',this)"></div>
         </div>
         <div class="li tap" onclick="openSheet('exactAlarm')">
-          <div class="ic" data-i="alarm"></div>
+          <div class="ic" data-i="target"></div>
           <div class="tx"><b>准点提醒</b><small id="exactHint">检查系统的精确闹钟授权</small></div>
           <div class="val"><span class="badge" id="exactBadge">检查中</span><span class="arrow">›</span></div>
         </div>
         <div class="li">
-          <div class="ic" data-i="sparkle"></div>
+          <div class="ic" data-i="dynamic"></div>
           <div class="tx"><b>灵动岛上岛</b><small id="islandHint">计时与上课提醒尝试显示为系统焦点/实况（需机型白名单）</small></div>
           <div class="switch" id="swIslandOn" onclick="togglePref('islandOn',this)"></div>
         </div>
@@ -1284,7 +1313,7 @@
       <div class="h2">AI 技能</div>
       <div class="list">
         <div class="li tap" onclick="openSkills()">
-          <div class="ic" data-i="plan"></div>
+          <div class="ic" data-i="puzzle"></div>
           <div class="tx"><b>管理技能</b><small id="skillCountHint">自定义方法注入对话；支持 AI 生成与 JSON 导入</small></div>
           <div class="val"><span class="badge" id="skillBadge">0</span><span class="arrow">›</span></div>
         </div>
@@ -1293,7 +1322,7 @@
       <div class="h2" id="h2TabletNav">平板布局</div>
       <div class="list" id="tabletNavList">
         <div class="li">
-          <div class="ic" data-i="sliders"></div>
+          <div class="ic" data-i="layout"></div>
           <div class="tx"><b>侧栏位置</b><small>宽屏下主导航靠左或靠右</small></div>
           <div class="val" style="gap:8px">
             <span class="badge plain" style="cursor:pointer" onclick="setNavSide('left');renderProfile()">左</span>
@@ -1301,7 +1330,7 @@
           </div>
         </div>
         <div class="li">
-          <div class="ic" data-i="compass"></div>
+          <div class="ic" data-i="align"></div>
           <div class="tx"><b>侧栏按钮对齐</b><small>贴顶 / 垂直居中 / 贴底</small></div>
           <div class="val" style="gap:6px">
             <span class="badge plain" style="cursor:pointer" onclick="setNavAlign('top');renderProfile()">顶</span>
@@ -1314,17 +1343,17 @@
       <div class="h2">AI 记忆</div>
       <div class="list">
         <div class="li">
-          <div class="ic" data-i="bookmark"></div>
+          <div class="ic" data-i="chip"></div>
           <div class="tx"><b>让 AI 记住我</b><small>记住你的偏好、目标与长期约束，对话和行程规划都会参考</small></div>
           <div class="switch" id="swMemOn" onclick="toggleMem('on',this)"></div>
         </div>
         <div class="li">
-          <div class="ic" data-i="sparkle"></div>
+          <div class="ic" data-i="wand"></div>
           <div class="tx"><b>自动记忆</b><small id="memAutoHint">对话中自动提取值得记住的信息</small></div>
           <div class="switch" id="swMemAuto" onclick="toggleMem('auto',this)"></div>
         </div>
         <div class="li tap" onclick="openMemory()">
-          <div class="ic" data-i="log"></div>
+          <div class="ic" data-i="chip"></div>
           <div class="tx"><b>管理记忆</b><small id="memCount">还没有任何记忆</small></div>
           <div class="val"><span class="badge" id="memBadge">0 条</span><span class="arrow">›</span></div>
         </div>
@@ -1339,17 +1368,17 @@
           <div class="ic" data-i="compass"></div><div class="tx"><b>重看新手引导</b><small>昵称、头像与课表导入</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li">
-          <div class="ic" data-i="sun"></div>
+          <div class="ic" data-i="holiday"></div>
           <div class="tx"><b>节假日模式</b><small id="holidayHint">法定节假日自动隐藏当天课程</small></div>
           <div class="switch" id="swHoliday" onclick="toggleHolidayMode(this)"></div>
         </div>
         <div class="li tap" onclick="openSheet('holidays')">
-          <div class="ic" data-i="plan"></div>
+          <div class="ic" data-i="holiday"></div>
           <div class="tx"><b>节假日设置</b><small id="holidayCountHint">还没同步</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.3 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.5 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1361,10 +1390,10 @@
           </div>
         </div>
         <div class="li tap" onclick="doBackup('study')">
-          <div class="ic" data-i="bookmark"></div><div class="tx"><b>备份学习数据</b><small>课表、专注记录、行程、偏好与个人资料</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="database"></div><div class="tx"><b>备份学习数据</b><small>课表、专注记录、行程、偏好与个人资料</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="doBackup('ai')">
-          <div class="ic" data-i="sparkle"></div><div class="tx"><b>备份 AI 服务配置</b><small>服务商、模型选择与 API Key（含密钥，别外传）</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="key"></div><div class="tx"><b>备份 AI 服务配置</b><small>服务商、模型选择与 API Key（含密钥，别外传）</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="doBackup('full')">
           <div class="ic" data-i="archive"></div><div class="tx"><b>导出完整备份</b><small>上面两份合成一个文件</small></div><div class="val"><span class="arrow">›</span></div>
@@ -1549,7 +1578,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.1.3 · 开源版</div>
+        <div class="about-ver">v0.1.5 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1568,7 +1597,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openSheet('credits')">
-          <div class="ic" data-i="sparkle"></div>
+          <div class="ic" data-i="heart"></div>
           <div class="tx"><b>特别鸣谢</b><small>协助完成本应用的伙伴</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
@@ -1632,6 +1661,16 @@
         </div>
       </div>
 
+      <div class="h2">联网搜索</div>
+      <div class="list">
+        <div class="li tap" onclick="openSheet('websearch')">
+          <div class="ic" data-i="globe"></div>
+          <div class="tx"><b>联网搜索</b><small id="webSearchHint">未开启</small></div>
+          <div class="val"><span class="arrow">›</span></div>
+        </div>
+      </div>
+      <div class="note2">开启并填好 Key 后，小径在需要最新信息时会自己联网查（搜索服务由你选择与付费）。</div>
+
       <div class="h2">输出方式</div>
       <div class="list">
         <div class="li">
@@ -1659,7 +1698,7 @@
       <div class="h2">回复风格</div>
       <div class="list">
         <div class="li tap" onclick="openSheet('replystyle')">
-          <div class="ic" data-i="sparkle"></div>
+          <div class="ic" data-i="smile"></div>
           <div class="tx"><b>回复风格</b><small id="replyStyleHint">贴心学长</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
@@ -1673,12 +1712,12 @@
       <div class="h2">语音</div>
       <div class="list">
         <div class="li tap" onclick="pickTtsVoice()">
-          <div class="ic" data-i="user"></div>
+          <div class="ic" data-i="voice"></div>
           <div class="tx"><b>音色</b><small id="ttsVoiceLab">跟随回复风格</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="pickTtsRate()">
-          <div class="ic" data-i="timer"></div>
+          <div class="ic" data-i="speed"></div>
           <div class="tx"><b>语速</b><small id="ttsRateLab">1.0×</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
@@ -1808,7 +1847,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.1.3';
+var APP_VER = 'v0.1.5';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -1854,6 +1893,9 @@ var DEFAULT = {
      auto = 是否在对话中自动提取。items 按加入顺序，超出上限时淘汰最久未更新的。 */
   memory: {on:true, auto:true, items:[]},
   chatHistory: [],           // 归档会话 {title, when, msgs}
+  /* 联网搜索：AI 的 webSearch 工具靠它。on=允许联网，provider 决定请求与解析方式，
+     url 留空用预设地址（SearXNG 必须自己填）；key 只存本机。 */
+  webSearch: {on:false, provider:'bocha', key:'', url:'', max:5},
   feedback: [],              // 点赞点踩 {q,a,vote,at}
   prefs: {workMin:25, shortMin:5, longMin:15, autoNext:true, classRemind:true, remindBefore:5, endRemind:true, focusNotify:true, islandOn:true, replyStyle:'gentle', replyLength:'medium',
     planDensity:'normal', chunkMode:'block', busyRanges:'', freeRanges:'', classMute:false},
@@ -2023,6 +2065,16 @@ window.onAiStreamDelta = function(kind, text){
   if(!job || !text) return;
   armAiTimeout(job);
   try{ if(job.onDelta) job.onDelta(kind === 'r' ? 'r' : 'c', text); }catch(e){}
+};
+/* 通用 GET 的回调入口。原生侧只会调 window.onHttpGet 这一个名字（见
+   MainActivity#callbackHttpGet）—— 页面侧改名时务必和它对齐：
+   曾经登记成 window.__onHttpGet，名字对不上，回调就永远进不来，而且静默失败。
+   这里按 id 分发到登记过的一次性回调（HTTP_GET_WAIT）。 */
+window.onHttpGet = function(id, ok, body){
+  var f = HTTP_GET_WAIT[id];
+  if(!f) return;
+  delete HTTP_GET_WAIT[id];
+  try{ f(ok, body); }catch(e){ logIt('网络', 'GET 回调异常：' + e.message); }
 };
 window.onAiResult = function(ok, payload){
   var job = AI_PENDING;
@@ -2706,7 +2758,55 @@ var ICON = {
   sparkle: '<path d="M12 3.2l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.6 15.4l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   download:'<path d="M12 3.6v12.2M7.6 11.4 12 15.8l4.4-4.4"/><path d="M4 16.2v2.4a1.8 1.8 0 0 0 1.8 1.8h12.4a1.8 1.8 0 0 0 1.8-1.8v-2.4"/>',
   /* 应用标识：向上的路径 + 递进的横线，呼应「书山有径」 */
-  appmark: '<path d="M4.6 19.6c0-6 4-8.4 7.4-11.4 1.6-1.4 2.6-2.6 2.6-4.6"/><path d="M9.2 8.6h9.4M13 12.4h5.6M15.4 16.2h3.2"/><circle cx="4.6" cy="19.6" r="1.7" fill="currentColor" stroke="none"/>'
+  appmark: '<path d="M4.6 19.6c0-6 4-8.4 7.4-11.4 1.6-1.4 2.6-2.6 2.6-4.6"/><path d="M9.2 8.6h9.4M13 12.4h5.6M15.4 16.2h3.2"/><circle cx="4.6" cy="19.6" r="1.7" fill="currentColor" stroke="none"/>',
+  /* 分享：三个节点连线（没有现成的 share 图标，笔记分享要用） */
+  share:   '<circle cx="17.6" cy="5.6" r="2.8"/><circle cx="6.4" cy="12" r="2.8"/><circle cx="17.6" cy="18.4" r="2.8"/><path d="M8.9 10.6l6.2-3.6M8.9 13.4l6.2 3.6"/>',
+  /* —— 补绘（v0.1.5）：下面这些位置原来都在「借」别的图标 ——
+     同一个图标被好几处共用，扫一眼分不出哪个是哪个。一律 24 网格 / 1.8 描边，
+     和上面保持同一套画法（圆头、圆角、currentColor）。 —— */
+  /* 联网搜索：网格球体。原来是罗盘 —— 罗盘是「方向」，跟「联网」没关系。 */
+  globe:   '<circle cx="12" cy="12" r="8.6"/><ellipse cx="12" cy="12" rx="4.4" ry="8.6"/><path d="M4.1 8.6h15.8M4.1 15.4h15.8"/>',
+  /* 对齐：一条基准线 + 三条齐头横杠 */
+  align:   '<path d="M4.4 3.6v16.8"/><path d="M8.6 6h11M8.6 12h11M8.6 18h11"/>',
+  /* 布局：面板 + 居左的窄栏（侧栏位置） */
+  layout:  '<rect x="3.2" y="4.4" width="17.6" height="15.2" rx="3"/><path d="M9.8 4.4v15.2"/><path d="M5.3 8.6h1.8M5.3 12h1.8M5.3 15.4h1.8"/>',
+  /* 灵动岛：药丸 + 内部波形 */
+  dynamic: '<rect x="3.4" y="6.6" width="17.2" height="7.4" rx="3.7"/><circle cx="7.6" cy="10.3" r="1.2" fill="currentColor" stroke="none"/><path d="M12.2 8.4v3.8M15 7.2v6.2M17.8 9.4v1.8"/>',
+  /* 自动：细杆魔术棒 + 两颗星（自动提取记忆）
+     杆要细 —— 画粗了带笔尖就成了 pencil，跟手写的铅笔撞脸。 */
+  wand:    '<path d="M3.6 20.4 13.4 10.6"/><path d="M16.8 3.2l1.4 3.6 3.6 1.4-3.6 1.4-1.4 3.6-1.4-3.6-3.6-1.4 3.6-1.4z"/><path d="M18.4 13.4l.7 1.7 1.7.7-1.7.7-.7 1.7-.7-1.7-1.7-.7 1.7-.7z"/>',
+  /* 密钥 */
+  key:     '<circle cx="7.6" cy="16.4" r="3.6"/><path d="M10.2 13.8 19.4 4.6"/><path d="M16.2 7.8l2.2 2.2M14 10l2.2 2.2"/>',
+  /* 致谢 */
+  heart:   '<path d="M12 20.2S4 15.3 4 10.1a4.6 4.6 0 0 1 8-3.1 4.6 4.6 0 0 1 8 3.1c0 5.2-8 10.1-8 10.1z"/>',
+  /* 语气 / 回复风格 */
+  smile:   '<circle cx="12" cy="12" r="8.6"/><path d="M8.6 14.2a4.4 4.4 0 0 0 6.8 0"/><circle cx="9.2" cy="9.8" r="1.05" fill="currentColor" stroke="none"/><circle cx="14.8" cy="9.8" r="1.05" fill="currentColor" stroke="none"/>',
+  /* 资费 / 余额：一枚带 ¥ 的硬币 */
+  coin:    '<circle cx="12" cy="12" r="8.4"/><path d="M12 7.4v9.2M9.4 7.6 12 11.2l2.6-3.6M9.4 11.2h5.2M9.4 13.6h5.2"/>',
+  /* 准点提醒：靶心（与「提前提醒」的闹钟区分开） */
+  target:  '<circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4.2"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>',
+  /* 压感：向下压的箭头 + 受力面（原来的笔尖形状缩小后像水滴，读不出来） */
+  pressure:'<path d="M12 3.4v9.8"/><path d="M8.2 9.6 12 13.4l3.8-3.8"/><path d="M4.4 16.6h15.2"/><path d="M7 20.2h10"/>',
+  /* AI 记忆：芯片。脑子的外形缩小后跟云朵分不出来，芯片不会有歧义 */
+  chip:    '<rect x="7.4" y="7.4" width="9.2" height="9.2" rx="2.6"/><rect x="10.6" y="10.6" width="2.8" height="2.8" rx="1"/><path d="M10.2 3.4v4M13.8 3.4v4M10.2 16.6v4M13.8 16.6v4M3.4 10.2h4M3.4 13.8h4M16.6 10.2h4M16.6 13.8h4"/>',
+  /* 终端（神秘代码 / 调试） */
+  terminal:'<rect x="3.2" y="4.6" width="17.6" height="14.8" rx="3"/><path d="M7.4 9.6l2.4 2.4-2.4 2.4M12.6 15h4.2"/>',
+  /* 笔记：摊开的书 */
+  book:    '<path d="M12 6.6C10.3 5.2 8.1 4.6 5.2 4.6H3.6v13.8h1.6c2.9 0 5.1.6 6.8 2 1.7-1.4 3.9-2 6.8-2h1.6V4.6h-1.6c-2.9 0-5.1.6-6.8 2z"/><path d="M12 6.6v13.8"/>',
+  /* 数据库（备份学习数据） */
+  database:'<ellipse cx="12" cy="6.6" rx="7.6" ry="3"/><path d="M4.4 6.6v10.8c0 1.7 3.4 3 7.6 3s7.6-1.3 7.6-3V6.6"/><path d="M4.4 12c0 1.7 3.4 3 7.6 3s7.6-1.3 7.6-3"/>',
+  /* 节假日：日历 + 星 */
+  holiday: '<rect x="3.2" y="5.2" width="17.6" height="15.6" rx="3.2"/><path d="M3.2 10.2h17.6M8.2 3.2v4M15.8 3.2v4"/><path d="M12 12.6l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
+  /* 音色：声波 */
+  voice:   '<path d="M4.6 10.4v3.2M8.2 7.6v8.8M12 4.8v14.4M15.8 7.6v8.8M19.4 10.4v3.2"/>',
+  /* 语速：快进双箭头 */
+  speed:   '<path d="M4.8 6.6 11 12l-6.2 5.4z"/><path d="M13 6.6 19.2 12 13 17.4z"/>',
+  /* 纸张：纸上一笔墨迹（中缝竖线看着像书脊，和 book 混） */
+  paper:   '<rect x="4.4" y="3.8" width="15.2" height="16.4" rx="2.8"/><path d="M7.8 15.6c1.4-4.8 2.6-4.8 3.4-1.2.8 3.6 2 3.6 3.2-.4"/>',
+  /* 技能：拼图块 */
+  puzzle:  '<path d="M4.6 4.6H9.8A1.9 1.9 0 1 1 13.6 4.6H19.4V10.2A1.9 1.9 0 1 1 19.4 14V19.4H4.6Z"/>',
+  /* 对勾（引导完成项） */
+  check:   '<circle cx="12" cy="12" r="8.6"/><path d="M8.2 12.4l2.6 2.6 5-5.6"/>'
 };
 function icSvg(name, size){
   var p = ICON[name] || ICON.user;
@@ -3958,7 +4058,11 @@ function renderSheet(kind, data){
       + (hist.length ? hist.map(function(h,i){
           return '<div class="li tap" onclick="loadChatSession(' + i + ')">'
             + '<div class="tx"><b>' + esc(h.title || '会话') + '</b><small>' + esc(h.when || '') + ' · ' + (h.msgs?h.msgs.length:0) + ' 条</small></div>'
-            + '<span class="arrow">›</span></div>';
+            + '<div class="val">'
+            /* 删除按钮必须 stopPropagation，否则会连带触发整行的「载入会话」 */
+            + '<span onclick="event.stopPropagation();openSheet(\'chatdel\',{idx:' + i + '})" '
+            + 'style="font-size:11.5px;color:var(--sub);border:1px solid var(--line);border-radius:8px;padding:3px 8px;margin-right:6px">删</span>'
+            + '<span class="arrow">›</span></div></div>';
         }).join('') : '<div class="li"><div class="tx"><b style="font-size:12px">还没有归档会话</b></div></div>')
       + '</div>'
       + '<div class="row g6" style="margin-top:14px">'
@@ -4002,6 +4106,28 @@ function renderSheet(kind, data){
   if(kind === 'minutes'){
     sheet.innerHTML = renderMinutes();
     refreshMinute();
+    return;
+  }
+  if(kind === 'noteshare'){
+    sheet.innerHTML = renderNoteShareSheet();
+    return;
+  }
+  if(kind === 'chatdel'){
+    var cdIdx = parseInt(data && data.idx, 10);
+    var cdH = (S.chatHistory || [])[cdIdx];
+    sheet.innerHTML = '<div class="sh"></div><h3>删除这条聊天记录？</h3>'
+      + '<div class="card" style="margin:12px 0 4px"><div style="font-size:13px;line-height:1.7;overflow-wrap:anywhere">'
+      + esc(cdH ? (cdH.title || '会话') : '') + '</div>'
+      + '<div class="muted" style="font-size:11.5px;margin-top:4px">'
+      + esc(cdH ? (cdH.when || '') : '') + ' · ' + (cdH && cdH.msgs ? cdH.msgs.length : 0) + ' 条</div></div>'
+      + '<div class="muted" style="font-size:11.5px;line-height:1.7">删除后无法恢复；当前正在进行的对话不受影响。</div>'
+      + '<div class="row g6" style="margin-top:14px">'
+      + '<div class="btn ghost" onclick="openSheet(\'chathist\')">取消</div>'
+      + '<div class="btn primary" onclick="delChatSession(' + cdIdx + ')">删除</div></div>';
+    return;
+  }
+  if(kind === 'websearch'){
+    sheet.innerHTML = renderWebSearchSheet();
     return;
   }
   if(kind === 'privacy'){
@@ -5430,6 +5556,18 @@ function loadChatSession(i){
   toast('已载入会话');
 }
 function openChatHistory(){ openSheet('chathist'); }
+/* 删除一条归档会话。删完回到列表（而不是关掉弹层）——
+   用户常常是连着清几条，每删一次就把他弹出来会很烦。 */
+function delChatSession(i){
+  var hist = S.chatHistory || [];
+  if(!(i >= 0 && i < hist.length)) return;
+  var name = String(hist[i].title || '会话').slice(0, 12);
+  hist.splice(i, 1);
+  S.chatHistory = hist;
+  save();
+  toast('已删除「' + name + '」');
+  openSheet('chathist');
+}
 function scrollMsgs(){
   var box = document.getElementById('msgs');
   if(box) box.scrollTop = box.scrollHeight;
@@ -5714,6 +5852,194 @@ function appStateSnapshot(what){
 }
 
 /* 对话页全量工具 */
+/* ============================================================
+   联网搜索
+   ------------------------------------------------------------
+   模型 API 不提供实时信息，所以「让 AI 联网」只能外接搜索服务：
+   模型输出 TOOL:webSearch|q=…，应用去搜，把结果作为新一轮上下文
+   再喂回去，模型据此作答（工具本身是文本协议，与其它工具同一套机制）。
+
+   三家预设，差别只在「怎么发请求」和「怎么读结果」：
+   · bocha   博查    POST + Bearer      中文搜索质量好
+   · tavily  Tavily  POST + Bearer      英文 / 学术资料强
+   · searxng SearXNG GET ?q=&format=json 可自建、通常免 Key
+
+   请求一律走 aiRequest 排队：原生的 onAiResult 只有一个回调槽位，
+   绕过队列直接 nat('aiPost') 会让聊天请求的回调被搜索结果顶掉。
+   ============================================================ */
+var SEARCH_PROVIDERS = {
+  bocha:  {n:'博查 Bocha', url:'https://api.bochaai.com/v1/web-search', key:'sk-…',
+           hint:'国内服务，中文搜索质量好，有免费额度；到 open.bochaai.com 申请 Key。'},
+  tavily: {n:'Tavily', url:'https://api.tavily.com/search', key:'tvly-…',
+           hint:'国际服务，英文与学术资料强，每月有免费额度；到 tavily.com 申请 Key。'},
+  searxng:{n:'SearXNG', url:'', key:'',
+           hint:'元搜索，免费、多数实例不用 Key。地址填你自己的实例（或可信的公共实例）的 /search。'}
+};
+var _wsSeq = 0;
+var HTTP_GET_WAIT = {};        /* id -> 一次性回调，见 window.onHttpGet */
+
+function webSearchCfg(){
+  if(!S.webSearch) S.webSearch = {on:false, provider:'bocha', key:'', url:'', max:5};
+  return S.webSearch;
+}
+function webSearchProvider(){
+  var c = webSearchCfg();
+  return SEARCH_PROVIDERS[c.provider] || SEARCH_PROVIDERS.bocha;
+}
+function webSearchUrl(){
+  var c = webSearchCfg();
+  return String(c.url || '').trim() || webSearchProvider().url;
+}
+/* 开了开关 + 有地址 +（非 SearXNG 的）有 Key，才算能搜 */
+function webSearchReady(){
+  var c = webSearchCfg();
+  if(!c.on) return false;
+  if(!webSearchUrl()) return false;
+  if(c.provider !== 'searxng' && !String(c.key || '').trim()) return false;
+  return true;
+}
+/* 从模型输出里抠出搜索词（一次可能写多条，最多取 3 条） */
+function webSearchQueries(out){
+  var re = /TOOL\s*:\s*webSearch\s*\|([^\n]*)/gi, m, qs = [];
+  while((m = re.exec(String(out || '')))){
+    var q = '';
+    String(m[1] || '').split('|').forEach(function(p){
+      var i = p.indexOf('=');
+      if(i > 0 && p.slice(0, i).trim() === 'q') q = stripToolTags(p.slice(i + 1));
+    });
+    if(q) qs.push(q);
+    if(qs.length >= 3) break;
+  }
+  return qs;
+}
+/* 各家响应结构不同，统一成「几行带链接的摘要」再喂给模型 */
+function webSearchParse(pid, body){
+  var o = null;
+  try{ o = JSON.parse(body); }catch(e){ return ''; }
+  var list = [], ans = '';
+  if(pid === 'bocha'){
+    var wp = o && o.data && o.data.webPages && o.data.webPages.value;
+    if(Array.isArray(wp)){
+      list = wp.map(function(x){ return {t:x.name, u:x.url, s:x.snippet || x.summary || ''}; });
+    }
+  } else {
+    if(Array.isArray(o.results)){
+      list = o.results.map(function(x){ return {t:x.title, u:x.url, s:x.content || x.snippet || ''}; });
+    }
+    if(pid === 'tavily') ans = o.answer || '';
+  }
+  if(!list.length) return '';
+  var lines = list.map(function(x, i){
+    return (i + 1) + '. ' + String(x.t || '').replace(/\s+/g, ' ').slice(0, 90) + '\n'
+      + '   ' + String(x.s || '').replace(/\s+/g, ' ').slice(0, 400) + '\n'
+      + '   链接：' + String(x.u || '');
+  });
+  return (ans ? ('摘要：' + String(ans).replace(/\s+/g, ' ').slice(0, 400) + '\n\n') : '')
+    + lines.join('\n');
+}
+function webSearchOne(q, max, cb){
+  var c = webSearchCfg(), pid = c.provider;
+  var url = webSearchUrl(), key = String(c.key || '').trim();
+  var done = false;
+  var timer = setTimeout(function(){ finish('（搜索超时，检查网络或接口地址）'); }, 25000);
+  function finish(txt){ if(done) return; done = true; clearTimeout(timer); cb(txt); }
+
+  if(pid === 'searxng'){
+    var tid = 'ws' + (++_wsSeq);
+    HTTP_GET_WAIT[tid] = function(ok, body){
+      if(!ok){ finish('（搜索失败：' + String(body || '').slice(0, 60) + '）'); return; }
+      finish(webSearchParse(pid, body) || '（没有搜到相关内容）');
+    };
+    var u = url + (url.indexOf('?') >= 0 ? '&' : '?')
+      + 'q=' + encodeURIComponent(q) + '&format=json&language=zh-CN';
+    if(!nat('httpGet', tid, u, '')){
+      delete HTTP_GET_WAIT[tid];
+      finish('（这台设备不支持联网搜索）');
+    }
+    return;
+  }
+  var body = (pid === 'tavily')
+    ? {query:q, max_results:max, search_depth:'basic', include_answer:true}
+    : {query:q, count:max, summary:true};
+  aiRequest(body, function(ok2, payload){
+    if(!ok2){ finish('（搜索失败：' + String(payload || '').slice(0, 60) + '）'); return; }
+    finish(webSearchParse(pid, payload) || '（没有搜到相关内容）');
+  }, null, {url:url, key:key, provider:pid});
+}
+function webSearchMany(qs, cb){
+  var c = webSearchCfg();
+  var max = Math.max(1, Math.min(10, parseInt(c.max, 10) || 5));
+  var out = [], left = qs.length;
+  if(!left){ cb('（没有可用的搜索词）'); return; }
+  qs.forEach(function(q, i){
+    webSearchOne(q, max, function(txt){
+      out[i] = '搜索词：' + q + '\n' + txt;
+      if(--left === 0) cb(out.join('\n\n'));
+    });
+  });
+}
+/* 配置页那一行的状态文字 */
+function renderWebSearchHint(){
+  var el = document.getElementById('webSearchHint');
+  if(!el) return;
+  var c = webSearchCfg();
+  el.textContent = !c.on ? '未开启'
+    : (webSearchReady() ? ('已开启 · ' + webSearchProvider().n) : '已开启，还缺 Key 或地址');
+}
+function renderWebSearchSheet(){
+  var c = webSearchCfg(), p = webSearchProvider();
+  return '<div class="sh"></div><h3>联网搜索</h3>'
+    + '<div class="li" style="margin-top:10px"><div class="ic">' + icSvg('globe', 17) + '</div>'
+    + '<div class="tx"><b>允许小径联网</b><small>需要最新信息时它自己搜</small></div>'
+    + '<div class="switch' + (c.on ? ' on' : '') + '" onclick="toggleWebSearch(this)"></div></div>'
+    + '<div class="h2" style="margin-top:10px">搜索服务</div>'
+    + '<div class="list">' + Object.keys(SEARCH_PROVIDERS).map(function(k){
+        var it = SEARCH_PROVIDERS[k];
+        return '<div class="li tap" onclick="setWebSearchProvider(\'' + k + '\')">'
+          + '<div class="tx"><b>' + esc(it.n) + '</b><small>' + (c.provider === k ? '当前使用' : '点选切换') + '</small></div>'
+          + '<div class="val">' + (c.provider === k ? '<span class="badge">✓</span>' : '') + '<span class="arrow">›</span></div></div>';
+      }).join('') + '</div>'
+    + '<div class="muted" style="font-size:11.5px;line-height:1.7;margin-top:8px">' + esc(p.hint) + '</div>'
+    + '<div class="h2" style="margin-top:12px">接口地址</div>'
+    + '<input class="f" id="wsUrl" value="' + esc(c.url || '') + '" placeholder="' + esc(p.url || 'https://你的实例/search') + '" '
+    + 'onchange="setWebSearchField(\'url\', this.value)" />'
+    + (c.provider === 'searxng' ? '' :
+        ('<div class="h2" style="margin-top:12px">API Key</div>'
+       + '<input class="f" id="wsKey" value="' + esc(c.key || '') + '" placeholder="' + esc(p.key || '') + '" '
+       + 'onchange="setWebSearchField(\'key\', this.value)" />'))
+    + '<div class="h2" style="margin-top:12px">每次取几条结果</div>'
+    + '<input class="f" id="wsMax" type="number" min="1" max="10" value="' + (c.max || 5) + '" '
+    + 'onchange="setWebSearchField(\'max\', this.value)" />'
+    + '<div class="row g6" style="margin-top:16px">'
+    + '<div class="btn ghost" onclick="closeSheet()">关闭</div></div>';
+}
+function toggleWebSearch(el){
+  var c = webSearchCfg();
+  c.on = !c.on;
+  if(el) el.classList.toggle('on', c.on);
+  save(); renderWebSearchHint(); renderAiState();
+  logIt('配置', '联网搜索 → ' + (c.on ? '开' : '关'));
+  toast(c.on ? (webSearchReady() ? '已开启联网搜索' : '已开启，记得填 Key 或地址') : '已关闭联网搜索');
+}
+function setWebSearchProvider(k){
+  if(!SEARCH_PROVIDERS[k]) return;
+  webSearchCfg().provider = k;
+  save();
+  renderWebSearchHint();
+  var host = document.getElementById('sheet');
+  if(host) host.innerHTML = renderWebSearchSheet();   /* 换服务商要重画：字段跟着变 */
+}
+function setWebSearchField(f, v){
+  var c = webSearchCfg();
+  if(f === 'max'){
+    var n = parseInt(v, 10);
+    c.max = Math.max(1, Math.min(10, isNaN(n) ? 5 : n));
+  } else {
+    c[f] = String(v || '').trim();
+  }
+  save(); renderWebSearchHint();
+}
+
 var AI_TOOLS = [
   /* —— 导航 —— */
   {k:'goTab', n:'切换主 Tab', a:'tab=home|chat|me'},
@@ -5785,7 +6111,9 @@ var AI_TOOLS = [
   {k:'clearChat', n:'清空当前对话并开新会话', a:''},
   {k:'testNotify', n:'发一条测试通知', a:''},
   {k:'backupNow', n:'导出学习数据备份', a:'group=study|ai|full'},
-  {k:'pushWidgets', n:'刷新桌面小组件', a:''}
+  {k:'pushWidgets', n:'刷新桌面小组件', a:''},
+  /* —— 联网（需用户在「AI 配置 → 联网搜索」里开启并填 Key） —— */
+  {k:'webSearch', n:'联网搜索（查最新资料 / 新闻 / 价格等）', a:'q=关键词'}
 ];
 
 /* 工具调用的格式铁律。
@@ -6245,6 +6573,12 @@ function runOneTool(name, args){
       return null;
     }
     if(name === 'importCourse'){ openImport(0); return '已打开导入课表'; }
+    /* webSearch 真正的工作在 send 里做（要先搜完再把结果喂回模型，
+       这是异步的，不能在这个同步函数里完成）。走到这里只有两种可能：
+       没开联网，或者当前入口（周总结之类）不走对话流程 —— 都要明确回话。 */
+    if(name === 'webSearch'){
+      return webSearchReady() ? '联网搜索要在对话页使用' : '还没开启联网搜索（我的 → AI 配置 → 联网搜索）';
+    }
   }catch(e){ return null; }
   return null;
 }
@@ -6693,7 +7027,7 @@ function renderCompanion(){
         return '<span class="badge ' + (c.proLevel===p[0]?'green':'plain') + '" style="cursor:pointer" onclick="cpSet(\'proLevel\',\'' + p[0] + '\')">' + p[1] + '</span>';
       }).join('')
     + '</div></div>'
-    + '<div class="li"><div class="ic" data-i="log"></div>'
+    + '<div class="li"><div class="ic" data-i="terminal"></div>'
     + '<div class="tx"><b>神秘代码</b><small>解锁调试</small></div></div>'
     + '<div class="li" style="padding-top:0;border:0">'
     + '<input class="f" id="cpCode" style="text-align:left" placeholder="…" oninput="cpCodeCheck(this)" />'
@@ -6920,7 +7254,7 @@ function renderReplyStyles(){
     box.innerHTML = Object.keys(REPLY_STYLES).map(function(k){
       var s = REPLY_STYLES[k];
       return '<div class="li tap" onclick="setReplyStyle(\'' + k + '\')">'
-        + '<div class="ic" data-i="sparkle"></div>'
+        + '<div class="ic" data-i="smile"></div>'
         + '<div class="tx"><b>' + s.n + '</b><small>' + s.t + '</small></div>'
         + '<div class="val"><span class="badge ' + (cur===k?'green':'plain') + '">' + (cur===k?'使用中':'选择') + '</span></div>'
         + '</div>';
@@ -7261,6 +7595,9 @@ function send(preset, opts){
   logIt('AI', '对话请求 · ' + S.models.chat + ' · ' + turns.length + ' 条消息');
 
   var attempt = 0;
+  /* 联网搜索只跑一轮：模型说「我要搜」→ 搜 → 再问一次，然后无论它还说什么都不再搜，
+     否则碰到爱反复搜的模型会无限循环烧 token。searched 用来在气泡上标来源。 */
+  var searchRounds = 0, searched = false;
   /* ---------- 流式：边收边显示 ----------
      delta 到达时先建一个临时气泡，正文/思考分别往里追加；
      等最终回调到了再交给 msgs + renderMsgs 统一渲染（临时气泡会被整体替换掉）。 */
@@ -7346,6 +7683,27 @@ function send(preset, opts){
         renderMsgs();
         return;
       }
+      /* 联网搜索：模型要求搜索时先搜再答（异步，多跑一轮）。
+         第一轮的「我来查一下」不落盘 —— 用户等的是结论，不是过程，
+         所以直接收掉临时气泡、挂回打字动画，搜完再让它正式开口。 */
+      var wsQ = webSearchQueries(out);
+      if(wsQ.length && searchRounds < 1 && webSearchReady()){
+        searchRounds++;
+        try{ if(thinkTick) clearInterval(thinkTick); }catch(e){}
+        if(live){ try{ live.box.remove(); }catch(e){} live = null; bufC = ''; bufR = ''; }
+        try{ box.appendChild(ty); scrollMsgs(); }catch(e){}
+        webSearchMany(wsQ, function(srchText){
+          searched = true;
+          turns = turns.concat([
+            {role:'assistant', content: String(out).slice(-1500)},
+            {role:'user', content: '【联网搜索结果】\n' + srchText
+              + '\n\n请基于上面的搜索结果回答我最初的问题。引用时给出标题或链接；'
+              + '结果里没有的信息不要编造，也不要说自己无法联网。'}
+          ]);
+          askOnce();
+        });
+        return;
+      }
       var toolMsg = runToolCall(out);
       var body = stripToolLine(out);
       try{ if(thinkTick) clearInterval(thinkTick); }catch(e){}
@@ -7353,6 +7711,7 @@ function send(preset, opts){
       if(memOn() && memItems().length) srcs.push('长期记忆');
       if(skillsAll().some(function(s){ return s.on !== false; })) srcs.push('技能');
       if(toolMsg) srcs.push('工具');
+      if(searched) srcs.push('联网搜索');
       if(meta && meta.reasoningModel) srcs.push('推理模型');
       /* meta.fallback = 正文为空、只能拿思考过程顶上：这时别再把同一段文字
          折叠成「思考过程」，否则同一内容出现两遍 */
@@ -8639,10 +8998,10 @@ function renderUsagePanel(){
     '<div class="li"><div class="ic" data-i="gauge"></div>'
     + '<div class="tx"><b>累计 Token</b><small>输入 ' + fmtWan(st.totalIn) + ' · 输出 ' + fmtWan(st.totalOut)
     + ' · 合计 ' + fmtWan(st.totalIn + st.totalOut) + '</small></div></div>'
-    + '<div class="li"><div class="ic" data-i="sparkle"></div>'
+    + '<div class="li"><div class="ic" data-i="coin"></div>'
     + '<div class="tx"><b>已消耗资费</b><small>按你填的单价计算</small></div>'
     + '<div class="val"><b style="font-size:14px">¥' + spent.toFixed(4) + '</b></div></div>'
-    + '<div class="li"><div class="ic" data-i="archive"></div>'
+    + '<div class="li"><div class="ic" data-i="coin"></div>'
     + '<div class="tx"><b>API 余额</b><small>填入后自动算剩余</small></div>'
     + '<div class="val"><span id="vBalance">' + (bal==null ? '未填写' : ('¥' + bal.toFixed(2))) + '</span></div></div>'
     + '<div class="li" style="padding-top:0;border:0">'
@@ -8776,7 +9135,7 @@ function saveModelPrice(){
   openSheet('usageprice');
 }
 function openAiConfig(){
-  renderModels(); renderAiState();
+  renderModels(); renderAiState(); renderWebSearchHint();
   renderSysPanel();
   renderTtsRow();
   var hint = document.getElementById('aiHubHint');
@@ -9090,7 +9449,7 @@ function renderOnboard(n){
       : (hasKey() ? '还差接口地址' : '未配置（AI 功能暂不可用）')));
     lines.push('课表：' + (hasCourseData() ? (courseCount() + ' 门课') : '暂未导入'));
     body = '<div class="list">' + lines.map(function(x){
-      return '<div class="li"><div class="ic">' + icSvg('log', 17) + '</div><div class="tx"><b>' + x + '</b></div></div>';
+      return '<div class="li"><div class="ic">' + icSvg('check', 17) + '</div><div class="tx"><b>' + x + '</b></div></div>';
     }).join('') + '</div>'
       + '<div class="note2">装到手机上后，课表会在每节课前发系统通知，'
       + '点一下就能开始记录这节的专注时长。放假的日子会按系统日历自动隐藏。</div>';
@@ -9888,24 +10247,11 @@ function impCycleWeek(i){
   var order = ['all','odd','even'];
   var idx = order.indexOf(c.w || 'all');
   c.w = order[(idx + 1) % 3];
-  if(impState.tab === 3 || document.getElementById('xaStatus')){
-    impPick(i); /* 重画 xiaoai 预览 */
-  } else {
-    renderImp(2);
-  }
+  renderImp(2);
 }
 function impPick(i){
   impState.picked[i] = !impState.picked[i];
-  var tab = impState.tab;
-  if(tab === 3){
-    var st = document.getElementById('xaStatus');
-    var list = impState.ocr || [];
-    if(st && list.length){
-      st.innerHTML = '<div class="card"><div style="font-size:13px;font-weight:700">解析到 ' + list.length + ' 门课</div>'
-        + '<div class="muted" style="font-size:11px;margin-top:6px">确认后点「导入所选」</div></div>'
-        + impOCRResultPreview(list);
-    }
-  } else renderImp(2);
+  renderImp(2);
 }
 function impSaveOCR(){
   var n = 0;
@@ -10458,163 +10804,6 @@ function renderSchedule(){
 }
 function openSchedule(){ openView('schedule'); renderSchedule(); }
 
-/* ---------- 小爱课表导入 ---------- */
-function xiaoaiUI(){
-  return '<div class="card" style="margin-bottom:12px">'
-    + '<div class="muted" style="font-size:11.5px;line-height:1.7">'
-    + '粘贴小爱课程表分享链接或 <b>linkToken</b>，自动拉取课表并导入。'
-    + '也可直接粘贴课程 JSON（含 name/day/time 等字段）。</div></div>'
-    + '<div class="field" style="margin-bottom:12px"><label>分享链接 / linkToken</label>'
-    + '<input class="f" id="xaLink" placeholder="https://…redirect.html?linkToken=… 或 token 本身" /></div>'
-    + '<div class="row g6" style="margin-bottom:14px">'
-    + '<div class="btn primary" style="flex:1" onclick="xiaoaiFetch()">拉取课表</div>'
-    + '</div>'
-    + '<div class="field" style="margin-bottom:12px"><label>或粘贴 JSON</label>'
-    + '<textarea class="f" id="xaJson" rows="6" style="font-size:12px" placeholder=\'{"courses":[{"name":"高数","day":0,"time":"08:00-09:40","weeks":"all"}]}\'></textarea></div>'
-    + '<div class="btn ghost" style="margin-bottom:12px" onclick="xiaoaiParseJson(document.getElementById(\'xaJson\').value)">解析粘贴的 JSON</div>'
-    + '<div id="xaStatus"></div>'
-    + '<div class="note2">说明：小米分享页需在浏览器打开时会跳到 i.ai.mi.com；接口若有变，可退回「识图」或「对话」导入。'
-    + '拉取走原生网络，成功后逐条勾选再导入。</div>';
-}
-function extractXiaoaiToken(raw){
-  var s = String(raw||'').trim();
-  var m = s.match(/linkToken=([^&#\s]+)/i);
-  if(m) return decodeURIComponent(m[1]);
-  if(/^[A-Za-z0-9+\/=_-]{8,}$/.test(s)) return s;
-  return '';
-}
-function xiaoaiFetch(){
-  var raw = (document.getElementById('xaLink')||{}).value || '';
-  var token = extractXiaoaiToken(raw);
-  var st = document.getElementById('xaStatus');
-  if(!token){ if(st) st.innerHTML = '<div class="empty" style="padding:16px"><div class="et">请粘贴链接或 token</div></div>'; return; }
-  if(st) st.innerHTML = '<div class="muted" style="font-size:12px">正在拉取…</div>';
-  logIt('AI', '小爱课表 · token 长度 ' + token.length);
-  /* 依次尝试几个可能的接口；失败则提示用 JSON / 识图 */
-  var urls = [
-    'https://i.ai.mi.com/aischedule/api/share/info?linkToken=' + encodeURIComponent(token),
-    'https://i.ai.mi.com/aischedule/v1/schedule/share/query?linkToken=' + encodeURIComponent(token),
-    'https://i.ai.mi.com/aischedule/api/v2/share/detail?linkToken=' + encodeURIComponent(token),
-    'https://i.ai.mi.com/h5/precache/ai-schedule/api/schedule/share?linkToken=' + encodeURIComponent(token)
-  ];
-  window.__xaTry = 0;
-  window.__xaToken = token;
-  tryXiaoaiUrl(0, urls);
-}
-function tryXiaoaiUrl(i, urls){
-  var st = document.getElementById('xaStatus');
-  if(i >= urls.length){
-    if(st) st.innerHTML = '<div class="empty" style="padding:18px 12px"><div class="ei">!</div>'
-      + '<div class="et">自动拉取未成功</div>'
-      + '<div class="ed">小爱接口可能已变更。请在手机浏览器打开分享页导出/复制 JSON，或改用识图导入。</div>'
-      + '<div class="act"><div class="btn ghost" onclick="impTab(2)">改识图</div></div></div>';
-    return;
-  }
-  window.__onHttpGet = function(id, ok, body){
-    if(id !== 'xa') return;
-    if(ok && body && body.length > 20){
-      var parsed = xiaoaiParsePayload(body);
-      if(parsed && parsed.length){
-        impState.ocr = parsed;
-        impState.picked = {};
-        parsed.forEach(function(_, k){ impState.picked[k] = true; });
-        renderImp(3);
-        if(st) st.innerHTML = '<div class="card"><div style="font-size:13px;font-weight:700">解析到 ' + parsed.length + ' 门课</div>'
-          + '<div class="muted" style="font-size:11px;margin-top:6px">确认后点「导入所选」</div></div>'
-          + impOCRResultPreview(parsed);
-        return;
-      }
-    }
-    if(st) st.innerHTML = '<div class="muted" style="font-size:11px;margin:6px 0">接口 ' + (i+1) + '/' + urls.length + ' 无效，试下一个…</div>';
-    tryXiaoaiUrl(i+1, urls);
-  };
-  if(NATIVE && NATIVE.httpGet){
-    var ok = nat('httpGet', 'xa', urls[i], 'https://i.ai.mi.com/');
-    if(ok) return;
-  }
-  tryXiaoaiUrl(i+1, urls);
-}
-function impOCRResultPreview(list){
-  var wName = function(w){ return w==='odd' ? '单周' : w==='even' ? '双周' : '每周'; };
-  return '<div class="list" style="margin-top:10px">' + list.map(function(c, i){
-    return '<div class="li" onclick="impPick(' + i + ')">'
-      + '<div class="ck2 ' + (impState.picked[i]?'on':'') + '"></div>'
-      + '<div class="tx" style="margin-left:2px"><b>' + esc(c.n) + '</b>'
-      + '<small>周' + DAYN[c.day] + ' ' + esc(c.t) + ' · ' + esc(c.loc||'') + '</small></div>'
-      + '<span class="badge plain" style="cursor:pointer;flex:none" '
-      + 'onclick="event.stopPropagation();impCycleWeek(' + i + ')">' + wName(c.w||'all') + '</span></div>';
-  }).join('') + '</div>'
-  + '<div class="row g6" style="margin-top:12px">'
-  + '<div class="btn primary" style="flex:1" onclick="impSaveOCR()">导入所选</div></div>';
-}
-function xiaoaiParseJson(text){
-  var st = document.getElementById('xaStatus');
-  var list = xiaoaiParsePayload(text);
-  if(!list.length){
-    if(st) st.innerHTML = '<div class="empty" style="padding:16px"><div class="et">没解析出课程</div>'
-      + '<div class="ed">请确认 JSON 含 courses 数组，或 name/day/time 字段。</div></div>';
-    return;
-  }
-  impState.ocr = list;
-  impState.picked = {};
-  list.forEach(function(_, k){ impState.picked[k] = true; });
-  if(st) st.innerHTML = '<div class="card"><div style="font-size:13px;font-weight:700">解析到 ' + list.length + ' 门课</div></div>'
-    + impOCRResultPreview(list);
-}
-function xiaoaiWeeksOf(x){
-  var w = x.weeks || x.week || x.weekType || x.zhouci || '';
-  if(w === 'odd' || w === 'even' || w === 'all') return w;
-  var s = String(w);
-  if(/单|奇|odd/i.test(s)) return 'odd';
-  if(/双|even/i.test(s)) return 'even';
-  if(x.odd === true || x.isOdd === true) return 'odd';
-  if(x.even === true || x.isEven === true) return 'even';
-  return 'all';
-}
-function xiaoaiParsePayload(payload){
-  var text = String(payload||'').trim();
-  if(!text) return [];
-  var j = null;
-  try{ j = JSON.parse(text); }catch(e){
-    var m = text.match(/\{[\s\S]*\}/);
-    if(m){ try{ j = JSON.parse(m[0]); }catch(_){} }
-  }
-  if(!j) return [];
-  var arr = j.courses || j.courseList || j.list || j.data || j.schedule || (Array.isArray(j) ? j : null);
-  if(j.data && !Array.isArray(arr) && j.data.courses) arr = j.data.courses;
-  if(j.result && j.result.courses) arr = j.result.courses;
-  if(!Array.isArray(arr)) arr = null;
-  if(!arr) return [];
-  var out = [];
-  arr.forEach(function(x){
-    if(!x || typeof x !== 'object') return;
-    var day = x.day != null ? x.day : x.weekday;
-    if(typeof day === 'string') day = DAYN.indexOf(String(day).replace(/[周星期]/g,''));
-    day = parseInt(day, 10);
-    if(day >= 1 && day <= 7) day = day - 1;
-    if(isNaN(day) || day < 0 || day > 6) return;
-    var t = String(x.time || x.period || (x.start + '-' + x.end) || x.t || '');
-    var m = t.match(/(\d{1,2})\s*[:：]\s*(\d{2})\s*[-–~至到]\s*(\d{1,2})\s*[:：]\s*(\d{2})/);
-    if(!m) return;
-    t = pad(m[1])+':'+m[2]+'-'+pad(m[3])+':'+m[4];
-    var name = String(x.name || x.courseName || x.course || x.title || x.n || '').trim();
-    if(!name) return;
-    var loc = String(x.location || x.room || x.place || x.loc || '').trim();
-    var teacher = String(x.teacher || x.teacherName || x.lecturer || '').trim();
-    out.push({
-      n: name,
-      day: day,
-      t: t,
-      loc: loc,
-      teacher: teacher,
-      c: 1,
-      w: xiaoaiWeeksOf(x),
-      conf: 'high'
-    });
-  });
-  return out;
-}
-
 /* ---------- 待办：列表只显示标题，点进详情编辑 ---------- */
 var todoCurId = null;
 function todoAddPrompt(){
@@ -10750,6 +10939,7 @@ function noteOpen(id){
   noteCurId = id; noteMode = 'edit'; renderNotes();
 }
 function noteBack(){
+  noteFullClose();
   noteMode = 'list'; noteCurId = null; renderNotes(); renderHomeTiles();
 }
 function noteDel(id){
@@ -10782,10 +10972,11 @@ function renderNotes(){
       return;
     }
     host.innerHTML = '<div class="list note-list">' + arr.map(function(n){
-      var prev = (n.body||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
+      /* 图片在预览里要留个痕，否则一篇「只有图」的笔记看着像空的 */
+      var prev = (n.body||'').replace(/<img\b[^>]*>/gi,' [图片] ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
       if(n.ink && !prev) prev = '[手写]';
       return '<div class="li tap" onclick="noteOpen(\'' + n.id + '\')">'
-        + '<div class="ic">' + icSvg('bookmark',16) + '</div>'
+        + '<div class="ic">' + icSvg('book',16) + '</div>'
         + '<div class="tx"><b>' + esc(n.title || '未命名') + '</b><small>' + esc(prev||'空笔记') + ' · ' + fmtNoteTime(n.at) + '</small></div>'
         + '<span class="arrow">›</span></div>';
     }).join('') + '</div>'
@@ -10797,12 +10988,15 @@ function renderNotes(){
   if(!n){ noteMode='list'; return renderNotes(); }
   if(title) title.textContent = '编辑笔记';
   host.innerHTML = ''
-    + '<input class="f" id="noteTitle" value="' + esc(n.title||'') + '" maxlength="40" placeholder="标题" />'
+    + '<div class="row between" style="align-items:center;gap:10px">'
+    + '<b style="font-size:15.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+    + esc(n.title || '未命名笔记') + '</b>'
+    + '<span class="muted" style="font-size:11px;flex:none">' + fmtNoteTime(n.at) + '</span></div>'
     + '<div class="note-toolbar" id="noteBar"></div>'
     + '<div id="noteTextWrap">'
-    + '<div class="note-body" id="noteBody" contenteditable="true" data-ph="写点什么…" '
-    + 'style="font-size:' + (n.fs||14) + 'px;min-height:220px" onmouseup="noteSyncSel()" ontouchend="noteSyncSel()"></div>'
-    + '<div class="muted" style="font-size:10.5px;margin-top:6px">可拖右下角扩大编辑区</div>'
+    + '<div class="note-prev" id="notePreview" data-ph="还没有内容，点下面按钮开始写" '
+    + 'onclick="noteFullEnter()">' + (n.body || '') + '</div>'
+    + '<div class="btn primary" style="margin-top:10px" onclick="noteFullEnter()">打开全屏编辑</div>'
     + '</div>'
     + '<div id="noteInkWrap" style="display:none;margin-top:8px">'
     + '<div class="row g6" style="align-items:center">'
@@ -10816,40 +11010,93 @@ function renderNotes(){
     + '</div>'
     + '<div class="row g6" style="margin-top:14px">'
     + '<div class="btn ghost" onclick="noteBack()">返回</div>'
+    + '<div class="btn ghost" onclick="noteOpenShare()">分享</div>'
     + '<div class="btn primary" onclick="noteSave()">保存</div>'
-    + '<div class="btn ghost" onclick="noteDel(\'' + n.id + '\')" style="flex:none">删除</div>'
+    + '<div class="btn danger" onclick="noteDel(\'' + n.id + '\')" style="flex:none">删除</div>'
     + '</div>';
-  var bd = document.getElementById('noteBody');
-  if(bd) bd.innerHTML = n.body || '';
-  renderNoteToolbar(n);
+  /* 全屏层常驻 DOM（只是 display:none），切笔记时必须重灌一次：
+     否则「打开 A → 返回 → 打开 B → 直接保存」会把 A 的内容写进 B。
+     重灌之后，即使不进全屏直接点保存，读到的也是这篇的内容。 */
+  syncNoteFull(n);
+  renderNoteToolbar(n); renderNoteTextBar(n);
   inkUpdatePreview();
-  var ti = document.getElementById('noteTitle');
-  if(ti) ti.addEventListener('input', function(){ n.title = ti.value; });
 }
 function noteFsIndex(fs){
   var i = NOTE_SIZES.indexOf(fs || 14);
   return i < 0 ? 1 : i;
 }
+/* 编辑页顶部：只放「文字 / 手写」开关与一句说明。
+   具体的排版工具在全屏编辑区底部（原来挂在这里，编辑区只有 220px 高，写不下东西）。 */
 function renderNoteToolbar(n){
   var bar = document.getElementById('noteBar');
   if(!bar) return;
   var mode = n.mode || 'text';
-  var fi = noteFsIndex(n.fs);
   bar.innerHTML = ''
     + '<div class="ntb ' + (mode==='text'?'on':'') + '" onclick="noteSetMode(\'text\')">文字</div>'
     + '<div class="ntb ' + (mode==='ink'?'on':'') + '" onclick="noteSetMode(\'ink\')">手写</div>'
-    + (mode==='text' ? (
-        '<div class="ntb mini" id="ntbBold" onclick="noteToggleWrap(\'b\')" title="加粗"><b>B</b></div>'
-      + '<div class="ntb mini" id="ntbItal" onclick="noteToggleWrap(\'i\')" title="斜体"><i>I</i></div>'
-      + '<div class="ntb mini" onclick="noteFmt(\'insertUnorderedList\')" title="分点">•</div>'
-      + '<div class="ntb mini" onclick="openSheet(\'tableform\')" title="表格">表</div>'
-      + '<div class="ntb mini" onclick="noteStepFs(-1)" title="缩小">A−</div>'
-      + '<div class="ntb mini on" title="字号档" style="min-width:36px">A' + (fi+1) + '</div>'
-      + '<div class="ntb mini" onclick="noteStepFs(1)" title="放大">A+</div>'
-      + NOTE_COLORS.slice(0,5).map(function(c){
-          return '<div class="ntb mini" title="颜色" onclick="noteColor(\'' + c + '\')" style="background:' + c + ';color:#fff;min-width:22px;padding:0;height:22px;border-radius:7px"></div>';
-        }).join('')
-    ) : '');
+    + '<span class="muted" style="font-size:10.5px;align-self:center;margin-left:2px">'
+    + (mode==='text' ? '全屏编辑，工具栏在底部' : '全屏手写，画完点「完成」回来') + '</span>';
+}
+/* 全屏文字编辑的底部工具栏 */
+function renderNoteTextBar(n){
+  var bar = document.getElementById('noteBarFull');
+  if(!bar) return;
+  var fi = noteFsIndex(n.fs);
+  bar.innerHTML = ''
+    + '<div class="ntb mini" id="ntbBold" onclick="noteToggleWrap(\'b\')" title="加粗"><b>B</b></div>'
+    + '<div class="ntb mini" id="ntbItal" onclick="noteToggleWrap(\'i\')" title="斜体"><i>I</i></div>'
+    + '<div class="ntb mini" onclick="noteFmt(\'insertUnorderedList\')" title="分点">•</div>'
+    + '<div class="ntb mini" onclick="notePickImg()" title="插入图片">图</div>'
+    + '<div class="ntb mini" onclick="openSheet(\'tableform\')" title="表格">表</div>'
+    + '<div class="ntb mini" onclick="noteStepFs(-1)" title="缩小">A−</div>'
+    + '<div class="ntb mini on" title="字号档" style="min-width:36px">A' + (fi+1) + '</div>'
+    + '<div class="ntb mini" onclick="noteStepFs(1)" title="放大">A+</div>'
+    + NOTE_COLORS.slice(0,5).map(function(c){
+        return '<div class="ntb mini" title="颜色" onclick="noteColor(\'' + c + '\')" style="background:' + c + ';color:#fff;min-width:22px;padding:0;height:22px;border-radius:7px"></div>';
+      }).join('');
+}
+/* 把笔记内容灌进全屏层的标题与正文 */
+function syncNoteFull(n){
+  var ti = document.getElementById('noteTitle');
+  var bd = document.getElementById('noteBody');
+  if(ti) ti.value = (n && n.title) || '';
+  if(bd){
+    bd.innerHTML = (n && n.body) || '';
+    bd.style.fontSize = ((n && n.fs) || 14) + 'px';
+  }
+}
+/* 把全屏层里改过的内容收回笔记对象 */
+function noteGrabFull(n){
+  if(!n) return n;
+  var ti = document.getElementById('noteTitle');
+  var bd = document.getElementById('noteBody');
+  if(ti) n.title = ti.value.trim() || '未命名笔记';
+  if(bd) n.body = bd.innerHTML;
+  n.at = Date.now();
+  return n;
+}
+function noteFullClose(){
+  var f = document.getElementById('noteFull');
+  if(f) f.classList.remove('show');
+  document.body.style.overflow = '';
+  closeSheet();
+}
+function noteFullEnter(){
+  var n = noteById(noteCurId); if(!n) return;
+  var f = document.getElementById('noteFull'); if(!f) return;
+  n.mode = 'text';
+  syncNoteFull(n);
+  renderNoteTextBar(n);
+  f.classList.add('show');
+  document.body.style.overflow = 'hidden';
+  var bd = document.getElementById('noteBody');
+  if(bd){ noteFocusEnd(bd); }
+}
+function noteFullExit(){
+  var n = noteById(noteCurId);
+  if(n) noteGrabFull(n);
+  noteFullClose();
+  renderNotes();
 }
 function noteStepFs(dir){
   var n = noteById(noteCurId); if(!n) return;
@@ -10891,7 +11138,7 @@ function noteSetSize(s){
   n.fs = s;
   var b = document.getElementById('noteBody');
   if(b) b.style.fontSize = s + 'px';
-  renderNoteToolbar(n);
+  renderNoteToolbar(n); renderNoteTextBar(n);   /* 两个工具栏都要跟着刷新 */
 }
 /* execCommand 在 WebView 里 bold/italic 经常静默失败，改成手动包/解标签 */
 function noteToggleWrap(tag){
@@ -10979,15 +11226,323 @@ function tableStep(k, d){
 }
 function noteSave(){
   var n = noteById(noteCurId); if(!n) return;
+  var inkOn = document.getElementById('inkFull') && document.getElementById('inkFull').classList.contains('show');
+  /* 手写内容由手写模块自己落盘（笔迹 + 成品图），这里只在全屏还开着时兜一次底 */
+  if(inkOn) inkSaveToNote();
+  noteGrabFull(n);
+  noteFullClose();
+  save();
+  toast('已保存');
+  noteBack();          /* 保存后回笔记总览：原来只存不动，用户看不出到底存没存 */
+}
+
+/* ---------- 笔记：插入图片 ----------
+   图片以 dataURL 直接内嵌进正文：单文件应用不依赖外部文件，备份/分享也能一起带走。
+   代价是体积，所以**先压缩再插**（长边 1080、JPEG 0.82）——
+   一张手机照片压完通常 100~200 KB，localStorage 放得下十几张；
+   不压的话一张就 2~4 MB，直接撑爆存储。
+   同一张图重复选会提示已存在，避免误触把同一张插两遍。 */
+var NOTE_IMG_MAX = 1080, NOTE_IMG_Q = 0.82;
+
+function noteSyncEdit(){
+  var n = noteById(noteCurId); if(!n) return;
   var ti = document.getElementById('noteTitle');
   var bd = document.getElementById('noteBody');
-  if(ti) n.title = ti.value.trim() || '未命名笔记';
+  if(ti) n.title = (ti.value.trim() || '未命名笔记');
   if(bd) n.body = bd.innerHTML;
-  var fullOn = document.getElementById('inkFull') && document.getElementById('inkFull').classList.contains('show');
-  /* 手写内容由手写模块自己落盘（笔迹 + 成品图），这里只在全屏还开着时兜一次底 */
-  if(fullOn) inkSaveToNote();
   n.at = Date.now();
   save(); renderHomeTiles();
+}
+function noteFocusEnd(bd){
+  try{
+    bd.focus();
+    var r = document.createRange();
+    r.selectNodeContents(bd);
+    r.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+  }catch(e){}
+}
+function noteInsertImg(dataUrl){
+  var n = noteById(noteCurId);
+  var bd = document.getElementById('noteBody');
+  if(!n || !bd){ toast('先打开一篇笔记'); return; }
+  if(String(bd.innerHTML).indexOf(dataUrl) >= 0){ toast('这张图已经在笔记里了'); return; }
+  var html = '<img src="' + dataUrl + '"><div><br></div>';
+  noteFocusEnd(bd);
+  var done = false;
+  try{ done = document.execCommand('insertHTML', false, html); }catch(e){ done = false; }
+  if(!done) bd.innerHTML += html;          /* 个别 WebView 不认 insertHTML，退化成追加 */
+  noteSyncEdit();
+  toast('已插入图片');
+}
+function notePickImg(){
+  /* 和相机弹层同一套做法：临时挂一个透明 input 到 body 上再点，
+     display:none 的 input 在很多 WebView 里唤不起选择器。 */
+  var old = document.getElementById('noteImgInput');
+  if(old) old.remove();
+  var el = document.createElement('input');
+  el.type = 'file';
+  el.id = 'noteImgInput';
+  el.accept = 'image/*';
+  el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;z-index:-1';
+  el.onchange = function(){
+    var f = el.files && el.files[0];
+    if(f){
+      var fr = new FileReader();
+      fr.onload = function(){
+        compressImg(fr.result, NOTE_IMG_MAX, NOTE_IMG_Q, function(small){
+          try{ noteInsertImg(small); }catch(e){ toast('这张图插不进去，换一张试试'); }
+        });
+      };
+      fr.onerror = function(){ toast('图片读不出来，换一张试试'); };
+      fr.readAsDataURL(f);
+    }
+    setTimeout(function(){ try{ el.remove(); }catch(e){} }, 800);
+  };
+  document.body.appendChild(el);
+  el.click();
+}
+
+/* ---------- 笔记：分享与导出 ----------
+   两条规矩：
+   1. 正文里有图片或手写时**只能导出图片** —— 文字导出会把这些整块丢掉，
+      与其给一份残缺的文本，不如直接不给这个选项并说明原因。
+   2. 真机上导出与分享都必须走原生：WebView 里 <a download> + blob 下载不下来，
+      分享则是系统的 ACTION_SEND。见 nat('saveText' / 'saveImage' / 'shareText' / 'shareImage')。 */
+function noteHasImg(n){ return /<img\b/i.test(String((n && n.body) || '')); }
+function noteHasInk(n){ return !!(n && n.ink); }
+function noteHasRich(n){ return noteHasImg(n) || noteHasInk(n); }
+
+function noteOpenShare(){
+  var n = noteById(noteCurId);
+  if(!n){ toast('先打开一篇笔记'); return; }
+  noteSyncEdit();                 /* 分享的是编辑区里当前的内容，不是上次保存的 */
+  openSheet('noteshare');
+}
+function noteFileBase(n){
+  var t = String((n && n.title) || '笔记').replace(/[\\/:*?"<>|\r\n\t]/g, '').trim().slice(0, 20);
+  return '学径-' + (t || '笔记');
+}
+/* HTML → 纯文本：块级标签断行、图片留个占位，实体还原 */
+function notePlainText(n){
+  if(!n) return '';
+  var t = String(n.body || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6]|tr|table|ul|ol|blockquote)>/gi, '\n')
+    .replace(/<img\b[^>]*>/gi, '[图片]')
+    .replace(/<[^>]+>/g, '');
+  t = t.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return (n.title || '未命名笔记') + '\n' + fmtNoteTime(n.at)
+    + (n.ink ? '\n[含手写内容]' : '') + '\n\n' + t + '\n';
+}
+function renderNoteShareSheet(){
+  var n = noteById(noteCurId);
+  if(!n){
+    return '<div class="sh"></div><h3>分享笔记</h3>'
+      + '<div class="muted" style="font-size:12px;margin-top:10px">没有打开的笔记。</div>'
+      + '<div class="btn ghost" style="margin-top:14px" onclick="closeSheet()">关闭</div>';
+  }
+  var rich = noteHasRich(n);
+  var why = '这篇笔记里有' + (noteHasInk(n) ? '手写' : '') + (noteHasImg(n) ? (noteHasInk(n) ? '和图片' : '图片') : '')
+    + '，导出成文字会丢掉它们，所以只能导出为图片。';
+  return '<div class="sh"></div><h3>分享笔记</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:6px;overflow-wrap:anywhere">'
+    + esc(n.title || '未命名笔记') + '</div>'
+    + (rich ? ('<div class="card" style="margin-top:12px"><div class="muted" style="font-size:11.5px;line-height:1.7">'
+        + esc(why) + '</div></div>') : '')
+    + '<div class="list" style="margin-top:12px">'
+    + (rich ? '' :
+        ('<div class="li tap" onclick="noteDoExport(\'text\')"><div class="ic">' + icSvg('download', 17) + '</div>'
+       + '<div class="tx"><b>导出为文字</b><small>.txt 文件，存到手机任意位置</small></div>'
+       + '<div class="val"><span class="arrow">›</span></div></div>'))
+    + '<div class="li tap" onclick="noteDoExport(\'image\')"><div class="ic">' + icSvg('image', 17) + '</div>'
+    + '<div class="tx"><b>导出为图片</b><small>整篇排成一张长图</small></div>'
+    + '<div class="val"><span class="arrow">›</span></div></div>'
+    + (rich ? '' :
+        ('<div class="li tap" onclick="noteDoShare(\'text\')"><div class="ic">' + icSvg('share', 17) + '</div>'
+       + '<div class="tx"><b>分享文字</b><small>直接发给微信 / QQ</small></div>'
+       + '<div class="val"><span class="arrow">›</span></div></div>'))
+    + '<div class="li tap" onclick="noteDoShare(\'image\')"><div class="ic">' + icSvg('share', 17) + '</div>'
+    + '<div class="tx"><b>分享图片</b><small>直接发给微信 / QQ</small></div>'
+    + '<div class="val"><span class="arrow">›</span></div></div>'
+    + '</div>'
+    + '<div class="btn ghost" style="margin-top:14px" onclick="closeSheet()">取消</div>';
+}
+function noteNoNative(){
+  toast('这个环境不支持保存文件，装到手机上再试');
+}
+function noteDoExport(kind){
+  var n = noteById(noteCurId);
+  if(!n) return;
+  if(kind === 'text'){
+    if(noteHasRich(n)){ toast('有图片的笔记只能导出为图片'); return; }
+    closeSheet();
+    if(!nat('saveText', noteFileBase(n) + '.txt', notePlainText(n))) noteNoNative();
+    return;
+  }
+  closeSheet();
+  toast('正在生成图片…');
+  noteRenderPng(n, function(dataUrl){
+    if(!dataUrl){ toast('图片生成失败，换个方式试试'); return; }
+    if(!nat('saveImage', noteFileBase(n) + '.png', dataUrl)) noteNoNative();
+  });
+}
+function noteDoShare(kind){
+  var n = noteById(noteCurId);
+  if(!n) return;
+  if(kind === 'text'){
+    if(noteHasRich(n)){ toast('有图片的笔记只能分享为图片'); return; }
+    closeSheet();
+    if(!nat('shareText', notePlainText(n))) noteNoNative();
+    return;
+  }
+  closeSheet();
+  toast('正在生成图片…');
+  noteRenderPng(n, function(dataUrl){
+    if(!dataUrl){ toast('图片生成失败，换个方式试试'); return; }
+    if(!nat('shareImage', noteFileBase(n) + '.png', dataUrl)) noteNoNative();
+  });
+}
+/* canvas 折行：中文逐字断，英文尽量在空格处断 */
+function noteWrapText(c, text, maxW){
+  var out = [], cur = '';
+  for(var i = 0; i < text.length; i++){
+    var ch = text.charAt(i);
+    if(cur && c.measureText(cur + ch).width > maxW){
+      var cut = -1;
+      if(ch !== ' ' && /[A-Za-z0-9]/.test(ch)) cut = cur.lastIndexOf(' ');
+      if(cut > 0){ out.push(cur.slice(0, cut)); cur = cur.slice(cut + 1) + ch; }
+      else { out.push(cur); cur = ch; }
+    } else cur += ch;
+  }
+  if(cur) out.push(cur);
+  return out.length ? out : [''];
+}
+function noteBlockChild(el){
+  for(var i = 0; i < el.children.length; i++){
+    var t = (el.children[i].tagName || '').toLowerCase();
+    if(t === 'div' || t === 'p' || t === 'ul' || t === 'ol' || t === 'table' || t === 'img'
+       || t === 'h1' || t === 'h2' || t === 'h3' || t === 'tr') return true;
+  }
+  return false;
+}
+/* 整篇笔记 → PNG dataURL。
+   离屏 DOM 负责排版（量出每块的真实位置与宽度），canvas 负责落笔：
+   文字按 computed style 自己折行画，图片直接 drawImage，表格重画边框。 */
+function noteRenderPng(n, cb){
+  var W = 760, PAD = 34, SCALE = 2;
+  var FONT = '-apple-system,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif';
+  var host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-99999px;top:0;width:' + W + 'px;background:#fff;color:#14161c;'
+    + 'font-family:' + FONT + ';font-size:15px;line-height:1.75;padding:' + PAD + 'px;box-sizing:border-box';
+  host.innerHTML = '<div class="xj-t" style="font-size:20px;font-weight:700;line-height:1.4">'
+      + esc(n.title || '未命名笔记') + '</div>'
+    + '<div class="xj-m" style="font-size:12px;color:#8a8f9c;margin:6px 0 18px">'
+      + esc(fmtNoteTime(n.at)) + ' · 学径</div>'
+    + '<div class="xj-b">' + (n.body || '') + '</div>';
+  document.body.appendChild(host);
+
+  /* 内容样式铺平：导出图不该跟着暗色主题变 */
+  var all = host.querySelectorAll('.xj-b *');
+  for(var i = 0; i < all.length; i++){
+    var e = all[i], tg = (e.tagName || '').toLowerCase();
+    if(tg === 'img'){
+      e.style.maxWidth = '100%'; e.style.height = 'auto'; e.style.display = 'block';
+      e.style.margin = '10px 0'; e.style.borderRadius = '10px';
+    } else if(tg === 'table'){
+      e.style.borderCollapse = 'collapse'; e.style.width = '100%'; e.style.margin = '8px 0';
+    } else if(tg === 'td' || tg === 'th'){
+      e.style.border = '1px solid #dfe2ea'; e.style.padding = '6px 8px'; e.style.fontSize = '13px';
+    } else if(tg === 'ul' || tg === 'ol'){
+      e.style.paddingLeft = '1.4em'; e.style.margin = '6px 0';
+    } else if(e.style.color === ''){ /* 交给 computed style */ }
+  }
+
+  var imgs = [].slice.call(host.querySelectorAll('img'));
+  var wait = imgs.length, fired = false;
+  function go(){
+    if(fired) return;
+    fired = true;
+    setTimeout(paint, 40);        /* 等一帧，让布局稳定 */
+  }
+  function tick(){ if(--wait <= 0) go(); }
+  if(!imgs.length) go();
+  else imgs.forEach(function(im){
+    if(im.complete) tick();
+    else { im.onload = tick; im.onerror = tick; }
+  });
+
+  function face(cs){
+    var fs = parseFloat(cs.fontSize) || 15;
+    return (cs.fontWeight || '400') + ' ' + fs + 'px ' + FONT;
+  }
+  function paintText(c, el, x, y, tag){
+    var txt = String(el.textContent || '').replace(/\s+/g, ' ').trim();
+    if(!txt) return;
+    var cs = window.getComputedStyle(el);
+    var fs = parseFloat(cs.fontSize) || 15;
+    var lh = parseFloat(cs.lineHeight);
+    if(!(lh > 0)) lh = fs * 1.7;
+    c.font = face(cs);
+    c.fillStyle = cs.color || '#14161c';
+    c.textBaseline = 'top';
+    var prefix = (tag === 'li') ? '· ' : '';
+    var maxW = Math.max(24, el.getBoundingClientRect().width - 2);
+    var lines = noteWrapText(c, prefix + txt, maxW);
+    var yy = y + Math.max(0, (lh - fs) / 2);
+    for(var k = 0; k < lines.length; k++){ c.fillText(lines[k], x, yy); yy += lh; }
+  }
+  function paintTable(c, tbl, hostRect){
+    var cells = tbl.querySelectorAll('th,td');
+    for(var j = 0; j < cells.length; j++){
+      var cl = cells[j], r = cl.getBoundingClientRect();
+      var cx = r.left - hostRect.left, cy = r.top - hostRect.top;
+      c.strokeStyle = '#dfe2ea'; c.lineWidth = 1;
+      c.strokeRect(cx + 0.5, cy + 0.5, r.width - 1, r.height - 1);
+      var cs2 = window.getComputedStyle(cl);
+      var fs2 = parseFloat(cs2.fontSize) || 13;
+      c.font = face(cs2);
+      c.fillStyle = cs2.color || '#14161c';
+      c.textBaseline = 'top';
+      var txt2 = String(cl.textContent || '').replace(/\s+/g, ' ').trim();
+      var lines2 = noteWrapText(c, txt2, Math.max(10, r.width - 14));
+      var yy2 = cy + 5;
+      for(var m = 0; m < lines2.length; m++){ c.fillText(lines2[m], cx + 7, yy2); yy2 += fs2 * 1.5; }
+    }
+  }
+  function paint(){
+    var H = Math.max(60, Math.ceil(host.offsetHeight));
+    var cv = document.createElement('canvas');
+    cv.width = W * SCALE; cv.height = H * SCALE;
+    var c = cv.getContext('2d');
+    c.scale(SCALE, SCALE);
+    c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H);
+    var hostRect = host.getBoundingClientRect();
+    var items = [];
+    (function walk(el){
+      for(var k = 0; k < el.children.length; k++){
+        var ch = el.children[k], tg = (ch.tagName || '').toLowerCase();
+        if(tg === 'img' || tg === 'table'){ items.push(ch); continue; }
+        if(noteBlockChild(ch)) walk(ch);
+        else items.push(ch);
+      }
+    })(host);
+    items.sort(function(a, b){ return a.getBoundingClientRect().top - b.getBoundingClientRect().top; });
+    for(var q = 0; q < items.length; q++){
+      var el2 = items[q], r2 = el2.getBoundingClientRect();
+      var x2 = r2.left - hostRect.left, y2 = r2.top - hostRect.top;
+      var tg2 = (el2.tagName || '').toLowerCase();
+      if(tg2 === 'img'){ try{ c.drawImage(el2, x2, y2, r2.width, r2.height); }catch(e){} continue; }
+      if(tg2 === 'table'){ paintTable(c, el2, hostRect); continue; }
+      paintText(c, el2, x2, y2, tg2);
+    }
+    var out = '';
+    try{ out = cv.toDataURL('image/png'); }catch(e){ out = ''; }
+    try{ host.remove(); }catch(e){}
+    cb(out);
+  }
 }
 /* ============================================================
    全屏手写（v1.1 重写：三种压感笔刷 + 双橡皮 + 按需调节栏）
@@ -11906,7 +12461,7 @@ function inkSheetHtml(){
     + '</div>'
     + '<div class="list" style="margin-top:12px">'
     + '<div class="li">'
-    + '<div class="ic" data-i="gauge"></div>'
+    + '<div class="ic" data-i="pressure"></div>'
     + '<div class="tx"><b>压感</b><small>手写笔按压力度控制粗细；用手指时按书写速度模拟</small></div>'
     + '<div class="switch' + (noteInk.pressure ? ' on' : '') + '" onclick="inkTogglePressure(this)"></div>'
     + '</div>'
@@ -11918,7 +12473,7 @@ function inkSheetHtml(){
    换主题时已有笔记不会被改花（白纸黑字的笔记切到深色模式还是看得见）。 */
 function inkPaperRow(){
   return '<div class="li" style="gap:10px">'
-    + '<div class="ic" data-i="moon"></div>'
+    + '<div class="ic" data-i="paper"></div>'
     + '<div class="tx"><b>纸张</b><small>' + (inkDark ? '深色纸配浅色墨' : '白纸配深色墨') + '</small></div>'
     + '<div class="seg two" style="flex:none;width:142px;height:32px">'
     + '<i class="segThumb" style="height:26px;transform:translateX(' + (inkDark ? '100%' : '0') + ')"></i>'
@@ -12306,6 +12861,22 @@ applyIslandPref();
 try{ renderHomeTiles(); }catch(e){}
 try{ pushWidgetsToNative(); }catch(e){}
 </script>
+  <!-- 全屏文字笔记：结构对齐全屏手写，工具栏在底部 -->
+  <div id="noteFull">
+    <div class="viewhead">
+      <div class="icon-btn" onclick="noteFullExit()">‹</div>
+      <input class="f" id="noteTitle" maxlength="40" placeholder="标题" />
+      <div class="ikgrp">
+        <button class="ibt on" id="noteDoneBtn" type="button">完成</button>
+      </div>
+    </div>
+    <div id="noteFullBody">
+      <div class="note-body" id="noteBody" contenteditable="true" data-ph="写点什么…"
+        onmouseup="noteSyncSel()" ontouchend="noteSyncSel()"></div>
+    </div>
+    <div id="noteBarFull"></div>
+  </div>
+
   <!-- 全屏手写 -->
   <div id="inkFull">
     <div class="viewhead">
