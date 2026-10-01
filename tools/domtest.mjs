@@ -599,12 +599,14 @@ const ASSERTS = String.raw`
       info: '未达限="" ' + (notBlocked === '') + ' 拦=' + /已达用量上限/.test(blocked)
         + ' warned=' + warned + ' stopped=' + stopped + ' 面板=' + panelOk };
   });
-  T('关于页版本号已到 v0.1.1', function(){
+  T('关于页与我的页版本号与 build.gradle 一致（' + window.__EXPECT_VER__ + '）', function(){
+    var want = window.__EXPECT_VER__;
     var hero = document.querySelector('#view-about .about-ver');
     var me = document.getElementById('page-me');
-    var ok = !!hero && /v0\.1\.1/.test(hero.textContent) && APP_VER === 'v0.1.1'
-      && !!me && /v0\.1\.1/.test(me.textContent);
-    return { ok: ok, info: 'hero=' + (hero ? hero.textContent.trim() : 'MISSING') + ' APP_VER=' + APP_VER };
+    var ok = !!want && !!hero && hero.textContent.indexOf(want) >= 0 && APP_VER === want
+      && !!me && me.textContent.indexOf(want) >= 0;
+    return { ok: ok, info: 'hero=' + (hero ? hero.textContent.trim() : 'MISSING')
+      + ' APP_VER=' + APP_VER + ' 期望=' + want + ' 我的页=' + (!!me && me.textContent.indexOf(want) >= 0) };
   });
 
   // 放在最后：这条会触发一次异步（无 AI 时的本地兜底），别影响前面的用例
@@ -672,13 +674,60 @@ const ASSERTS = String.raw`
       info: '头像=' + hasImg + ' 上岛逻辑=' + hasLogic + ' 寄语=' + hasMsg };
   });
 
+  // ---------- 回归：模型把工具协议裹成 <TOOL>…</TOOL> 标签时，标签不能落进参数值 ----------
+  T('TOOL 标签不落进工具参数（假日名不能是「国庆</TOOL>」）', function(){
+    var snap = snapState();
+    var out = '', err = '';
+    try{
+      out = String(runToolCall('<TOOL>TOOL:addHoliday|from=2026-10-01|to=2026-10-07|name=国庆</TOOL>') || '');
+    }catch(e){ err = String(e && (e.message || e)); }
+    var hit = null;
+    holidayAll().forEach(function(r){ if(r && r.from === '2026-10-01' && r.src === 'user') hit = r; });
+    var nm = hit ? String(hit.name) : '(未添加)';
+    var noTag = nm.indexOf('<') < 0 && nm.indexOf('>') < 0;
+    var cleanOut = out.indexOf('<') < 0 && out.indexOf('>') < 0;
+    restoreState(snap);
+    return { ok: noTag && cleanOut && /国庆/.test(nm),
+      info: 'name=' + nm + ' 回执=' + out.slice(0, 36) + (err ? ' ERR=' + err : '') };
+  });
+
+  // ---------- 回归：放假当天的「今日课程」也要隐藏（以前只有完整课表隐藏了） ----------
+  T('放假时主页今日课程隐藏并提示放假', function(){
+    var snap = snapState();
+    var ti = todayI;
+    var dk = dateKeyForDayIdx(ti, weekNo(new Date()));
+    S.prefs.holidayMode = true;
+    S.courses[ti] = [{ t:'08:00-09:40', n:'__假期测试课__', loc:'测试楼', w:'all', c:0, p:'normal' }];
+    if(!Array.isArray(S.holidayRanges)) S.holidayRanges = [];
+    S.holidayRanges.push({ id:'u__test__', from:dk, to:dk, name:'__测试假__', src:'user' });
+    holidayInvalidate();
+    selIdx = ti;
+    renderCourses();
+    var txt = String((document.getElementById('courses') || {}).textContent || '').replace(/\s+/g, ' ');
+    var hid = txt.indexOf('__假期测试课__') < 0;
+    var say = txt.indexOf('__测试假__') >= 0;
+    restoreState(snap);
+    holidayInvalidate();
+    selIdx = ti; renderCourses(); renderWeek();
+    return { ok: hid && say, info: '课已隐藏=' + hid + ' 显示放假=' + say + ' | ' + txt.slice(0, 34) };
+  });
+
   return JSON.stringify(R);
 })()
 `;
 
+// 期望版本号从 build.gradle 读，断言里不写死；发版只需改 build.gradle 与 index.html
+let EXPECT_VER = '';
+try {
+  const gradle = fs.readFileSync(path.join(root, 'android', 'app', 'build.gradle'), 'utf8');
+  const mv = /versionName\s+"([^"]+)"/.exec(gradle);
+  if (mv) EXPECT_VER = 'v' + mv[1];
+} catch (e) {}
+if (!EXPECT_VER) { console.error('读不到 android/app/build.gradle 的 versionName'); process.exit(1); }
+
 let html = fs.readFileSync(SRC, 'utf8');
 if (!/<\/body>/.test(html)) { console.error('index.html 里没有 </body>'); process.exit(1); }
-html = html.replace(/<\/body>/, '\n<script>\nwindow.__ASSERTSRC__ = ' + JSON.stringify(ASSERTS) + ';\n</script>\n</body>');
+html = html.replace(/<\/body>/, '\n<script>\nwindow.__ASSERTSRC__ = ' + JSON.stringify(ASSERTS) + ';\nwindow.__EXPECT_VER__ = ' + JSON.stringify(EXPECT_VER) + ';\n</script>\n</body>');
 fs.writeFileSync(path.join(root, 'tools', '_domtest.html'), html, 'utf8');
 
 const server = http.createServer((req, res) => {

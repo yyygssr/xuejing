@@ -1349,7 +1349,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.1 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.2 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1549,7 +1549,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.1.1 · 开源版</div>
+        <div class="about-ver">v0.1.2 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1808,7 +1808,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.1.1';
+var APP_VER = 'v0.1.2';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -4358,7 +4358,9 @@ function renderCourses(){
   var day = selIdx;
   var all = courses(day);
   var wno = weekNo(new Date());
-  var list = all.filter(function(c){ return courseShouldShow(c, wno); });
+  /* 必须走 coursesAt：放假当天的课由它整条过滤。
+     以前这里自己 filter(all)，于是完整课表显示「放假」、今日课程照常上课 —— 两边打架。 */
+  var list = coursesAt(day, wno);
   document.getElementById('daylabel').textContent = selIdx===todayI ? '今日课程' : ('周' + DAYN[selIdx] + '课程');
   var box = document.getElementById('courses');
   if(!hasCourseData()){
@@ -4370,6 +4372,16 @@ function renderCourses(){
     return;
   }
   if(!list.length){
+    /* 放假导致的「空」要和「这周没排课」区分开，否则会显示成「本周没轮到」 */
+    var holN = isHolidayDay(day, wno) ? (holidayOn(dateKeyForDayIdx(day, wno)) || '节假日') : '';
+    if(holN){
+      box.innerHTML = '<div class="empty">'
+        + '<div class="ei">假</div>'
+        + '<div class="et">' + esc(holN) + ' · 放假中</div>'
+        + '<div class="ed">这天的课按节假日隐藏了，假期结束后自动恢复。</div>'
+        + '<div class="act"><div class="btn ghost" onclick="openSchedule()" style="flex:none">看完整课表</div></div></div>';
+      return;
+    }
     var hidden = all.length;
     box.innerHTML = '<div class="empty">'
       + '<div class="ei">' + (hidden ? '周' : '空') + '</div>'
@@ -5797,6 +5809,14 @@ function feedbackBlock(){
     return '· ' + (x.vote==='up'?'点赞':'点踩') + '：' + String(x.a||'').slice(0,60) + (x.q ? ('（问：'+String(x.q).slice(0,30)+'）') : '');
   }).join('\n') + '\n';
 }
+/* 模型常把工具协议裹成标签形状：<TOOL>TOOL:addHoliday|...|name=国庆</TOOL>
+   —— 标签会粘在最后一个参数值上，name 就成了「国庆</TOOL>」，既存进数据又显示给用户。
+   各家写法不一（<TOOL> / <tool_call> / <function_call>），一次覆盖常见的几种，
+   所有工具的参数值统一过一遍。 */
+var TOOL_TAG_RE = /<\/?\s*(?:tool|tools|tool_call|tool_calls|function_call|function|invoke)\s*>/gi;
+function stripToolTags(v){
+  return String(v == null ? '' : v).replace(TOOL_TAG_RE, '').trim();
+}
 function runToolCall(text){
   if(!text) return null;
   var re = /TOOL\s*:\s*([a-zA-Z]+)((?:\|[^\n]*)?)/g;
@@ -5806,7 +5826,7 @@ function runToolCall(text){
     String(mm[2]||'').split('|').forEach(function(p){
       if(!p) return;
       var i = p.indexOf('=');
-      if(i > 0) args[p.slice(0,i).trim()] = p.slice(i+1).trim();
+      if(i > 0) args[p.slice(0,i).trim()] = stripToolTags(p.slice(i+1));
     });
     hits.push({name: mm[1], args: args});
     if(hits.length >= 8) break; /* 防止模型刷屏 */
@@ -6217,6 +6237,8 @@ function stripToolLine(s){
   t = t.replace(/\n?^[ \t]*(?:[-*>+]|#{1,6}|\d+[.)])?[ \t]*`{0,3}[ \t]*TOOL[ \t]*:[^\n]*$/gim, '');
   /* 兜底：工具说明夹在句子中间、或被写成小写 tool: 的情况 */
   t = t.replace(/\bTOOL\s*:[^\n]*/gi, '');
+  /* 上一行只吃掉了 TOOL: 那一行，模型额外裹的 <tool_call> 之类会孤零零留在正文里 */
+  t = t.replace(TOOL_TAG_RE, '');
   t = t.replace(/```[ \t]*\n[ \t]*```/g, '');
   t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
   return t.trim();
