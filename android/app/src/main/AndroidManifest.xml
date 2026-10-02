@@ -38,6 +38,13 @@
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
         </intent>
+        <!-- 语音引擎（TTS）。Android 11 起有「包可见性过滤」：
+             不显式声明这个 action，queryIntentServices(TTS_SERVICE) 会返回空列表，
+             于是「设备明明装了小爱语音引擎，app 却报没有引擎」。
+             这是 TTS 适配最常踩的一个坑，必须写在这里。 -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
     </queries>
 
     <application

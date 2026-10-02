@@ -26,7 +26,11 @@ public class ClassAlarmReceiver extends BroadcastReceiver {
            而下一次排程要等用户重开 App —— 表现就是这门课根本不提醒。
            现在闹钟每周照排，不匹配的这一周静默跳过（下面仍会重排下周）。 */
         boolean thisWeek = ReminderScheduler.weekMatchesNow(context, w == null ? "all" : w);
-        if (thisWeek) {
+        /* 节假日同理，在**触发时**判断：放假日静默跳过（下面仍会重排下一周）。
+           与页面 dayInfo() 的规则必须一致 —— 历史上页面改了、这里没改，
+           结果放假照常弹通知。改任何一边都要看另一边，tools/audit.mjs 会做字段对账。 */
+        boolean skipHoliday = ReminderScheduler.isHolidayNow(context);
+        if (thisWeek && !skipHoliday) {
             /* before==0 表示正点「上课」闹钟；>0 是课前提醒 */
             if (isStart && before <= 0) {
                 String timeOnly = detail == null ? "" : detail.split("·")[0].trim();

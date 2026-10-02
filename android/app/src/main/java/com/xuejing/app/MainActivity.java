@@ -525,6 +525,22 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    /** WebView 内核版本 —— 用户提 Issue 时最常变的环境因素。
+     *  页面里 navigator.userAgent 拿不到内核真实版本，只能由原生给。
+     *  注意 WebView 可被系统应用商店单独升级，同一台机器不同时间结果可能不同。 */
+    String webviewVersion() {
+        try {
+            if (web == null) return "?";
+            /* getCurrentWebViewPackage() 直接给 PackageInfo；
+               没有 getCurrentWebViewPackageName() 那个方法（写错了会编译不过）。 */
+            android.content.pm.PackageInfo pi = WebView.getCurrentWebViewPackage();
+            if (pi == null) return "?";
+            return String.valueOf(pi.packageName) + " " + String.valueOf(pi.versionName);
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
     private void callbackTts(final boolean ok, final String path) {
         final String js = "window.onTtsResult && window.onTtsResult("
                 + (ok ? "true" : "false") + "," + jsString(path == null ? "" : path) + ")";
@@ -951,8 +967,9 @@ public class MainActivity extends AppCompatActivity {
         return new String(bos.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    /** 拼进 JS 字符串字面量前必须转义，否则响应里的引号换行会把脚本打崩 */
-    private static String jsString(String s) {
+    /** 拼进 JS 字符串字面量前必须转义，否则响应里的引号换行会把脚本打崩。
+     *  包内可见：NativeBridge 的 deviceInfo() 也要用它拼 JSON。 */
+    static String jsString(String s) {
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -1400,6 +1417,14 @@ public class MainActivity extends AppCompatActivity {
     private void evalJs(String js) {
         if (web == null) return;
         try { web.evaluateJavascript(js, null); } catch (Throwable ignored) { }
+    }
+
+    /** 供 Tts 这类不持有 Activity 的类回调页面。
+     *  用 sRef 而不是外部持 Activity：否则这个单例会把 Activity 钉住不回收。 */
+    static void execOnMain(Context c, final String js) {
+        final MainActivity a = sRef.get();
+        if (a == null) return;
+        a.runOnUiThread(() -> a.evalJs(js));
     }
 
     private void toast(final String msg) {

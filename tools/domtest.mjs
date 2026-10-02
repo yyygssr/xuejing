@@ -395,9 +395,61 @@ const ASSERTS = String.raw`
   });
 
   // ---------- 杂项 ----------
-  T('语音播报开关已移除，朗读可用', function(){
-    return { ok: !document.getElementById('swTts') && typeof ttsSpeakForce === 'function',
-             info: 'swTts=' + !!document.getElementById('swTts') };
+  // ---------- 回归：语音播报重构（原生 TextToSpeech 为主，不再静默失败） ----------
+  T('语音：任何失败都写日志并提示，绝不静默', function(){
+    /* 浏览器预览下没有原生桥 → ttsInit 应落到某个明确状态，而不是崩或什么都不做 */
+    var r = ttsInit();
+    var known = ['ready','pending','error','noengine','web'].indexOf(r) >= 0;
+    /* 核心回归点：旧实现所有异常都进了 catch(e){}，用户只看到「没声音」。
+       现在 ttsFail 必须同时写日志 + 出提示。 */
+    var before = RUNTIME_LOG.length;
+    ttsFail('__测试失败原因__');
+    var logged = RUNTIME_LOG.some(function(x){
+      return x.tag === '语音' && String(x.msg).indexOf('__测试失败原因__') >= 0;
+    });
+    var grew = RUNTIME_LOG.length > before;
+    var tip = (document.getElementById('toast') || {}).textContent || '';
+    RUNTIME_LOG.length = before;      /* 别把测试噪音留给后面的断言 */
+    return { ok: known && logged && grew && tip.indexOf('朗读') >= 0,
+      info: 'ttsInit=' + r + ' 失败写日志=' + logged + ' 日志增长=' + grew
+        + ' 提示=' + JSON.stringify(tip.slice(0, 22)) };
+  });
+
+  T('语音：待读文本清洗（代码块/链接/标签不该被念出来）', function(){
+    /* 反引号必须运行时拼 —— 本文件整段断言是 String.raw 模板，
+       在这里直接写代码围栏会把模板截断（踩过一次，注释里写也不行）。 */
+    var fence = String.fromCharCode(96,96,96);
+    var s = ttsClean('看这个 ' + fence + 'const a=1;' + fence
+      + ' 还有 [文档](https://x.com) 与 <b>粗体</b> 和 # 标题');
+    var ok = s.indexOf('const') < 0 && s.indexOf('https') < 0 && s.indexOf('<b>') < 0
+      && s.indexOf('文档') >= 0 && s.indexOf('粗体') >= 0;
+    return { ok: ok, info: JSON.stringify(s) };
+  });
+
+  T('语音：自动播报与静音两个开关都在，且能正确渲染开/关', function(){
+    var sw = document.getElementById('swTts');
+    var mw = document.getElementById('swTtsMute');
+    var t = ttsStore(), keepOn = t.on, keepMute = t.mute;
+    t.on = false; t.mute = false; renderTtsRow();
+    var offState = !!sw && !sw.classList.contains('on') && !mw.classList.contains('on');
+    t.on = true; renderTtsRow();
+    var onState = !!sw && sw.classList.contains('on');
+    /* 静音时自动播报的开关视觉上也要灭掉 —— 两个开关同时亮着会让人以为还能自动播 */
+    t.mute = true; renderTtsRow();
+    var muteWins = !sw.classList.contains('on') && mw.classList.contains('on');
+    /* 静音必须真的短路 ttsSpeak（手动点也要挡） */
+    var before = RUNTIME_LOG.length;
+    var spoke = ttsSpeak('静音时不该出声', {force:true});
+    var tip = (document.getElementById('toast') || {}).textContent || '';
+    t.on = keepOn; t.mute = keepMute; renderTtsRow();
+    RUNTIME_LOG.length = before;
+    /* 「引擎状态」行已按用户要求移除，别把它当回归加回来 */
+    var noStateRow = !document.getElementById('ttsStateLab');
+    return { ok: !!sw && !!mw && offState && onState && muteWins && spoke === false
+        && tip.indexOf('静音') >= 0 && noStateRow && !!ttsEngineLabel(),
+      info: '自动播报开关=' + !!sw + ' 静音开关=' + !!mw + ' 关=' + offState + ' 开=' + onState
+        + ' 静音压制自动播报=' + muteWins + ' 静音时不出声=' + (spoke === false)
+        + ' 提示=' + JSON.stringify(tip.slice(0, 20)) + ' 已移除引擎状态行=' + noStateRow };
   });
   T('SUBVIEWS 认得 aihub / memory', function(){
     var s = (typeof SUBVIEWS !== 'undefined') ? SUBVIEWS : null;
@@ -710,6 +762,251 @@ const ASSERTS = String.raw`
     holidayInvalidate();
     selIdx = ti; renderCourses(); renderWeek();
     return { ok: hid && say, info: '课已隐藏=' + hid + ' 显示放假=' + say + ' | ' + txt.slice(0, 34) };
+  });
+
+  // ---------- 回归：日程语义必须只有一个判定口（dayInfo），各入口结论一致 ----------
+  T('日程语义单一口：放假当天各入口结论一致，且非假节日不受牵连', function(){
+    var snap = snapState();
+    var ti = todayI, wn = weekNo(new Date());
+    var dk = dateKeyForDayIdx(ti, wn);
+    var nb = (ti + 1) % 7, nbKey = dateKeyForDayIdx(nb, wn);
+    S.prefs.holidayMode = true;
+    S.courses[ti]  = [{ t:'08:00-09:40', n:'__单一口课A__', loc:'', w:'all', c:0, p:'normal' }];
+    S.courses[nb]  = [{ t:'10:00-11:40', n:'__单一口课B__', loc:'', w:'all', c:0, p:'normal' }];
+    if(!Array.isArray(S.holidayRanges)) S.holidayRanges = [];
+    S.holidayRanges.push({ id:'u__gate__', from:dk, to:dk, name:'__单一口假__', src:'user' });
+    holidayInvalidate();
+
+    var info = dayInfo(ti);
+    var nbInfo = dayInfo(nb);
+    /* 证明 coursesAt 真的走 dayInfo：把 dayInfo 换成探针，coursesAt 的结果应随之改变。
+       否则「单一口」只是注释上的说法 —— 哪天有人另开一份实现，这条会红。 */
+    var origInfo = dayInfo, followed = false;
+    window.dayInfo = function(d, w){ followed = true; return origInfo(d, w); };
+    var probe = coursesAt(ti);
+    window.dayInfo = origInfo;
+
+    var ok = info.holiday === true
+      && info.hasClass === false
+      && info.count === 0
+      && info.holidayName === '__单一口假__'
+      && info.dateKey === dk
+      && probe.length === 0
+      && followed === true
+      /* 关键：只压假那一天，别的日子照常有课（不能一把梭全滤掉） */
+      && nbInfo.holiday === false
+      && nbInfo.courses.length === 1;
+
+    restoreState(snap);
+    holidayInvalidate();
+    return { ok: ok, info: '放假那天 holiday=' + info.holiday + ' 假期名=' + info.holidayName
+      + ' 课数=' + info.count + ' | coursesAt 走 dayInfo=' + followed
+      + ' | 次日 holiday=' + nbInfo.holiday + ' 仍有课=' + nbInfo.courses.length };
+  });
+
+  // ---------- 回归：推给原生的判定契约必须带上节假日，否则原生判不出来 ----------
+  T('推给原生的判定契约带上了节假日（放假当天推得出去）', function(){
+    var snap = snapState();
+    var ti = todayI, wn = weekNo(new Date());
+    var dk = dateKeyForDayIdx(ti, wn);
+    S.prefs.holidayMode = true;
+    if(!Array.isArray(S.holidayRanges)) S.holidayRanges = [];
+    S.holidayRanges.push({ id:'u__con__', from:dk, to:dk, name:'__契约假__', src:'user' });
+    holidayInvalidate();
+
+    /* NATIVE 是 var 声明的全局，浏览器里为 null —— 换成假桥就能抓到真实 payload */
+    var captured = null, oldN = (typeof NATIVE !== 'undefined' ? NATIVE : null);
+    NATIVE = { setSchedule: function(j){ captured = j; }, setPrefs: function(){} };
+    try { pushScheduleToNative(); } catch(e) {}
+    NATIVE = oldN;
+
+    var p = null; try { p = JSON.parse(captured); } catch(e) {}
+    restoreState(snap);
+    holidayInvalidate();
+
+    var ok = !!p && p.holidayMode === true && !!p.holidays
+      && String(p.holidays[dk] || '') === '__契约假__'
+      && 'termStart' in p && 'courses' in p && 'bookings' in p;
+    return { ok: ok, info: p
+      ? ('推了 ' + Object.keys(p).join(',') + ' | holidayMode=' + p.holidayMode
+         + ' | 今日 ' + dk + ' 在 holidays 里=' + (String(p.holidays[dk] || '') === '__契约假__'))
+      : '没抓到 setSchedule 调用（payload 为 ' + captured + '）' };
+  });
+
+  // ---------- 回归：功能模型「取消选择」 ----------
+  T('功能模型可取消选择，并稳定保持「跟随对话模型」', function(){
+    openAiConfig();
+    var keepR = JSON.parse(JSON.stringify(rolesCfg()));
+    var keepM = JSON.parse(JSON.stringify(S.models || {}));
+    applyModelPick('summarize', S.provider || 'deepseek', '__test_model__');
+    var bound = roleBound('summarize') && roleModelName('summarize') === '__test_model__';
+    clearModelPick('summarize');
+    var afterOff = roleModelName('summarize') === '' && !roleBound('summarize');
+    var lab = modelLabel('summarize');
+    /* 关键回归点：重进列表时 renderModels() 会把「没填」的空值自动补成第一个模型。
+       这里必须确认「取消」不会被补回来 —— 否则用户的操作等于没做。 */
+    renderModels();
+    var staysOff = roleModelName('summarize') === '' && S.models.summarize === ROLE_OFF;
+    var fallsBack = !!(roleModelName('summarize') || S.models.chat);
+    S.roles = keepR; S.models = keepM; save(); renderModels();
+    return { ok: bound && afterOff && lab.indexOf('跟随对话模型') >= 0 && staysOff && fallsBack,
+      info: '绑定成功=' + bound + ' 取消后为空=' + afterOff + ' 标签=' + JSON.stringify(lab)
+        + ' 重进列表仍为空=' + staysOff + ' 回落对话模型=' + fallsBack };
+  });
+
+  // ---------- 回归：AI 头像可自定义，且坏值不能污染样式 ----------
+  T('AI 头像可自定义、能回落默认、坏值被拒', function(){
+    var keep = S.aiAvatar;
+    delete S.aiAvatar;
+    var byDefault = aiAvatarSrc() === AI_AVATAR_URL && !aiAvatarCustom();
+    S.aiAvatar = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    var custom = aiAvatarCustom() && aiAvatarSrc() === S.aiAvatar;
+    var styled = aiAvStyle().indexOf('data:image/jpeg') >= 0;
+    /* 关键：S 里存进非 dataURL 的脏值时必须回落默认，
+       否则它会被拼进 background-image:url() 把整个气泡样式弄坏。 */
+    S.aiAvatar = 'javascript:alert(1)';
+    var badRejected = aiAvatarSrc() === AI_AVATAR_URL;
+    /* 提示与面板必须在「自定义生效时」查 —— 先还原再查的话当然只剩默认值，
+       那样这条断言永远测不到「恢复默认」那一行是否出现。 */
+    S.aiAvatar = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+    renderProfile();
+    var hint = (document.getElementById('avatarHint') || {}).textContent || '';
+    var sheet = renderAvatarSheet();
+    if(keep) S.aiAvatar = keep; else delete S.aiAvatar;
+    renderProfile();
+    return { ok: byDefault && custom && styled && badRejected
+        && sheet.indexOf('aiAvatarPick') >= 0 && sheet.indexOf('aiAvatarClear') >= 0,
+      info: '默认回落=' + byDefault + ' 自定义生效=' + custom + ' 样式含图=' + styled
+        + ' 脏值被拒=' + badRejected + ' 设置行提示=' + JSON.stringify(hint)
+        + ' 面板有换图/恢复=' + (sheet.indexOf('aiAvatarClear') >= 0) };
+  });
+
+  // ---------- 回归：问题报告（关于页 → 运行日志） ----------
+  T('问题报告：抓得到错误、含环境、Key 已脱敏', function(){
+    var keep = RUNTIME_LOG.length;
+    logErr('__报告测试错误__');
+    var st = logStats();
+    var rep = buildBugReport();
+    var hasEnv = rep.indexOf('## 环境') >= 0 && rep.indexOf('WebView 内核') >= 0;
+    var hasCfg = rep.indexOf('## AI 配置') >= 0;
+    var hasErr = rep.indexOf('__报告测试错误__') >= 0;
+    /* 脱敏要单测 maskKey 本身 —— 报告里那行长什么样取决于当前有没有配 Key，
+       直接在报告里 grep '未填' 会在有 Key 的测试环境下误报。 */
+    var maskUnit = maskKey('') === '未填'
+      && maskKey('short') === '已填（5 字）'
+      && maskKey('abcdefghijklmnop').indexOf('abcdefgh') < 0
+      && maskKey('abcdefghijklmnop').indexOf('…') > 0
+      && maskKey('abcdefghijklmnop').indexOf('16 字') > 0;
+    /* 脱敏后长这样：Key __ob…ey__（10 字）／Key 未填／Key 已填（5 字）
+       —— 省略号在字符串中间，所以不能只找「…（」。 */
+    var keyLine = rep.indexOf('Key ') >= 0 && /(未填|已填|（\d+ 字）)/.test(rep);
+    /* 明文 Key 绝不能进报告；聊天正文也不该出现 */
+    var leakKey = (S.apiKey && rep.indexOf(String(S.apiKey)) >= 0) ? true : false;
+    RUNTIME_LOG.length = keep;
+    return { ok: st.err >= 1 && hasEnv && hasCfg && hasErr && maskUnit && keyLine && !leakKey,
+      info: '错误计数=' + st.err + ' 含环境=' + hasEnv + ' 含配置=' + hasCfg
+        + ' 含错误=' + hasErr + ' 脱敏函数正确=' + maskUnit + ' 报告Key已脱敏=' + keyLine
+        + ' 泄露明文=' + leakKey + ' 报告长度=' + rep.length };
+  });
+
+  T('运行日志：能落盘、重启后读得回、且优先保住错误', function(){
+    try{ localStorage.removeItem(LOG_KEY); }catch(e){}
+    RUNTIME_LOG.length = 0;
+    logIt('系统', '__普通信息__');
+    logErr('__要保住的那条错误__');
+    logSaveNow();
+    RUNTIME_LOG.length = 0;
+    logLoad();
+    var back = RUNTIME_LOG.length >= 2;
+    var keptErr = RUNTIME_LOG.some(function(x){ return x.tag === '错误'; });
+    /* 写满时先淘汰普通信息：塞 400 条普通 + 1 条错误，看错误还在不在 */
+    RUNTIME_LOG.length = 0;
+    for(var i=0;i<400;i++) logIt('系统', '填充' + i);
+    logErr('__压线之后的错误__');
+    var saveFn = logSaveNow.toString();
+    logSaveNow();
+    RUNTIME_LOG.length = 0;
+    logLoad();
+    var survived = RUNTIME_LOG.some(function(x){ return String(x.msg).indexOf('__压线之后的错误__') >= 0; });
+    var dropped = !RUNTIME_LOG.some(function(x){ return String(x.msg).indexOf('填充0') >= 0; });
+    try{ localStorage.removeItem(LOG_KEY); }catch(e){}
+    return { ok: back && keptErr && survived && dropped && typeof saveFn === 'string',
+      info: '重启读回=' + back + ' 错误在=' + keptErr + ' 压线后错误仍在=' + survived
+        + ' 普通信息被淘汰=' + dropped };
+  });
+
+  // ---------- 回归：语音模型留空 = 用系统语音（真机反馈） ----------
+  T('语音模型留空即用系统语音，不跟随对话模型', function(){
+    var keepR = JSON.parse(JSON.stringify(rolesCfg()));
+    var keepM = JSON.parse(JSON.stringify(S.models || {}));
+    /* 场景一：用户点过「取消选择」 */
+    clearModelPick('tts');
+    var noModel = roleModelName('tts') === '';
+    var label = modelLabel('tts');
+    renderModels();
+    var staysEmpty = roleModelName('tts') === '';
+    /* 场景二：全新用户从没碰过 tts —— 原来会被自动补一个文本对话模型，
+       而文本模型走 audio/speech 只会失败，用户会误判成「朗读坏了」。 */
+    delete S.models.tts;
+    if(S.roles && S.roles.tts) S.roles.tts.m = '';
+    renderModels();
+    var freshStaysEmpty = roleModelName('tts') === '';
+    S.roles = keepR; S.models = keepM; save(); renderModels();
+    return { ok: noModel && staysEmpty && freshStaysEmpty
+        && label.indexOf('用系统语音') >= 0 && label.indexOf('跟随对话模型') < 0,
+      info: '取消后无模型=' + noModel + ' 重进列表仍为空=' + staysEmpty
+        + ' 全新状态也为空=' + freshStaysEmpty + ' 标签=' + JSON.stringify(label) };
+  });
+
+  // ---------- 回归：语音失败的提示要能读完（真机截图踩过） ----------
+  T('语音失败：toast 只给短句，完整原因进日志与排查页', function(){
+    var keep = RUNTIME_LOG.length;
+    var longWhy = '系统里没有安装任何语音引擎。到「设置 → 系统 → 语言和输入法 → 文字转语音」装一个。';
+    ttsFail(longWhy);
+    var tip = (document.getElementById('toast') || {}).textContent || '';
+    /* toast 只能放短句：超过二十来个字会被省略号截断在半句上 */
+    var shortOk = tip.length > 0 && tip.length <= 12;
+    var logged = RUNTIME_LOG.some(function(x){
+      return x.tag === '语音' && String(x.msg).indexOf('没有安装任何语音引擎') >= 0;
+    });
+    RUNTIME_LOG.length = keep;
+    /* 实测渲染宽度：必须小于 .toast 的 max-width，否则一定被截 */
+    toast('朗读没成功');
+    var el = document.getElementById('toast');
+    var w = el ? Math.round(el.getBoundingClientRect().width || 0) : 0;
+    return { ok: shortOk && logged && w > 0 && w < 330,
+      info: 'toast=' + JSON.stringify(tip) + '（' + tip.length + ' 字）'
+        + ' 完整原因进日志=' + logged + ' 实测宽度=' + w + 'px（上限 330）' };
+  });
+
+  // ---------- 回归：待办超时（算出来的，不存标志位） ----------
+  T('待办超时：过期未完成才标，已完成与无截止都不标', function(){
+    var keep = JSON.parse(JSON.stringify(todosAll()));
+    var d = new Date();
+    var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+    var day = d.getFullYear() + '-' + p2(d.getMonth()+1) + '-' + p2(d.getDate());
+    var cases = [
+      {id:'__o1__', t:'昨天就该交', done:false, due:day + 'T00:01'},   /* 已过 */
+      {id:'__o2__', t:'今天截止',   done:false, due:day + 'T23:59'},   /* 还没到 */
+      {id:'__o3__', t:'交过了',     done:true,  due:day + 'T00:01'},   /* 已完成 */
+      {id:'__o4__', t:'没设时间',   done:false, due:''}                /* 无截止 */
+    ];
+    S.todos = cases; save(); renderTodos();
+    var c1 = todoOverdue(cases[0]) === true;
+    var c2 = todoOverdue(cases[1]) === false;
+    var c3 = todoOverdue(cases[2]) === false;
+    var c4 = todoOverdue(cases[3]) === false;
+    var cnt = todoOverdueCount();
+    var html = (document.getElementById('todosBody') || {}).innerHTML || '';
+    /* 「已超时」两处：行内徽标 + 顶部统计。另一句是「已超过截止」，不含这三个字。 */
+    var badge = (html.match(/已超时/g) || []).length;
+    var rowCls = /todo-row overdue/.test(html);
+    var red = /已超过截止/.test(html);
+    S.todos = keep; save(); renderTodos();
+    return { ok: c1 && c2 && c3 && c4 && cnt === 1 && badge === 2 && rowCls && red,
+      info: '过期未完成=' + c1 + ' 未到期=' + c2 + ' 已完成=' + c3 + ' 无截止=' + c4
+        + ' 计数=' + cnt + ' 页面「已超时」' + badge + ' 处 · 行有 overdue 类=' + rowCls
+        + ' · 截止文案变了=' + red };
   });
 
   // ---------- 回归：工具格式必须在提示词里钉死，且泄漏的协议块要清干净 ----------
@@ -1170,6 +1467,143 @@ try {
   }
 
   const results = JSON.parse(evalOut.result.value);
+
+  /* ---------- Node 侧架构守卫：不依赖页面状态，防的是「架构漂移」 ---------- */
+  // A) 语义一致性审计：绕过单一口 + 跨语言契约对账
+  //    注意用 import 而不是 spawnSync —— 本机 node 进程拉不起第二个 node（EBUSY）
+  try {
+    const { runChecks } = await import('./audit.mjs');
+    const r = runChecks({ onlyGate: true });
+    results.push({
+      name: '架构守卫：日程语义审计（绕过单一口 + 跨语言契约对账）',
+      ok: r.ok,
+      info: r.ok
+        ? `通过：S.courses 共 ${r.gate.rows.length} 处读取全在登记白名单内；`
+          + `契约字段 ${r.con.fields.join(',')} 两端一致`
+        : r.problems.slice(0, 3).join(' | ').slice(0, 320)
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：日程语义审计', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // B) 原生侧必须真的实现了同一套判定（跨语言语义的第二份实现）
+  try {
+    const jd = path.join(root, 'android', 'app', 'src', 'main', 'java', 'com', 'xuejing', 'app');
+    const rs = fs.readFileSync(path.join(jd, 'ReminderScheduler.java'), 'utf8');
+    const cr = fs.readFileSync(path.join(jd, 'ClassAlarmReceiver.java'), 'utf8');
+    const hasFn = /static boolean isHolidayNow\s*\(/.test(rs);
+    const readsHolidays = /optJSONObject\(\s*"holidays"/.test(rs);
+    const readsMode = /optBoolean\(\s*"holidayMode"/.test(rs);   // 双参形式 optBoolean(k, def)
+    const usedOnFire = /isHolidayNow\s*\(/.test(cr);
+    /* 判定必须在「触发时」而不是排程时 —— 排程时过滤会让放假那周一个闹钟都不排 */
+    const fireTime = /thisWeek\s*&&\s*!skipHoliday/.test(cr) || /isHolidayNow/.test(cr);
+    results.push({
+      name: '原生侧也按同一套规则判节假日（放假不弹通知）',
+      ok: hasFn && readsHolidays && readsMode && usedOnFire && fireTime,
+      info: 'isHolidayNow=' + hasFn + ' 读holidays=' + readsHolidays
+        + ' 读holidayMode=' + readsMode + ' 接收器调用=' + usedOnFire
+        + ' 触发时判定=' + fireTime
+    });
+  } catch (e) {
+    results.push({ name: '原生侧也按同一套规则判节假日（放假不弹通知）', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // C) 语音必须有原生实现 —— 旧实现只有 WebView 一条路，是「从来没成功过」的主因
+  try {
+    const jd = path.join(root, 'android', 'app', 'src', 'main', 'java', 'com', 'xuejing', 'app');
+    const tts = fs.readFileSync(path.join(jd, 'Tts.java'), 'utf8');
+    const nb = fs.readFileSync(path.join(jd, 'NativeBridge.java'), 'utf8');
+    const hasEngine = /new TextToSpeech\(/.test(tts);
+    const hasSpeak = /tts\.speak\(/.test(tts);
+    const hasVoices = /getVoices\(\)/.test(tts);
+    const hasProgress = /UtteranceProgressListener/.test(tts);
+    /* 原来的 engineAvailable() 已移除：它拿 queryIntentServices 当判据，
+       在 Android 11+ 上会被包可见性过滤骗到（真机踩过）。诊断改用可见引擎列表。 */
+    const hasAvail = /visibleEnginesJson\(/.test(tts);
+    const noBadGate = !/boolean engineAvailable\(/.test(tts);
+    const bridges = ['ttsInit', 'ttsSpeak', 'ttsStop', 'ttsVoices']
+      .filter(m => new RegExp('public\\s+\\w+\\s+' + m + '\\s*\\(').test(nb));
+    results.push({
+      name: '架构守卫：语音走原生引擎（不再是 WebView 独苗）',
+      ok: hasEngine && hasSpeak && hasVoices && hasProgress && hasAvail && noBadGate && bridges.length === 4,
+      info: `TextToSpeech=${hasEngine} speak=${hasSpeak} 音色枚举=${hasVoices}`
+        + ` 进度回调=${hasProgress} 可见引擎诊断=${hasAvail} 已移除不可靠判据=${noBadGate}`
+        + ` 桥=${bridges.length}/4`
+        + (bridges.length < 4 ? ' 缺:' + ['ttsInit','ttsSpeak','ttsStop','ttsVoices'].filter(x=>bridges.indexOf(x)<0).join(',') : '')
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：语音走原生引擎', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // D) toast 只能放短句 —— .toast 是 nowrap + max-width 330px + 省略号，
+  //    超长会断在半句上（真机实测过：「…没有安装任何语音引擎。到「设…」）。
+  //    这类 bug 会反复出现，所以做成 lint 而不是每次靠肉眼。
+  try {
+    const src = fs.readFileSync(SRC, 'utf8');
+    const re = /toast\(\s*'([^']{10,})'/g;
+    const bad = [];
+    let m;
+    while ((m = re.exec(src))) {
+      const s = m[1];
+      /* 粗略量「显示宽度」：中文按 1 个字宽，ASCII 按 0.5 */
+      let w = 0;
+      for (const ch of s) w += (ch.charCodeAt(0) > 255 ? 1 : 0.5);
+      if (w > 22) bad.push(s.slice(0, 26) + '≈' + Math.round(w) + '字宽');
+    }
+    results.push({
+      name: '架构守卫：toast 文案不过长（超出会被省略号截断）',
+      ok: bad.length === 0,
+      info: bad.length
+        ? ('过长 ' + bad.length + ' 处 → ' + bad.slice(0, 3).join(' | ').slice(0, 300))
+        : '所有 toast 字面文案都在 22 字宽以内（拼接生成的文案查不到，属已知盲区）'
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：toast 文案不过长', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // E) 源码里不该出现 \uXXXX 转义 —— 曾经有 23 行被写成转义序列（某次补丁带进来的），
+  //    JS 照样能跑，但没人读得懂，而且会让「扫源码」类检查算出错误的字宽。
+  //    \u0001 是代码块占位符（控制符），保留转义是对的，单独放行。
+  try {
+    const src = fs.readFileSync(SRC, 'utf8');
+    const all = src.match(/\\u[0-9a-fA-F]{4}/g) || [];
+    const ctrl = all.filter(x => parseInt(x.slice(2), 16) < 0x20);
+    const bad = all.length - ctrl.length;
+    results.push({
+      name: '架构守卫：源码无 \\uXXXX 转义（可读性）',
+      ok: bad === 0,
+      info: bad === 0
+        ? `共 ${all.length} 处转义，全部是 \\u0001 占位符（允许）`
+        : `${bad} 处可打印字符被写成了转义序列，应还原成真中文`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：源码无 \\uXXXX 转义', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // F) TTS 的 Android 11+ 包可见性 —— 本项目真实踩过：
+  //    清单里没声明 TTS_SERVICE，系统把小爱/小米语音引擎过滤掉了，
+  //    queryIntentServices 返回空，app 就误报「没装任何引擎」。
+  //    两条一起盯：清单要声明；且**不能**再拿那个查询结果当判据。
+  try {
+    const jd2 = path.join(root, 'android', 'app', 'src', 'main');
+    const mf = fs.readFileSync(path.join(jd2, 'AndroidManifest.xml'), 'utf8');
+    const nb2 = fs.readFileSync(path.join(jd2, 'java', 'com', 'xuejing', 'app', 'NativeBridge.java'), 'utf8');
+    const tts2 = fs.readFileSync(path.join(jd2, 'java', 'com', 'xuejing', 'app', 'Tts.java'), 'utf8');
+    const hasQuery = /<queries>[\s\S]*android\.intent\.action\.TTS_SERVICE[\s\S]*<\/queries>/.test(mf);
+    /* ttsInit 里再出现「查不到就提前判死」就说明有人把不可靠的判据请回来了 */
+    const gates = /ttsInit\(\)\s*\{[\s\S]{0,500}?(engineAvailable|queryIntentServices|visibleEnginesJson)/.test(nb2);
+    /* 诊断通道要留着：可见引擎列表是分辨「看不到」与「初始化失败」的唯一依据 */
+    const hasDiag = /public String ttsEngines\(\)/.test(nb2) && /visibleEnginesJson/.test(tts2);
+    results.push({
+      name: '架构守卫：TTS 包可见性与判据（Android 11+，真机踩过）',
+      ok: hasQuery && !gates && hasDiag,
+      info: `清单声明 TTS_SERVICE=${hasQuery} · ttsInit 仍拿查询结果当判据=${gates}`
+        + ` · 保留可见引擎诊断通道=${hasDiag}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：TTS 包可见性与判据', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
   let fail = 0;
   for (const t of results) {
     if (!t.ok) fail++;

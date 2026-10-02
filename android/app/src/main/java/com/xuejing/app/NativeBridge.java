@@ -93,7 +93,29 @@ public class NativeBridge {
     }
 
     /**
-     * 精确闹钟授权状态（JSON）：sdk / canExact。
+     * 设备与 WebView 信息（JSON），供「关于 → 运行日志」生成问题报告。
+     * 用户提 Issue 时最缺的就是环境信息：机型、系统版本、WebView 版本。
+     * 全部由原生给出 —— 页面里 navigator.userAgent 拿不到内核真实版本。
+     */
+    @JavascriptInterface
+    public String deviceInfo() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"model\":").append(MainActivity.jsString(
+                        String.valueOf(android.os.Build.MANUFACTURER) + " "
+                                + String.valueOf(android.os.Build.MODEL)))
+          .append(",\"android\":").append(MainActivity.jsString(
+                        String.valueOf(android.os.Build.VERSION.RELEASE)))
+          .append(",\"sdk\":").append(android.os.Build.VERSION.SDK_INT)
+          .append(",\"abi\":").append(MainActivity.jsString(
+                        String.valueOf(android.os.Build.SUPPORTED_ABIS != null
+                                && android.os.Build.SUPPORTED_ABIS.length > 0
+                                ? android.os.Build.SUPPORTED_ABIS[0] : "?")))
+          .append(",\"webview\":").append(MainActivity.jsString(act.webviewVersion()))
+          .append("}");
+        return sb.toString();
+    }
+
+    /** 精确闹钟授权状态（JSON）：sdk / canExact。
      * 没有这个授权时，排下去的课表提醒会退化成系统的宽窗口非精确闹钟，
      * 在 Doze 里可能晚十几分钟 —— 用户感受到的就是「到时间提醒不及时」。
      */
@@ -101,6 +123,64 @@ public class NativeBridge {
     public String exactAlarmState() {
         return "{\"sdk\":" + android.os.Build.VERSION.SDK_INT
                 + ",\"canExact\":" + ReminderScheduler.canExact(act) + "}";
+    }
+
+    /* ================= 语音播报（系统 TTS） =================
+       页面原来的 speechSynthesis 在 Android WebView 上不可靠：音色列表异步才到、
+       失败不回调。现在改走原生 TextToSpeech，失败原因由这里如实回吐。 */
+
+    /**
+     * 启动引擎初始化。**一律返回 1**（去建引擎），结果由 window.onTtsEvent 回报。
+     *
+     * <p>曾经在这里用 {@code queryIntentServices(TTS_SERVICE)} 先判「有没有引擎」，
+     * 空的就直接告诉用户「系统里没有安装任何语音引擎」。结果在小米手机上被系统骗了 ——
+     * 明明有「系统语音引擎」，但 Android 11+ 的包可见性过滤让它查不到（除非在
+     * AndroidManifest 的 {@code <queries>} 里声明 TTS_SERVICE，已补）。
+     * 而且厂商 ROM 对这个查询还有各种偏差。
+     *
+     * <p>结论：<strong>唯一可信的判据是 TextToSpeech 构造后的 onInit 回调</strong>。
+     * 所以这里不再预判，直接建引擎，让 onInit 说真话。
+     */
+    @JavascriptInterface
+    public int ttsInit() {
+        final Tts t = Tts.get(act);
+        t.init(new Tts.InitCB() {
+            @Override
+            public void onResult(final boolean ok, final String engine, final String error) {
+                final String js = "window.onTtsEvent && window.onTtsEvent({t:"
+                        + MainActivity.jsString(ok ? "ready" : "error")
+                        + ",id:'',d:" + MainActivity.jsString(ok ? engine : error) + "})";
+                MainActivity.execOnMain(act, js);
+            }
+        });
+        return 1;
+    }
+
+    /**
+     * 本机**可见**的 TTS 引擎列表（JSON 数组，元素是引擎包名）。
+     * 纯诊断用：出问题时能分清「一个都看不到」（可见性/ROM 问题）和
+     * 「能看到但初始化失败」（引擎本身坏了）—— 这两种的解法完全不同。
+     */
+    @JavascriptInterface
+    public String ttsEngines() {
+        return Tts.visibleEnginesJson(act);
+    }
+
+    /** 朗读。返回空串 = 已提交；返回非空 = 失败原因（直接显示给用户，别再吞掉）。 */
+    @JavascriptInterface
+    public String ttsSpeak(String text, String voiceId, float rate, float pitch) {
+        return Tts.get(act).speak(text, voiceId, rate, pitch);
+    }
+
+    @JavascriptInterface
+    public void ttsStop() {
+        Tts.get(act).stop();
+    }
+
+    /** 音色列表 JSON 数组（引擎未就绪时是空数组） */
+    @JavascriptInterface
+    public String ttsVoices() {
+        return Tts.get(act).voicesJson();
     }
 
     /** 跳到系统「闹钟和提醒」授权页（Android 12/12L 必须用户手动开） */

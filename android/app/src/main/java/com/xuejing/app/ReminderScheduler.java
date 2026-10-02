@@ -290,6 +290,37 @@ public class ReminderScheduler {
         return false;
     }
 
+    /**
+     * 今天是不是放假（放假当天不提醒上课）。
+     *
+     * 数据来自页面 pushScheduleToNative() 推来的 holidays 扁平表 + holidayMode 开关，
+     * 规则必须与页面 dayInfo() 完全一致 —— 契约见页面 pushScheduleToNative() 的注释。
+     *
+     * 和单双周一样在**触发时**判断而不是排程时判断：排程时过滤会让放假那周一个闹钟都不排，
+     * 而下一次重排要等用户重开 App，于是「放假前最后一节课之后再也不提醒」。
+     * 现在每周照排，不该响的那天静默跳过（接收器仍会重排下一周）。
+     *
+     * 以前这里完全没有节假日概念 —— 页面修了「放假当天主页不显示课」，
+     * 通知却照响，因为这条语义在页面和原生写了两遍且没人通知对方。
+     */
+    static boolean isHolidayNow(Context c) {
+        try {
+            SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
+            JSONObject root = new JSONObject(sp.getString(K_SCHEDULE, "{}"));
+            if (!root.optBoolean("holidayMode", false)) return false;
+            JSONObject hol = root.optJSONObject("holidays");
+            if (hol == null) return false;
+            Calendar cal = Calendar.getInstance();
+            String key = cal.get(Calendar.YEAR) + "-" + pad2(cal.get(Calendar.MONTH) + 1)
+                    + "-" + pad2(cal.get(Calendar.DAY_OF_MONTH));
+            return hol.optString(key, "").length() > 0;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String pad2(int n) { return (n < 10 ? "0" : "") + n; }
+
     /** 从 "08:00-09:40" 算出秒数 */
     static int durationSecs(String timeRange) {
         try {

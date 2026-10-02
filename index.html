@@ -482,6 +482,20 @@
     letter-spacing:-.2px}
   .logrow .lc{font-size:10px;font-weight:750;padding:2px 6px;border-radius:6px;flex:none;white-space:nowrap}
   .logrow .lm{font-size:11.5px;line-height:1.55;word-break:break-word}
+  /* 日志面板顶部的三张统计卡：出问题时第一眼就要看到「错了几条」 */
+  .lgstats{display:flex;gap:8px;margin-top:12px}
+  .lgstat{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);
+    border-radius:12px;padding:9px 10px;text-align:center}
+  .lgstat b{display:block;font-size:19px;font-weight:800;line-height:1.25;
+    font-variant-numeric:tabular-nums}
+  .lgstat span{font-size:10px;color:var(--sub)}
+  .lgstat.bad b{color:var(--danger)}
+  .lgstat.warn b{color:var(--warn)}
+  /* 问题报告预览：等宽 + 保留换行，粘出去格式不乱 */
+  .repbox{margin-top:12px;max-height:320px;overflow:auto;background:var(--bg);
+    border:1px solid var(--line);border-radius:14px;padding:10px 12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;line-height:1.75;
+    white-space:pre-wrap;word-break:break-word}
 
   /* ---------- 通用弹层（与数据看板选择器统一：滑动关闭 + 同款动画） ---------- */
   .mask{position:absolute;inset:0;background:rgba(8,10,18,.45);z-index:40;display:flex;align-items:flex-end;
@@ -846,6 +860,11 @@
   .todo-row .ck.on{background:var(--brand);border-color:var(--brand);color:#fff}
   .todo-row .tt{flex:1;font-size:13px;font-weight:600}
   .todo-row .td{font-size:10.5px;color:var(--sub)}
+  /* 逾期待办：整行淡红底 + 标题与截止时间转红。用 --danger-soft 是因为它深浅色都配过了，
+     另写一套 rgba 会在暗色模式下变成脏粉色。 */
+  .todo-row.overdue{background:var(--danger-soft)}
+  .todo-row.overdue .tt,.todo-row.overdue .td{color:var(--danger)}
+  .todo-row.overdue .ck{border-color:var(--danger)}
 
   .note-list .li .tx b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .note-toolbar{display:flex;flex-wrap:wrap;gap:6px;padding:8px 0;position:sticky;top:0;background:var(--bg);z-index:2}
@@ -1209,6 +1228,12 @@
         <div class="li" style="padding-top:0;border:0">
           <input class="f" id="callInput" maxlength="12" placeholder="留空 = 跟随昵称" />
         </div>
+        <div class="li tap" onclick="openSheetAvatar()">
+          <div class="ic" data-i="user"></div>
+          <div class="tx"><b>AI 的头像</b><small id="avatarHint">默认头像</small></div>
+          <div class="val"><span class="arrow">›</span></div>
+        </div>
+        <input type="file" id="aiAvatarFile" accept="image/*" style="display:none" onchange="onAiAvatarFile(this)" />
         <div class="li" style="padding:11px 14px;background:var(--brand-soft)">
           <div class="tx" style="font-size:11.5px;color:var(--brand);line-height:1.6">
             当前 AI 会称呼你为「<b id="callEcho" class="inln">同学</b>」
@@ -1378,7 +1403,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.1.5 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.0 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1578,7 +1603,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.1.5 · 开源版</div>
+        <div class="about-ver">v0.2.0 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1588,7 +1613,7 @@
       <div class="list">
         <div class="li tap" onclick="openSheet('diag')">
           <div class="ic" data-i="log"></div>
-          <div class="tx"><b>运行日志</b><small>导航、弹层、配置、AI 拉取与返回层，按时间记成一条线</small></div>
+          <div class="tx"><b>运行日志 · 问题报告</b><small>记录所有报错与操作，一键生成可直接贴进 Issue 的报告</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openSheet('privacy')">
@@ -1711,9 +1736,14 @@
 
       <div class="h2">语音</div>
       <div class="list">
+        <div class="li tap" onclick="ttsPreview()">
+          <div class="ic" data-i="megaph"></div>
+          <div class="tx"><b>先试一下</b><small>点这里播一句，确认这台机器能出声</small></div>
+          <div class="val"><span class="arrow">›</span></div>
+        </div>
         <div class="li tap" onclick="pickTtsVoice()">
           <div class="ic" data-i="voice"></div>
-          <div class="tx"><b>音色</b><small id="ttsVoiceLab">跟随回复风格</small></div>
+          <div class="tx"><b>音色</b><small id="ttsVoiceLab">跟随系统默认</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="pickTtsRate()">
@@ -1721,8 +1751,19 @@
           <div class="tx"><b>语速</b><small id="ttsRateLab">1.0×</small></div>
           <div class="val"><span class="arrow">›</span></div>
         </div>
+        <div class="li">
+          <div class="ic" data-i="bell"></div>
+          <div class="tx"><b>自动播报</b><small>AI 回完自动念，气泡上的「朗读」不受影响</small></div>
+          <div class="switch" id="swTts" onclick="toggleTts(this)"></div>
+        </div>
+        <div class="li">
+          <div class="ic" data-i="mute"></div>
+          <div class="tx"><b>静音</b><small>打开后这一整类都不会再出声</small></div>
+          <div class="switch" id="swTtsMute" onclick="toggleTtsMute(this)"></div>
+        </div>
       </div>
-      <div class="note2">对话页气泡下可点「朗读」。</div>
+      <div class="note2">该类下所有设置都会发声进行测试，如果您处在不便发出声音的环境中，
+        请不要点击，或开启静音调整开关。</div>
 
       <div class="h2">行程规划偏好</div>
       <div class="list">
@@ -1847,7 +1888,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.1.5';
+var APP_VER = 'v0.2.0';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -1938,8 +1979,14 @@ function providerModels(){
 function modelLabel(k){
   var rc = roleCreds(k);
   var pname = providerMeta(rc.provider).n || rc.provider;
-  if(!rc.model) return pname + ' · 未设置';
-  return pname + ' · ' + rc.model;
+  if(rc.model) return pname + ' · ' + rc.model;
+  /* tts 的「没模型」有确切含义：走系统语音，**不是**跟随对话模型 ——
+     对话模型是文本模型，拿来合成语音本来就不通。
+     之前一律显示「跟随对话模型」，用户会以为取消后会自动用 chat 的模型朗读。 */
+  if(MODEL_NO_AUTO[k]) return '留空 · 用系统语音';
+  /* 「明确取消跟随」和「还没配」要显示得不一样，
+     否则用户看到「未设置」会以为功能坏了，而不是自己刚点的取消。 */
+  return (k === 'chat') ? (pname + ' · 未设置') : (pname + ' · 跟随对话模型');
 }
 
 /* ============================================================
@@ -2358,7 +2405,8 @@ function modelIsReasoning(m){ return REASONING_RE.test(String(m || '')); }
 /* 纯文本补全 */
 function aiText(role, messages, cb, opts){
   var rc = roleCreds(role);
-  var model = rc.model || S.models[role] || S.models.chat;
+  /* 取消选择 = 跟随对话模型：roleModelName 返回空串，落到 chat 那一档 */
+  var model = roleModelName(role) || S.models.chat;
   if(!model){ cb(false, '「' + (MODEL_ROLE_NAME[role] || role) + '」还没选模型 —— 去「我的 → AI 配置」选一个'); return; }
   var o = opts || {};
   var body = {
@@ -2400,7 +2448,7 @@ function aiText(role, messages, cb, opts){
 }
 /* 带图片的补全（识图导入 / 拍照搜题） */
 function aiVision(role, prompt, imageDataUrl, cb, opts){
-  var model = S.models[role] || S.models.chat;
+  var model = roleModelName(role) || S.models.chat;
   if(!model){ cb(false, '「' + (MODEL_ROLE_NAME[role] || role) + '」还没选模型 —— 去「我的 → AI 配置」选一个'); return; }
   if(!imageDataUrl){ cb(false, '图片读取失败，换一张试试'); return; }
   var o = opts || {};
@@ -2490,6 +2538,26 @@ var MODEL_ROLES = [
   {k:'vision',    n:'图片 / 题目识别', d:'识图导入课表、拍照搜题', ic:'image'},
   {k:'tts',       n:'语音播报',       d:'朗读 AI 回复；未配置则用系统 TTS', ic:'megaph'}
 ];
+/* 「取消选择」的哨兵值，写在 S.models[k] 上。
+   为什么不用空串 —— 有三处会把空串当「还没填」自动补回去：
+     ① renderModels() 里 `if(cur == null || !String(cur).trim()) S.models[k] = pool[0]`
+     ② rolesCfg() 的迁移 `if(!r[k].m && S.models[k]) r[k].m = S.models[k]`
+     ③ 调用侧的 `S.models[role] || S.models.chat` 兜底
+   三处都不认「用户明确不要」，所以必须用一个显式值。 */
+var ROLE_OFF = '__off__';
+/** 这个功能当前实际生效的模型名；返回空串表示「没单独绑 / 已取消」。 */
+function roleModelName(k){
+  var m = (rolesCfg()[k] || {}).m;
+  if(m && m !== ROLE_OFF) return m;
+  var legacy = (S.models || {})[k];
+  if(legacy === ROLE_OFF) return '';
+  return legacy || '';
+}
+/** 是否单独绑定了模型（用于列表显示与按钮置灰） */
+function roleBound(k){ return !!roleModelName(k); }
+/* 不参与「没填就自动补默认模型」的功能。见 renderModels() 里的理由。 */
+var MODEL_NO_AUTO = { tts: 1 };
+
 /* 每个功能可绑定：渠道 provider + 该渠道下的 model */
 function rolesCfg(){
   if(!S.roles) S.roles = {};
@@ -2505,7 +2573,7 @@ function rolesCfg(){
   if(S.models){
     for(i=0;i<keys.length;i++){
       k = keys[i];
-      if(!r[k].m && S.models[k]) r[k].m = S.models[k];
+      if(!r[k].m && S.models[k] && S.models[k] !== ROLE_OFF) r[k].m = S.models[k];
     }
   }
   /* 同步 S.models 兼容旧读法 */
@@ -2527,7 +2595,7 @@ function roleCreds(role){
   if(p === (S.provider||'') && !url) url = S.baseUrl || '';
   if(p === (S.provider||'') && !key) key = S.apiKey || '';
   url = String(url||'').replace(/\/+$/, '');
-  return {provider: p, model: cfg.m || S.models[role] || '', url: url, key: key};
+  return {provider: p, model: roleModelName(role), url: url, key: key};
 }
 var DAYN = ['一','二','三','四','五','六','日'];
 
@@ -2643,6 +2711,11 @@ window.__setInsets = function(top, bottom){
    工具
    ============================================================ */
 var toastTimer;
+/* ⚠️ toast 只能放**短句**。
+   样式是 white-space:nowrap + max-width:330px + overflow:hidden + text-overflow:ellipsis
+   （见 .toast），实测超过二十来个中文字就断在半句上 —— 真机截图里就出现过
+   「…没有安装任何语音引擎。到「设…」这种断法，比不显示还让人困惑。
+   要放完整说明就用弹层（例如朗读失败 → 「为什么不出声」页），别往 toast 里塞长文本。 */
 function toast(msg){
   var el = document.getElementById('toast');
   el.textContent = msg; el.classList.add('show');
@@ -2761,9 +2834,13 @@ var ICON = {
   appmark: '<path d="M4.6 19.6c0-6 4-8.4 7.4-11.4 1.6-1.4 2.6-2.6 2.6-4.6"/><path d="M9.2 8.6h9.4M13 12.4h5.6M15.4 16.2h3.2"/><circle cx="4.6" cy="19.6" r="1.7" fill="currentColor" stroke="none"/>',
   /* 分享：三个节点连线（没有现成的 share 图标，笔记分享要用） */
   share:   '<circle cx="17.6" cy="5.6" r="2.8"/><circle cx="6.4" cy="12" r="2.8"/><circle cx="17.6" cy="18.4" r="2.8"/><path d="M8.9 10.6l6.2-3.6M8.9 13.4l6.2 3.6"/>',
-  /* —— 补绘（v0.1.5）：下面这些位置原来都在「借」别的图标 ——
+  /* —— 补绘（v0.2.0）：下面这些位置原来都在「借」别的图标 ——
      同一个图标被好几处共用，扫一眼分不出哪个是哪个。一律 24 网格 / 1.8 描边，
      和上面保持同一套画法（圆头、圆角、currentColor）。 —— */
+  /* 重新检测：环形箭头（缺口在右上，箭头尖指回内侧） */
+  refresh: '<path d="M19.6 12a7.6 7.6 0 1 1-2.3-5.4"/><path d="M19.8 3.8v3.6h-3.6"/>',
+  /* 静音：喇叭 + 一道斜杠。喇叭要画出两段声波，否则「斜杠」看不出是挡声音 */
+  mute:   '<path d="M4.4 9.4h3.2L12 5.6v12.8l-4.4-3.8H4.4z"/><path d="M15.4 9.8l4.2 4.4M19.6 9.8l-4.2 4.4"/>',
   /* 联网搜索：网格球体。原来是罗盘 —— 罗盘是「方向」，跟「联网」没关系。 */
   globe:   '<circle cx="12" cy="12" r="8.6"/><ellipse cx="12" cy="12" rx="4.4" ry="8.6"/><path d="M4.1 8.6h15.8M4.1 15.4h15.8"/>',
   /* 对齐：一条基准线 + 三条齐头横杠 */
@@ -2978,9 +3055,9 @@ function dateKeyForDayIdx(day, wno){
   var d = new Date(mon); d.setDate(mon.getDate() + (day|0));
   return dayKey(d);
 }
-function isHolidayDay(day, wno){
-  return holidayModeOn() && !!holidayOn(dateKeyForDayIdx(day, wno));
-}
+/* 「这天放假吗」的判定已经并入 dayInfo()（见下方「日程语义 · 全应用唯一判定口」）。
+   原先这里有个 isHolidayDay(day, wno)，被 dayInfo 内联后就没人调用了 ——
+   留着只会让人以为有两个判定入口，所以删掉。要问「某天上不上课」一律用 dayInfo。 */
 
 /* ---------- 从系统日历同步 ---------- */
 var _holSyncing = false;
@@ -3175,12 +3252,32 @@ function renderHolidaySheet(){
     + '<div class="btn ghost" style="margin-top:12px" onclick="closeSheet()">关闭</div>';
 }
 
-function coursesAt(day, wno){
+/* ============================================================
+   日程语义 · 全应用唯一判定口
+   ============================================================
+   「某天上不上课、有没有课」只有这一个答案来源。
+   课表、首页今日课程、上课提醒、桌面小组件、AI 工具、日期选择器、导出 ——
+   全部走这里。谁都不许自己再抄一遍「放假 → 没课」。
+
+   直接读 S.courses 去判断某天有没有课 = 绕过。
+   tools/audit.mjs 会把绕过点连同它的下游影响面一起列出来。
+
+   ⚠️ 跨语言：原生 ReminderScheduler 独立复现同一套判定（单双周 + 节假日）。
+   判定所需的全部事实由 pushScheduleToNative() 一次性推过去，契约字段见该函数。 */
+function dayInfo(day, wno){
   var w = (wno == null) ? weekNo(new Date()) : wno;
+  var dateKey = dateKeyForDayIdx(day, w);
   /* 节假日模式下，放假当天的课整条隐藏 —— 课表按星期几排，假日按日期放 */
-  if(isHolidayDay(day, wno)) return [];
-  return courses(day).filter(function(c){ return courseShouldShow(c, w); });
+  var hol = holidayModeOn() ? (holidayOn(dateKey) || '') : '';
+  var list = hol ? [] : courses(day).filter(function(c){ return courseShouldShow(c, w); });
+  return {
+    day: day, wno: w, dateKey: dateKey,
+    holiday: !!hol, holidayName: hol,
+    courses: list, count: list.length, hasClass: list.length > 0
+  };
 }
+/* 兼容入口：只关心「当天有哪些课」时用这个；要「当天上不上课、为什么」时用 dayInfo */
+function coursesAt(day, wno){ return dayInfo(day, wno).courses; }
 /* 距今 k 天所在日的周次（用于「明天」以及未来 7 天的单双周过滤） */
 function weekNoAfterDays(k){
   var d = new Date();
@@ -3220,12 +3317,25 @@ function addCourse(rec){
   return !dup;
 }
 function pushScheduleToNative(){
-  /* 带上 termStart：原生排课表闹钟时要按单双周过滤，否则双周课在单周也会响 */
+  /* ===== 页面 → 原生 的「日程语义契约」 =====
+     原生 ReminderScheduler 要独立复现同一套「这条课今天该不该响」的判定，
+     所以这里必须把判定所需的**全部**事实一次性推过去，缺一项它就判错：
+
+       termStart   → 算第几周（单双周、第 5~8 周）
+       courses     → 星期几 + 时间 + 周次字段
+       bookings    → 已预约的课不提醒
+       holidays    → {日期键: 名称} 扁平表，判定「这天放假」
+       holidayMode → 节假日模式总开关；关掉时 holidays 不生效
+
+     ⚠️ 改这个结构必须同步改原生读取字段。tools/audit.mjs 会对两边做字段对账，
+     漏改会直接报错（历史上就是漏改导致「放假照常提醒上课」）。 */
   try{
     nat('setSchedule', JSON.stringify({
       termStart: S.termStart || '',
       courses: S.courses,
-      bookings: S.bookings || {}
+      bookings: S.bookings || {},
+      holidays: holidayFlat(),
+      holidayMode: holidayModeOn()
     }));
   }catch(e){}
 }
@@ -3688,18 +3798,98 @@ function currentLayer(){
    还是弹层没关。只盯一个值很难定位。
    所以改成一整条按时间排的运行日志：谁调的、调了什么、落在哪个层。
    ============================================================ */
-var RUNTIME_LOG = [], RUNTIME_LOG_MAX = 200;
-/* tag 决定面板里的颜色分类；msg 尽量写成「动作 + 结果」以便直接读 */
+var RUNTIME_LOG = [], RUNTIME_LOG_MAX = 200, LOG_KEY = 'xuejing_log_v1', LOG_SAVE_MAX = 300;
+/* tag 决定面板里的颜色分类；msg 尽量写成「动作 + 结果」以便直接读。
+   LOG_KEEP 标出「值得留到最后一刻」的级别 —— 写满时先淘汰普通信息类，保住错误。 */
+var LOG_KEEP = { '错误': 3, '警告': 2 };
+var LOG_MSG_MAX = 300;
 function logIt(tag, msg){
   var d = new Date();
+  var s = String(msg == null ? '' : msg);
+  /* 截断：有些失败回执是整段 body，不截的话报告会被一行撑爆 */
+  if(s.length > LOG_MSG_MAX) s = s.slice(0, LOG_MSG_MAX) + '…（已截断）';
   RUNTIME_LOG.push({
     t: pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()),
+    ts: d.getTime(),
     tag: tag,
-    msg: msg,
+    msg: s,
     layer: currentLayer()
   });
   if(RUNTIME_LOG.length > RUNTIME_LOG_MAX) RUNTIME_LOG.shift();
+  logSave();
 }
+/* 错误单独一个入口：除了进日志，同时打到 console ——
+   远程调试时能在 Chrome DevTools 里直接看到，不必先复现到面板。 */
+function logErr(msg, tag){
+  try{ console.error('[学径]', tag || '错误', msg); }catch(e){}
+  logIt(tag || '错误', msg);
+  logSaveNow();     /* 错误立刻落盘：崩了之后可能没有下一次机会 */
+}
+function logWarn(msg){ logIt('警告', msg); }
+
+/* 落盘：以前日志只在内存里，重启就没了 —— 而问题常常横跨「重启前后」。 */
+var _logSaveT = null;
+function logSave(){
+  if(_logSaveT) return;
+  _logSaveT = setTimeout(function(){ _logSaveT = null; logSaveNow(); }, 400);
+}
+function logSaveNow(){
+  if(_logSaveT){ try{ clearTimeout(_logSaveT); }catch(e){} _logSaveT = null; }
+  try{
+    var a = RUNTIME_LOG.slice();
+    while(a.length > LOG_SAVE_MAX){
+      /* 先丢最老的非错误条目；全是错误时才从最老的开始丢 */
+      var idx = -1;
+      for(var i=0;i<a.length;i++){ if(!LOG_KEEP[a[i].tag]){ idx = i; break; } }
+      if(idx < 0) idx = 0;
+      a.splice(idx, 1);
+    }
+    localStorage.setItem(LOG_KEY, JSON.stringify(a));
+  }catch(e){}
+}
+function logLoad(){
+  try{
+    var raw = localStorage.getItem(LOG_KEY);
+    if(!raw) return;
+    var a = JSON.parse(raw);
+    if(Array.isArray(a) && a.length) RUNTIME_LOG = a;
+  }catch(e){}
+}
+function logClear(){
+  RUNTIME_LOG.length = 0;
+  try{ localStorage.removeItem(LOG_KEY); }catch(e){}
+  logIt('系统', '日志已清空');
+}
+function logStats(){
+  var e = 0, w = 0;
+  for(var i=0;i<RUNTIME_LOG.length;i++){
+    if(RUNTIME_LOG[i].tag === '错误') e++;
+    else if(RUNTIME_LOG[i].tag === '警告') w++;
+  }
+  return {err:e, warn:w, total:RUNTIME_LOG.length};
+}
+
+/* 全局错误捕获。
+   以前日志只记「应用主动记了什么」，页面自己崩了反而一条都没有 ——
+   而用户报「点了一下没反应」时，最有价值的就是这条。
+   用捕获阶段（第三个参数 true）才能接到资源加载失败（img/script/css）。 */
+window.addEventListener('error', function(e){
+  if(!e) return;
+  if(e.target && e.target !== window && !e.message){
+    /* 资源加载失败没有 message，不区分的话每次进页面都会刷一堆 */
+    var t = e.target;
+    logWarn('资源加载失败：' + (t.src || t.href || t.tagName || '未知'));
+    return;
+  }
+  var where = e.filename
+    ? (' @' + String(e.filename).split('/').pop() + ':' + (e.lineno || 0)) : '';
+  logErr((e.message || '未知错误') + where);
+}, true);
+window.addEventListener('unhandledrejection', function(e){
+  var r = e && e.reason;
+  var s = (r && (r.message || String(r))) || String(r || '空');
+  logErr('未处理的 Promise 拒绝：' + s.slice(0, 200));
+});
 /* 兼容老的自查口子：CDP 验证脚本一直在读 window.__layerLog，
    保留成「只看返回层」的投影，免得既有验证全废 */
 Object.defineProperty(window, '__layerLog', {
@@ -3823,6 +4013,11 @@ function openSheet(kind, data){
     sheet.insertBefore(sh, sheet.firstChild);
   }
   bindSheetDrag();
+  /* 弹层内容是 innerHTML 现填的，而 renderIcons() 只在页面加载时跑过一次 ——
+     于是**所有动态弹层里写的 data-i 图标都是空的**（本轮做语音故障排查页时撞上）。
+     与其要求每个 renderXxx 都改用 icSvg()，不如在这里统一补一次 ——
+     前者要改几十处、漏一处就是一个空框，后者改一处就根治。 */
+  try{ renderIcons(); }catch(e){ logErr('弹层图标渲染失败：' + (e && e.message), '弹层'); }
   syncBack();
 }
 function closeSheet(){
@@ -4039,6 +4234,14 @@ function renderSheet(kind, data){
     sheet.innerHTML = renderCpSettings();
     return;
   }
+  if(kind === 'avatar'){
+    sheet.innerHTML = renderAvatarSheet();
+    return;
+  }
+  if(kind === 'ttsfix'){
+    sheet.innerHTML = renderTtsTroubleshoot();
+    return;
+  }
   if(kind === 'planpref'){
     sheet.innerHTML = renderPlanPrefSheet();
     return;
@@ -4175,9 +4378,13 @@ var LOG_TAGS = {
   'AI':  ['var(--brand-2)', 'var(--brand-soft)'],
   '数据': ['#10b981', 'rgba(16,185,129,.12)'],
   '通知': ['var(--danger)', 'rgba(224,80,90,.12)'],
-  '系统': ['var(--sub)', 'var(--line)']
+  '系统': ['var(--sub)', 'var(--line)'],
+  '错误': ['#fff', 'var(--danger)'],
+  '警告': ['#fff', 'var(--warn)'],
+  '语音': ['#0b7285', 'var(--accent-soft)']
 };
 function debugLogSheet(){
+  var st = logStats();
   var rows = RUNTIME_LOG.length
     ? RUNTIME_LOG.slice().reverse().map(function(x){
         var c = LOG_TAGS[x.tag] || ['var(--sub)','var(--line)'];
@@ -4190,19 +4397,125 @@ function debugLogSheet(){
   document.getElementById('sheet').innerHTML =
       '<div class="sh"></div><h3>运行日志</h3>'
     + '<div class="muted" style="font-size:11.5px;margin-top:4px;line-height:1.8">'
-    + '当前返回层：<b>' + esc(currentLayer()) + '</b>（root = 再返回一次就退出应用）<br/>'
-    + '共 <b>' + RUNTIME_LOG.length + '</b> 条，最新在最上面。'
-    + '侧滑不对时，看最后几条的「返回」和「页面」是不是对得上。</div>'
+    + '这里会记下导航、弹层、AI 请求，以及<b>所有页面报错</b>（崩了也会留下）。<br/>'
+    + '出问题时点「生成问题报告」，整段贴进 Issue 就行 —— Key 会自动脱敏。</div>'
+    + '<div class="lgstats">'
+    + '<div class="lgstat' + (st.err ? ' bad' : '') + '"><b>' + st.err + '</b><span>错误</span></div>'
+    + '<div class="lgstat' + (st.warn ? ' warn' : '') + '"><b>' + st.warn + '</b><span>警告</span></div>'
+    + '<div class="lgstat"><b>' + st.total + '</b><span>总记录</span></div>'
+    + '</div>'
+    + '<div class="btn primary" style="margin-top:12px" onclick="showBugReport()">生成问题报告</div>'
+    + '<div class="row" style="gap:8px;margin-top:8px">'
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="copyBugReport()">复制报告</div>'
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="copyRunLog()">复制原始日志</div>'
+    + '</div>'
+    + '<div id="bugReportBox" style="display:none"></div>'
     + '<div class="logbox">' + rows + '</div>'
     + '<div class="row" style="gap:8px;margin-top:14px">'
     + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="clearRunLog()">清空</div>'
-    + '<div class="btn primary" style="flex:1;margin-top:0" onclick="copyRunLog()">复制全部</div>'
-    + '</div>'
-    + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet()">知道了</div>';
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="closeSheet()">知道了</div>'
+    + '</div>';
+}
+function showBugReport(){
+  var txt = buildBugReport();
+  var box = document.getElementById('bugReportBox');
+  if(box){
+    box.className = 'repbox';
+    box.style.display = '';
+    box.textContent = txt;
+    try{ box.scrollTop = 0; }catch(e){}
+  }
+  toast('报告已生成，滚到底部全选复制或点「复制报告」');
+}
+/* Key 只留头尾各 4 位 + 长度：够确认「配的是哪一把」，又不会泄露。 */
+function maskKey(k){
+  k = String(k || '');
+  if(!k) return '未填';
+  if(k.length <= 8) return '已填（' + k.length + ' 字）';
+  return k.slice(0,4) + '…' + k.slice(-4) + '（' + k.length + ' 字）';
+}
+function hostOf(u){
+  return String(u || '').replace(/^https?:\/\//,'').split('/')[0] || '未填';
+}
+function dataBytes(){
+  try{ return (localStorage.getItem(KEY)||'').length + (localStorage.getItem(OLDKEY)||'').length; }
+  catch(e){ return -1; }
+}
+/* ===== 问题报告 =====
+   目标：用户点一下，粘进 Issue 就够作者定位。所以要含四样 ——
+   环境（WebView 内核版本页面拿不到，必须问原生）、配置摘要、错误清单、事发前后的操作。 */
+function buildBugReport(){
+  var st = logStats();
+  var dev = {model:'（未取到，装到手机上才有）', android:'?', sdk:'?', abi:'?', webview:'?'};
+  if(isApp && nat('deviceInfo')){
+    try{ var d = JSON.parse(String(nat('deviceInfo'))); if(d) dev = d; }catch(e){}
+  }
+  var db = dataBytes();
+  var L = [];
+  L.push('# 学径 ' + APP_VER + ' 问题报告');
+  L.push('');
+  L.push('> 由「我的 → 关于学径 → 运行日志」自动生成。整段贴进 Issue 即可，Key 已脱敏。');
+  L.push('');
+  L.push('## 一句话描述');
+  L.push('（请在这里补一句：做了什么、期望什么、实际什么）');
+  L.push('');
+  L.push('## 环境');
+  L.push('- 应用版本：' + APP_VER);
+  L.push('- 设备：' + dev.model);
+  L.push('- 系统：Android ' + dev.android + '（API ' + dev.sdk + '，' + dev.abi + '）');
+  L.push('- WebView 内核：' + dev.webview);
+  L.push('- 本机数据占用：' + (db >= 0 ? (db/1024).toFixed(1) + ' KB' : '未知'));
+  L.push('');
+  L.push('## AI 配置（Key 已脱敏）');
+  ['chat','summarize','plan','vision','tts'].forEach(function(k){
+    var rc = roleCreds(k);
+    L.push('- ' + (MODEL_ROLE_NAME[k] || k) + '：' + providerMeta(rc.provider).n
+      + ' · 模型 ' + (rc.model || '（未设置 → 跟随对话模型）')
+      + ' · ' + hostOf(rc.url) + ' · Key ' + maskKey(rc.key));
+  });
+  L.push('- 联网搜索：' + (webSearchReady() ? ('已开启 · ' + webSearchProvider().n)
+      : (webSearchCfg().on ? '已开但缺 Key 或地址' : '关闭')));
+  L.push('- 节假日模式：' + (holidayModeOn() ? '开' : '关')
+      + ' · 假期记录 ' + holidayAll().length + ' 段 · 学期起始 ' + (S.termStart || '未设'));
+  L.push('- 语音：' + ttsEngineLabel());
+  L.push('');
+  L.push('## 问题统计');
+  L.push('- 错误 ' + st.err + ' 条 / 警告 ' + st.warn + ' 条 / 共 ' + st.total + ' 条记录');
+  L.push('');
+  L.push('## 错误与警告');
+  var bad = RUNTIME_LOG.filter(function(x){ return x.tag==='错误' || x.tag==='警告'; });
+  if(!bad.length){
+    L.push('（没有捕获到错误。如果问题出在网络/服务商，请把下面的「最近操作」一起贴上。）');
+  }else{
+    bad.slice(-40).forEach(function(x){ L.push('- [' + x.t + '] ' + x.tag + '：' + x.msg + '　@' + x.layer); });
+  }
+  L.push('');
+  L.push('## 最近操作（问题发生前后各发生了什么）');
+  RUNTIME_LOG.slice(-40).forEach(function(x){ L.push('- [' + x.t + '] ' + x.tag + '：' + x.msg + '　@' + x.layer); });
+  L.push('');
+  L.push('---');
+  L.push('本报告由应用自动生成；不含聊天正文与 API Key 明文。');
+  return L.join('\n');
+}
+function copyBugReport(){
+  var txt = buildBugReport();
+  if(isApp && nat('copyText', txt)){ toast('报告已复制，粘贴给作者即可'); return; }
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt);
+      toast('报告已复制');
+      return;
+    }
+  }catch(e){}
+  /* 复制不了就退到原生分享，让用户自己发给自己再取 */
+  if(isApp && nat('shareText', '学径-' + APP_VER + '-问题报告.txt', txt)){
+    toast('已拉起分享，可先发给自己再复制');
+    return;
+  }
+  toast('这台机器没法自动复制，截图也一样');
 }
 function clearRunLog(){
-  RUNTIME_LOG.length = 0;
-  logIt('系统', '日志已清空');
+  logClear();
   openSheet('diag');
 }
 function copyRunLog(){
@@ -4349,7 +4662,8 @@ function openPickDay(){
     value: DAYN[selIdx],
     options: DAYN.map(function(nm,i){
       var d = new Date(mon); d.setDate(mon.getDate()+i);
-      var n = (S.courses[i]||[]).length;
+      /* 走单一口：放假当天的标签要显示「无课」，不能直接数 S.courses */
+      var n = coursesAt(i, weekNo(d)).length;
       return {v:nm, l:'周' + nm + ' · ' + (d.getMonth()+1) + '/' + d.getDate(),
               s: n ? (n + ' 节课') : '无课'};
     }),
@@ -4499,7 +4813,7 @@ function renderCourses(){
   }
   if(!list.length){
     /* 放假导致的「空」要和「这周没排课」区分开，否则会显示成「本周没轮到」 */
-    var holN = isHolidayDay(day, wno) ? (holidayOn(dateKeyForDayIdx(day, wno)) || '节假日') : '';
+    var holN = dayInfo(day, wno).holidayName;   /* 单一口已经算好了，不用再拼一遍 */
     if(holN){
       box.innerHTML = '<div class="empty">'
         + '<div class="ei">假</div>'
@@ -5433,7 +5747,81 @@ function greetingMsg(){
     + '，本周已累计专注 ' + fmtMin(weekMin()) + '。有什么想问的？';
 }
 var AI_AVATAR_URL = 'data:image/png;base64,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';
-function aiAvStyle(){ return 'background-image:url(' + AI_AVATAR_URL + ');background-size:cover;background-position:center'; }
+/* ---------- 对话页 AI 头像 ----------
+   AI_AVATAR_URL 是写死的默认头像（构建期内联的 base64）。
+   用户换成自己的图后存 S.aiAvatar。
+   ⚠️ 用正则判断而不是 slice：'data:image/' 是 11 个字符，
+      写成 slice(0,12) 会拿到 'data:image/j' 永远不匹配 —— 头像是自定义的，
+      界面却一直显示默认，而这种错没有任何报错。
+      校验不可省：脏值会被拼进 background-image:url() 把整个气泡样式弄坏。 */
+var AI_AVATAR_MAX = 256, AI_AVATAR_Q = 0.86;
+function isImgDataUrl(v){ return typeof v === 'string' && /^data:image\//i.test(v); }
+function aiAvatarSrc(){ return isImgDataUrl(S.aiAvatar) ? S.aiAvatar : AI_AVATAR_URL; }
+function aiAvatarCustom(){ return aiAvatarSrc() !== AI_AVATAR_URL; }
+function aiAvStyle(){ return 'background-image:url(' + aiAvatarSrc() + ');background-size:cover;background-position:center'; }
+
+function openSheetAvatar(){ openSheet('avatar'); }
+function renderAvatarSheet(){
+  var cur = aiAvatarCustom();
+  return '<div class="sh"></div><h3>AI 头像</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:4px;line-height:1.8">'
+    + '图片只存在这台手机上，不会上传到任何地方。换了之后，对话页、'
+    + '正在输入的气泡和「我的」页都会跟着变。</div>'
+    + '<div style="margin-top:14px;display:flex;gap:14px;align-items:center">'
+    + '<div class="avatar" style="width:56px;height:56px;flex:none;' + aiAvStyle() + '"></div>'
+    + '<div class="muted" style="font-size:11.5px;line-height:1.7">当前：'
+    + (cur ? '自定义头像' : '默认头像') + '</div></div>'
+    + '<div class="list" style="margin-top:14px">'
+    + '<div class="li tap" onclick="aiAvatarPick()"><div class="ic" data-i="image"></div>'
+    + '<div class="tx"><b>从相册选一张</b><small>自动压到 256px，占用很小</small></div>'
+    + '<div class="val"><span class="arrow">›</span></div></div>'
+    + (cur
+      ? '<div class="li tap" onclick="aiAvatarClear()"><div class="ic" data-i="refresh"></div>'
+        + '<div class="tx"><b>恢复默认头像</b><small>删掉自定义图片</small></div>'
+        + '<div class="val"><span class="arrow">›</span></div></div>'
+      : '')
+    + '</div>'
+    + '<div class="btn ghost" style="margin-top:10px" onclick="closeSheet()">关闭</div>';
+}
+/* 选图走静态隐藏 input，与「我的」页用户头像同一套（onAvatarFile 那套已验证可用）。
+   方形裁剪 + 256×256 JPEG：头像在界面上只显示 28~40px，整库又在 localStorage
+   （配额 ~5MB），存原图纯浪费。 */
+function aiAvatarPick(){ document.getElementById('aiAvatarFile').click(); }
+function onAiAvatarFile(inp){
+  var f = inp.files && inp.files[0];
+  if(!f) return;
+  if(!/^image\//.test(f.type)){ toast('请选择图片文件'); inp.value=''; return; }
+  var fr = new FileReader();
+  fr.onload = function(){
+    var img = new Image();
+    img.onload = function(){
+      try{
+        var size = AI_AVATAR_MAX, c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        var g = c.getContext('2d'), s = Math.min(img.width, img.height);
+        g.drawImage(img, (img.width-s)/2, (img.height-s)/2, s, s, 0, 0, size, size);
+        S.aiAvatar = c.toDataURL('image/jpeg', AI_AVATAR_Q);
+        save();
+        logIt('配置', 'AI 头像已自定义（约 ' + Math.round(S.aiAvatar.length/1024) + ' KB）');
+        /* 换完要刷的入口：对话消息、打字气泡、我的页 */
+        renderMsgs(); renderProfile();
+        closeSheet(); openSheet('avatar');
+        toast('头像换好了');
+      }catch(e){ toast('这张图片处理失败了，换一张试试'); }
+    };
+    img.onerror = function(){ toast('图片读取失败'); };
+    img.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+  inp.value = '';
+}
+function aiAvatarClear(){
+  delete S.aiAvatar;
+  save();
+  logIt('配置', 'AI 头像恢复默认');
+  closeSheet(); renderMsgs(); renderProfile(); openSheet('avatar');
+  toast('已恢复默认头像');
+}
 function userAvHtml(){
   if(S.avatar) return '<div class="avatar sm" style="background-image:url(' + S.avatar + ');background-size:cover;background-position:center"></div>';
   var ch = (S.nick && S.nick[0]) || '同';
@@ -7729,7 +8117,9 @@ function send(preset, opts){
       if(toolMsg){
         msgs.push({r:'sys', t: toolMsg});
       }
-      try{ ttsSpeak(body || '', true); }catch(e){}
+      /* 自动播报要守开关：原来这里传的是 force=true，等于「无视开关强制念」，
+         而开关又没渲染在界面上 —— 用户既关不掉也看不到。 */
+      try{ ttsSpeak(body || ''); }catch(e){}
       renderMsgs();
       memTick(text);
       try{ save(); }catch(e){}
@@ -7999,6 +8389,8 @@ function renderProfile(){
   document.getElementById('myName').textContent = S.nick || '未设置昵称';
   document.getElementById('nickInput').value = S.nick || '';
   document.getElementById('aiNameInput').value = S.aiName || '';
+  var avh = document.getElementById('avatarHint');
+  if(avh) avh.textContent = aiAvatarCustom() ? '自定义头像（点开可换或恢复）' : '默认头像';
   document.getElementById('callInput').value = S.callLocked ? (S.aiCall||'') : '';
   document.getElementById('callHint').textContent = S.callLocked
     ? '已手动设置，不再跟随昵称' : '留空则跟随昵称';
@@ -8252,57 +8644,257 @@ function togglePref(k, el){
 }
 
 /* ---------- 服务商 / 模型 ---------- */
-/* ---------- 语音播报（系统 TTS） ---------- */
+/* ============================================================
+   语音播报
+   ============================================================
+   【为什么重构】原来只有一条路：WebView 的 speechSynthesis。三个问题叠在一起，
+   表现就是「从来没成功朗读过」，而且用户完全不知道卡在哪：
+     ① getVoices() 首次**同步返回空数组**，要等 voiceschanged 事件才有内容。
+        旧代码从不注册那个事件 → ttsPickVoice() 永远返回 null。
+     ② 设备没装 TTS 引擎时 speak() 静默失败 —— 不抛错、不回调。
+     ③ 异常全进了 catch(e){}，用户只看到「没声音」。
+
+   【现在】原生 TextToSpeech 为主、WebView 为兜底，且每条失败都把原因告诉用户。
+   原生侧见 android/.../Tts.java；四个桥方法在 NativeBridge：
+   ttsInit / ttsSpeak / ttsStop / ttsVoices。
+   引擎生命周期事件（就绪 / 出错 / 开始 / 读完）由原生回调 window.onTtsEvent。 */
+
+/* status: unknown 未检测 | pending 初始化中 | ready 可用 | error 引擎有问题 | web 浏览器预览 */
+var TTS = { status:'unknown', engine:'', voices:[], err:'' };
+var _ttsWaiter = null;      /* 引擎初始化期间的朗读请求，ready 后补上 */
+
 function ttsStore(){
-  if(!S.tts) S.tts = {on:false, voice:'', rate:1, styleVoice:'auto'};
-  if(S.tts.rate == null) S.tts.rate = 1;
-  return S.tts;
+  if(!S.tts) S.tts = {on:false, mute:false, voice:'', rate:1, pitch:1};
+  var t = S.tts;
+  if(t.rate == null) t.rate = 1;
+  if(t.pitch == null) t.pitch = 1;
+  if(t.mute == null) t.mute = false;
+  return t;
 }
-function ttsVoices(){
-  try{
-    if(!window.speechSynthesis) return [];
-    return window.speechSynthesis.getVoices() || [];
-  }catch(e){ return []; }
-}
-function ttsPickVoice(){
-  var t = ttsStore();
-  var vs = ttsVoices();
-  if(t.voice){
-    for(var i=0;i<vs.length;i++) if(vs[i].name === t.voice) return vs[i];
+
+/* 启动引擎初始化。
+   ⚠️ 这里**不预判**「设备有没有引擎」。以前先用 queryIntentServices(TTS_SERVICE) 判一次，
+   空的就直接报「系统里没有安装任何语音引擎」—— 结果在小米手机上被 Android 11+ 的
+   **包可见性过滤**骗了：明明装着「系统语音引擎」，却报没装（清单里没声明 TTS_SERVICE，已补）。
+   而且厂商 ROM 对这个查询还有各种偏差。
+   结论：**唯一可信的判据是 TextToSpeech 的 onInit 回调**，所以这里只负责发起，让回调说真话。
+   返回：'ready' | 'pending' | 'error' | 'web'（'noengine' 已不再由这里产生） */
+function ttsInit(){
+  if(TTS.status === 'ready' || TTS.status === 'web') return TTS.status;
+  if(!isApp || !NATIVE || typeof NATIVE.ttsInit !== 'function'){
+    TTS.status = 'web';
+    return 'web';
   }
-  var lang = (S.prefs.replyStyle === 'tsundere' || S.prefs.replyStyle === 'oneesan') ? 'zh' : 'zh';
-  var zh = vs.filter(function(v){ return /^zh|Chinese|cmn/i.test(v.lang||''); });
-  if(zh.length) return zh[0];
-  return vs[0] || null;
+  if(TTS.status === 'pending') return 'pending';
+  TTS.status = 'pending';
+  try{
+    nat('ttsInit');
+  }catch(e){
+    TTS.status = 'error';
+    TTS.err = '调用语音引擎时出错：' + ((e && e.message) || e);
+    logErr(TTS.err, '语音');
+    return 'error';
+  }
+  return 'pending';   /* 结论等 onInit */
 }
-function ttsSpeak(text, force){
-  var t = ttsStore();
-  /* 对话页按钮强制朗读；自动播报仍看开关（开关已从 UI 隐藏） */
-  if(!force && !t.on) return;
-  var s = String(text||'').replace(/<[^>]+>/g,' ').trim();
-  if(!s) return;
-  var rc = roleCreds('tts');
-  if(rc.model && rc.url && rc.key){
-    ttsModelSpeak(rc, s.slice(0, 500), function(ok){
-      if(!ok) ttsSystemSpeak(s);
-    });
+
+/* 原生 → 页面：引擎生命周期 */
+window.onTtsEvent = function(ev){
+  if(!ev || !ev.t) return;
+  if(ev.t === 'ready'){
+    TTS.status = 'ready';
+    TTS.engine = ev.d || '';
+    TTS.err = '';
+    TTS.voices = ttsFetchVoices();
+    logIt('语音', '引擎就绪：' + (TTS.engine || '默认') + '，音色 ' + TTS.voices.length + ' 个');
+    renderTtsRow();
+    var cb = _ttsWaiter; _ttsWaiter = null;
+    if(cb) cb('ready');
     return;
   }
-  ttsSystemSpeak(s);
-}
-function ttsSystemSpeak(text){
-  if(!window.speechSynthesis) return;
+  if(ev.t === 'error'){
+    TTS.status = 'error';
+    TTS.err = ev.d || '未知原因';
+    logErr('语音引擎不可用：' + TTS.err, '语音');
+    renderTtsRow();
+    var cb2 = _ttsWaiter; _ttsWaiter = null;
+    if(cb2) cb2('error');
+    return;
+  }
+  if(ev.t === 'start') logIt('语音', '开始朗读');
+  else if(ev.t === 'done') logIt('语音', '朗读完成');
+  else if(ev.t === 'cancel') logIt('语音', '朗读被停止');
+  else if(ev.t === 'error' || (ev.t === 'utterance' && ev.d)) logWarn('朗读出错：' + ev.d);
+};
+
+/* 本机**可见**的 TTS 引擎包名。只用于诊断：
+   一个都看不到 → 可见性过滤 / ROM 差异；看得到但初始化失败 → 引擎本身没配好。
+   这两种的解法完全不同，所以排查页要把它显示出来。 */
+function ttsVisibleEngines(){
+  if(!isApp || !NATIVE || typeof NATIVE.ttsEngines !== 'function') return [];
   try{
-    window.speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(String(text||'').slice(0, 400));
-    var v = ttsPickVoice();
-    if(v) u.voice = v;
-    u.rate = Math.max(0.5, Math.min(2, +ttsStore().rate || 1));
-    u.pitch = (S.prefs.replyStyle === 'tsundere' || S.prefs.replyStyle === 'oneesan') ? 1.1
-      : (S.prefs.replyStyle === 'ceo' || S.prefs.replyStyle === 'butler') ? 0.85 : 1;
-    window.speechSynthesis.speak(u);
+    var a = JSON.parse(String(nat('ttsEngines') || '[]'));
+    return Array.isArray(a) ? a : [];
+  }catch(e){ return []; }
+}
+
+/* 原生音色列表。引擎未就绪时返回空数组 —— 那时页面应该显示「待检测」而不是空白 */
+function ttsFetchVoices(){
+  if(!isApp || !NATIVE || typeof NATIVE.ttsVoices !== 'function') return [];
+  try{
+    var a = JSON.parse(String(nat('ttsVoices') || '[]'));
+    return Array.isArray(a) ? a : [];
+  }catch(e){ return []; }
+}
+
+/* ---------- WebView / 浏览器预览路径 ----------
+   这里把旧代码最大的问题补上：注册 voiceschanged + 缓存 + 拿到后自动重试。
+   旧代码只同步取一次，拿到空数组就认定「系统没有可用音色」。 */
+var _webVoices = null;
+function ttsWebVoices(){
+  try{
+    if(!window.speechSynthesis) return [];
+    var v = window.speechSynthesis.getVoices() || [];
+    if(v.length) _webVoices = v;
+    return _webVoices || [];
+  }catch(e){ return _webVoices || []; }
+}
+if(typeof window.speechSynthesis !== 'undefined'){
+  try{
+    window.speechSynthesis.onvoiceschanged = function(){
+      _webVoices = null;
+      var n = ttsWebVoices().length;
+      logIt('语音', '系统音色列表就绪：' + n + ' 个');
+      renderTtsRow();
+    };
   }catch(e){}
 }
+
+/* 统一入口。opt.force = true 时忽略「自动播报」开关（对话页气泡上的「朗读」按钮）。 */
+function ttsSpeak(text, opt){
+  opt = opt || {};
+  var t = ttsStore();
+  /* 静音优先于自动播报开关：叫「静音」就該真的什么都别出声。
+     只挡测试音却照样自动念的话，用户会以为开关坏了。 */
+  if(t.mute){
+    if(opt.force) toast('已静音，先关掉静音开关');
+    return false;
+  }
+  if(!opt.force && !t.on) return false;
+  var s = ttsClean(text);
+  if(!s){ toast('没有可朗读的内容'); return false; }
+  /* 路径 1：用户给「语音播报」绑了模型 → 用模型合成，音色自然得多。
+     失败会先记日志再自动回落到系统引擎，不再静默。 */
+  var rc = roleCreds('tts');
+  if(rc.model && rc.url && rc.key){
+    ttsModelSpeak(rc, s.slice(0, 500), function(ok, why){
+      if(!ok){
+        logWarn('模型合成失败（' + (why || '未知') + '），回落到系统引擎', '语音');
+        ttsSystemSpeak(s);
+      }
+    });
+    return true;
+  }
+  return ttsSystemSpeak(s);
+}
+
+/* 清洗待读文本：代码块、链接、图片标记读出来只是噪声 */
+function ttsClean(text){
+  return String(text == null ? '' : text)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[|*#>`_]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* 系统引擎：原生优先；原生不可用时退回 WebView。返回是否已提交。 */
+function ttsSystemSpeak(s){
+  if(isApp && NATIVE && typeof NATIVE.ttsSpeak === 'function'){
+    var st = TTS.status;
+    if(st === 'unknown' || st === 'pending'){
+      ttsInit();
+      /* 引擎还没就绪就把这次朗读挂起来，ready 事件到了自动补上 —— 不要直接丢弃 */
+      _ttsWaiter = function(r){
+        if(r === 'ready') ttsSystemSpeak(s);
+        else ttsFail(TTS.err || '语音引擎不可用');
+      };
+      toast('正在启动语音引擎…');
+      return true;
+    }
+    if(st === 'ready'){
+      var t = ttsStore(), err = '';
+      try{ err = String(nat('ttsSpeak', s, t.voice || '', +t.rate || 1, +t.pitch || 1) || ''); }
+      catch(ex){ err = '调用语音引擎出错：' + (ex && ex.message); }
+      if(!err) return true;
+      logWarn('原生朗读被拒：' + err, '语音');
+      ttsFail(err, {help:true});
+      return false;
+    }
+    /* error 状态不再悄悄退回 WebView —— 直接把原因告诉用户，并给出路 */
+    ttsFail(TTS.err || '语音引擎不可用', {help:true});
+    return false;
+  }
+  return ttsWebSpeak(s);
+}
+
+function ttsWebSpeak(s){
+  if(!window.speechSynthesis){
+    ttsFail('当前环境不支持语音合成', {help:true});
+    return false;
+  }
+  var vs = ttsWebVoices();
+  if(!vs.length){
+    /* 首次必然是空的。等 voiceschanged 到了再读一次，别直接判死刑。 */
+    setTimeout(function(){
+      if(ttsWebVoices().length) ttsWebSpeak(s);
+      else ttsFail('系统没有可用音色。请到「设置 → 系统 → 语言和输入法 → 文字转语音」'
+        + '确认已安装语音引擎，并下载中文语音包。', {help:true});
+    }, 700);
+    toast('正在等待系统音色…');
+    return true;
+  }
+  try{
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(s.slice(0, 400));
+    var t = ttsStore();
+    var v = t.voice ? vs.filter(function(x){ return x.name === t.voice; })[0] : null;
+    if(!v) v = vs.filter(function(x){ return /^zh|cmn|Chinese/i.test(x.lang || ''); })[0] || vs[0];
+    if(v){ u.voice = v; u.lang = v.lang; }
+    u.rate = Math.max(0.5, Math.min(2, +t.rate || 1));
+    u.pitch = Math.max(0.4, Math.min(2, +t.pitch || 1));
+    window.speechSynthesis.speak(u);
+    logIt('语音', '走浏览器语音合成：' + (v ? v.name : '默认音色'));
+    return true;
+  }catch(e){
+    ttsFail('朗读失败：' + (e && e.message));
+    return false;
+  }
+}
+
+/** 所有失败都从这里出去：写日志 + 明确提示，绝不静默 */
+/* opt.help = true 时自动弹「为什么不出声」页。
+   用于**引擎级**失败（没装引擎 / 引擎初始化失败）：这类问题用户自己解决不了，
+   必须告诉他去哪儿装、装完怎么重试 —— 一句 toast 承载不了。 */
+function ttsFail(why, opt){
+  why = String(why || '未知原因');
+  logErr('朗读失败：' + why, '语音');
+  toast('朗读没成功');
+  if(opt && opt.help){
+    setTimeout(function(){
+      try{ closeSheet(); openTtsTroubleshoot(); }catch(e){}
+    }, 650);
+  }
+}
+
+function ttsStop(){
+  if(isApp && NATIVE && NATIVE.ttsStop){ try{ nat('ttsStop'); }catch(e){} }
+  try{ if(window.speechSynthesis) window.speechSynthesis.cancel(); }catch(e){}
+  if(_ttsAudio){ try{ _ttsAudio.pause(); _ttsAudio = null; }catch(e){} }
+}
+
 var _ttsAudio = null;
 function ttsModelSpeak(rc, text, done){
   var url = joinApiUrl(rc.url, 'audio/speech');
@@ -8313,66 +8905,196 @@ function ttsModelSpeak(rc, text, done){
     response_format: 'mp3'
   });
   if(!isApp || !NATIVE || !NATIVE.aiTts){
-    if(done) done(false);
+    if(done) done(false, '没有原生桥');
     return;
   }
   toast('正在用模型合成语音…');
-  window.__ttsDone = function(ok, path){
-    if(!ok){ if(done) done(false); return; }
+  window.__ttsDone = function(ok, path, why){
+    if(!ok){ if(done) done(false, why || '模型合成失败'); return; }
     try{
       if(_ttsAudio){ _ttsAudio.pause(); _ttsAudio = null; }
       _ttsAudio = new Audio(path);
-      _ttsAudio.play().then(function(){ if(done) done(true); }).catch(function(){
-        if(done) done(false);
-      });
-    }catch(e){ if(done) done(false); }
+      _ttsAudio.play().then(function(){ if(done) done(true, ''); })
+        .catch(function(){ if(done) done(false, '音频播放被系统拒绝'); });
+    }catch(e){ if(done) done(false, (e && e.message) || '播放异常'); }
   };
   nat('aiTts', url, rc.key || '', body);
 }
-window.onTtsResult = function(ok, path){
-  if(window.__ttsDone) window.__ttsDone(!!ok, path);
+window.onTtsResult = function(ok, path, why){
+  if(window.__ttsDone) window.__ttsDone(!!ok, path, why || '');
 };
-function ttsSpeakForce(text){ ttsSpeak(text, true); }
+
+function ttsSpeakForce(text){ ttsSpeak(text, {force:true}); }
+
+/* ---------- 设置项 ---------- */
+function ttsVoiceOptions(){
+  if(TTS.status === 'ready' && TTS.voices.length){
+    return TTS.voices.map(function(v){
+      return { v:v.id, l:(v.name || v.id), s:v.lang || '' };
+    });
+  }
+  return ttsWebVoices().map(function(v){
+    return { v:v.name, l:v.name, s:v.lang || '' };
+  });
+}
+/* 用哨兵值代表「跟随系统默认」：openPick 的 value 为空时无法可靠匹配 */
+var TTS_DEFAULT = '__default__';
+
 function pickTtsVoice(){
-  var vs = ttsVoices();
-  if(!vs.length){ toast('系统没有可用音色'); return; }
+  if(TTS.status === 'unknown' || TTS.status === 'pending') ttsInit();
+  var opts = ttsVoiceOptions();
+  var t = ttsStore();
+  if(!opts.length){
+    /* 没有音色不是死路：先给原因，再给一个可试的入口 */
+    openTtsTroubleshoot();
+    return;
+  }
+  opts.unshift({ v:TTS_DEFAULT, l:'跟随系统默认', s:'由系统挑一个可用的' });
   openPick({
     title:'音色',
-    options: vs.map(function(v){ return {v:v.name, l:v.name, s:v.lang||''}; }),
-    value: ttsStore().voice,
+    sub: (TTS.status === 'ready' ? (TTS.engine || '系统引擎') : '当前：浏览器语音')
+       + ' · 共 ' + (opts.length-1) + ' 个',
+    options: opts,
+    value: t.voice || TTS_DEFAULT,
     onPick: function(v){
-      var t = ttsStore(); t.voice = v; save();
-      var lab = document.getElementById('ttsVoiceLab');
-      if(lab) lab.textContent = v;
-      toast('音色已切换');
+      t.voice = (v === TTS_DEFAULT) ? '' : v;
+      save(); renderTtsRow();
+      logIt('语音', '音色 → ' + (t.voice || '跟随系统默认'));
+      ttsSpeak('这是现在的音色。', {force:true});
     }
   });
 }
+/* 音色一个都拿不到时，把「为什么」和「怎么办」一次说清。
+   走 openSheet('ttsfix') + renderSheet 分支，不要在这里直接改 innerHTML ——
+   那样 openSheet 就对不上 renderSheet 的分支表，正是本项目踩过 9 次的那个坑。 */
+function openTtsTroubleshoot(){ openSheet('ttsfix'); }
+function renderTtsTroubleshoot(){
+  var why = TTS.err || (TTS.status === 'web'
+    ? '当前是浏览器预览，没有系统音色 —— 装到手机上才会用原生引擎。'
+    : '还没检测到引擎状态。');
+  /* 把「本机看得见哪些引擎」摆出来 —— 这一行是分辨两类问题的关键 */
+  var eng = ttsVisibleEngines();
+  var engLine = isApp
+    ? ('<div class="muted" style="font-size:11.5px;margin-top:10px;line-height:1.8">'
+       + '本机可见的语音引擎：' + (eng.length
+           ? ('<b>' + eng.map(function(x){ return esc(x); }).join('、') + '</b>（' + eng.length + ' 个）')
+           : '<b style="color:var(--danger)">一个都看不到</b>') + '</div>')
+    : '';
+  return '<div class="sh"></div><h3>语音为什么不出声</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.8">' + esc(why) + '</div>'
+    + engLine
+    + '<div class="list" style="margin-top:12px">'
+    + '<div class="li tap" onclick="ttsRecheck()"><div class="ic" data-i="refresh"></div>'
+    + '<div class="tx"><b>重新检测</b><small>刚装完语音引擎就点这里</small></div>'
+    + '<div class="val"><span class="arrow">›</span></div></div>'
+    + '<div class="li tap" onclick="openAppSettings();closeSheet()"><div class="ic" data-i="device"></div>'
+    + '<div class="tx"><b>打开系统设置</b><small>文字转语音引擎与语音包都在那几页里</small></div>'
+    + '<div class="val"><span class="arrow">›</span></div></div>'
+    + '</div>'
+    + '<div class="note2" style="margin-top:10px">常见原因：① 系统里没装 TTS 引擎；'
+    + '② 装了但「首选引擎」被禁用或没下中文语音包；③ 系统省电把后台语音服务杀了；'
+    + '④ 上面「本机可见的语音引擎」一个都没有 —— 这种情况请把应用报告反馈给作者，'
+    + '属于应用侧的适配问题，不是设备没装。</div>'
+    + '<div class="btn ghost" style="margin-top:10px" onclick="closeSheet()">知道了</div>';
+}
+/* 跳系统设置。原生有 openAppSettings 桥；浏览器里只能提示一下。 */
+function openAppSettings(){
+  if(isApp && nat('openAppSettings')) return true;
+  toast('浏览器里跳不了系统设置');
+  return false;
+}
+function ttsRecheck(){
+  TTS.status = 'unknown';
+  var r = ttsInit();
+  renderTtsRow();
+  if(r === 'ready'){ toast('引擎可用'); pickTtsVoice(); return; }
+  if(r === 'error'){ openTtsTroubleshoot(); return; }
+  toast('正在检测引擎…');
+  /* ready / error 事件会走 onTtsEvent；这里兜一下超时，别让用户干等 */
+  setTimeout(function(){
+    if(TTS.status === 'pending'){ TTS.status = 'error'; TTS.err = '引擎初始化超时（15 秒无响应）'; renderTtsRow(); openTtsTroubleshoot(); }
+  }, 15000);
+}
+/* 失败原因往往是一整段带指路的话（「到设置里装一个」），塞进一行小字会挤爆。
+   只取第一个分句，长了再省略 —— 完整原因在「为什么不出声」页与日志里。 */
+/* 引擎状态的唯一出口现在是两处：音色行的小字（renderTtsRow）与问题报告（ttsEngineLabel）。
+   原来还有个 ttsStatusLine() 专供「引擎状态」那一行，那行按用户要求去掉后它就没人调用了 ——
+   留着会让人以为还有第三个地方在显示状态。 */
+function ttsErrShort(s){
+  s = String(s || '').split('。')[0].split('，')[0].trim();
+  if(!s) return '未知原因';
+  return s.length > 16 ? (s.slice(0, 16) + '…') : s;
+}
+function toggleTts(el){
+  var t = ttsStore();
+  t.on = !t.on;
+  save();
+  if(el) el.classList.toggle('on', !!t.on);
+  logIt('语音', '自动播报 → ' + (t.on ? '开' : '关'));
+  if(t.on) ttsSpeak('自动播报已打开。', {force:true});
+}
+function toggleTtsMute(el){
+  var t = ttsStore();
+  t.mute = !t.mute;
+  save();
+  if(el) el.classList.toggle('on', !!t.mute);
+  renderTtsRow();
+  if(t.mute){
+    /* 正在播的立刻停掉，否则「已静音」和还在响同时发生 */
+    ttsStop();
+    logIt('语音', '静音已开启');
+    toast('已静音，这一类不会再出声');
+  }else{
+    logIt('语音', '静音已关闭');
+    ttsSpeak('静音已关闭，这是现在的声音。', {force:true});
+  }
+}
+function ttsPreview(){
+  ttsSpeak('你好，我是小径。这是我现在的声音。如果你能听到这句话，'
+    + '说明朗读功能是正常的。', {force:true});
+}
 function pickTtsRate(){
   var opts = [
-    {v:'0.8', l:'慢 0.8×', s:''},{v:'1', l:'正常 1.0×', s:''},
-    {v:'1.2', l:'快 1.2×', s:''},{v:'1.5', l:'很快 1.5×', s:''}
+    {v:'0.7', l:'很慢 0.7×', s:''},{v:'0.85', l:'慢 0.85×', s:''},
+    {v:'1', l:'正常 1.0×', s:''},{v:'1.2', l:'快 1.2×', s:''},
+    {v:'1.5', l:'很快 1.5×', s:''},{v:'1.8', l:'极快 1.8×', s:''}
   ];
   openPick({
     title:'语速', options:opts, value: String(ttsStore().rate),
     onPick: function(v){
-      var t = ttsStore(); t.rate = parseFloat(v)||1; save();
-      var lab = document.getElementById('ttsRateLab');
-      if(lab) lab.textContent = t.rate + '×';
-      toast('语速 ' + t.rate + '×');
+      var t = ttsStore(); t.rate = parseFloat(v)||1; save(); renderTtsRow();
+      logIt('语音', '语速 → ' + t.rate + '×');
+      ttsSpeak('现在的语速是这样的。', {force:true});
     }
   });
 }
 function renderTtsRow(){
   var t = ttsStore();
   var sw = document.getElementById('swTts');
-  if(sw) sw.classList.toggle('on', !!t.on);
+  if(sw) sw.classList.toggle('on', !!t.on && !t.mute);
+  var mw = document.getElementById('swTtsMute');
+  if(mw) mw.classList.toggle('on', !!t.mute);
   var v = document.getElementById('ttsVoiceLab');
-  if(v) v.textContent = t.voice || '跟随回复风格（中文优先）';
+  /* 「引擎状态」行已按用户要求去掉，但「这台机器到底能不能出声」仍是核心疑问 ——
+     引擎不可用时把原因挂到音色行的小字上，点了正好进排查页。 */
+  if(v){
+    v.textContent = (TTS.status === 'error')
+      ? ('不可用：' + ttsErrShort(TTS.err))
+      : (t.voice || '跟随系统默认');
+    v.style.color = (TTS.status === 'error') ? 'var(--danger)' : '';
+  }
   var r = document.getElementById('ttsRateLab');
   if(r) r.textContent = (t.rate||1) + '×';
 }
-
+/* 供「问题报告」用：这个环境到底能不能朗读，是排查时的高频信息 */
+function ttsEngineLabel(){
+  /* 报告里要能分辨三类：可用 / 不可用 / 压根看不到引擎（= 应用侧适配问题） */
+  var vis = isApp ? ('，可见引擎 ' + ttsVisibleEngines().length + ' 个') : '';
+  if(TTS.status === 'ready') return '原生引擎 ' + (TTS.engine || '默认') + '，音色 ' + TTS.voices.length + ' 个' + vis;
+  if(TTS.status === 'error') return '不可用（' + TTS.err + '）' + vis;
+  if(TTS.status === 'web') return '浏览器语音合成（仅预览有效）';
+  return '尚未检测' + vis;
+}
 /* ---------- 服务商账户（可多渠道独立 url/key） ---------- */
 function providerAccs(){
   if(!S.providerAcc) S.providerAcc = {};
@@ -8534,10 +9256,10 @@ function renderProviders(){
       + '<div class="li tap" onclick="toggleProvCard(\'' + v.id + '\')" style="border-radius:0">'
         + '<div style="width:36px;height:36px;border-radius:11px;background:var(--brand-soft);color:var(--brand);'
           + 'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex:none">'
-          + esc((v.n||'\u00b7').slice(0,2)) + '</div>'
-        + '<div class="tx"><b>' + esc(v.n) + '</b><small>' + esc(v.d||'') + (ready ? ' \u00b7 已配 Key' : ' \u00b7 待配 Key') + '</small></div>'
+          + esc((v.n||'·').slice(0,2)) + '</div>'
+        + '<div class="tx"><b>' + esc(v.n) + '</b><small>' + esc(v.d||'') + (ready ? ' · 已配 Key' : ' · 待配 Key') + '</small></div>'
         + '<div class="val">' + (S.provider === v.id ? '<span class="badge green">使用中</span>' : '')
-          + '<span class="arrow" style="display:inline-block;transform:rotate(' + (isOpen ? 90 : 0) + 'deg)">\u203a</span></div>'
+          + '<span class="arrow" style="display:inline-block;transform:rotate(' + (isOpen ? 90 : 0) + 'deg)">›</span></div>'
       + '</div>'
       + (isOpen ? renderProvBody(v.id) : '')
       + '</div>';
@@ -8546,7 +9268,7 @@ function renderProviders(){
     + '<div style="width:36px;height:36px;border-radius:11px;background:var(--brand-soft);color:var(--brand);'
       + 'display:flex;align-items:center;justify-content:center;font-size:18px;flex:none">＋</div>'
     + '<div class="tx"><b>新增提供商</b><small>添加一个 OpenAI 兼容渠道</small></div>'
-    + '<div class="val"><span class="arrow">\u203a</span></div>'
+    + '<div class="val"><span class="arrow">›</span></div>'
   + '</div>';
   host.innerHTML = html;
   renderAiState();
@@ -8577,11 +9299,11 @@ function renderProvBody(id){
   }
   out += '<div class="field"><label>Base URL</label>'
     + '<input class="f" style="text-align:left" value="' + esc(acc.url||'') + '" '
-    + 'placeholder="' + esc(PROVIDER_URL[id] || 'https://\u2026/v1') + '" '
+    + 'placeholder="' + esc(PROVIDER_URL[id] || 'https://…/v1') + '" '
     + 'onchange="saveProviderField(\'' + q(id) + '\',\'url\',this.value)"></div>'
     + '<div class="field"><label>API Key（仅存本机）</label>'
     + '<input class="f" type="password" style="text-align:left" value="' + esc(acc.key||'') + '" '
-    + 'placeholder="sk-\u2026" onchange="saveProviderField(\'' + q(id) + '\',\'key\',this.value)"></div>'
+    + 'placeholder="sk-…" onchange="saveProviderField(\'' + q(id) + '\',\'key\',this.value)"></div>'
     + '<div class="row g6">'
     + (S.provider === id
         ? ''
@@ -8592,16 +9314,16 @@ function renderProvBody(id){
     + '</div>'
     + '<div class="row g6">'
     + '<div class="btn primary" style="flex:1" onclick="fetchProviderModels(\'' + q(id) + '\')">'
-    + ((_fetching && window.__fetchProvId === id) ? '拉取中\u2026' : '拉取模型列表') + '</div>'
+    + ((_fetching && window.__fetchProvId === id) ? '拉取中…' : '拉取模型列表') + '</div>'
     + '<div class="btn ghost" style="flex:1" onclick="openSheet(\'modelprice\',{pid:\'' + q(id) + '\'})">模型定价</div>'
     + '</div>';
-  if(age) out += '<div class="note2" style="margin:0">上次拉取：' + age + ' \u00b7 共 ' + fetched.length + ' 个。拉到的先进「待添加」，点 ＋ 才进可用名单。</div>';
-  out += '<div><div class="muted" style="font-size:11px;margin-bottom:6px">可用模型（' + enabled.length + '）\u00b7 点 \u00d7 移出</div>'
+  if(age) out += '<div class="note2" style="margin:0">上次拉取：' + age + ' · 共 ' + fetched.length + ' 个。拉到的先进「待添加」，点 ＋ 才进可用名单。</div>';
+  out += '<div><div class="muted" style="font-size:11px;margin-bottom:6px">可用模型（' + enabled.length + '）· 点 × 移出</div>'
     + '<div class="list" style="max-height:150px;overflow:auto">'
     + (enabled.length
         ? enabled.map(function(m){
             return '<div class="li"><div class="tx"><b style="font-size:12px;overflow-wrap:anywhere">' + esc(m) + '</b></div>'
-              + '<div class="val"><div class="icon-btn" onclick="providerModelsDel(\'' + q(id) + '\',\'' + q(m) + '\')">\u00d7</div></div></div>';
+              + '<div class="val"><div class="icon-btn" onclick="providerModelsDel(\'' + q(id) + '\',\'' + q(m) + '\')">×</div></div></div>';
           }).join('')
         : '<div class="li"><div class="tx"><b style="font-size:12px;color:var(--sub)">还没加入模型，从下面添加或手动填</b></div></div>')
     + '</div></div>'
@@ -8610,7 +9332,7 @@ function renderProvBody(id){
     + '<div class="btn ghost" style="flex:none" onclick="providerModelsAdd(\'' + q(id) + '\',(document.getElementById(\'pcAdd_' + esc(id) + '\')||{}).value)">加入</div>'
     + '</div>';
   if(rest.length){
-    out += '<div><div class="muted" style="font-size:11px;margin-bottom:6px">已拉取待添加（' + rest.length + '）\u00b7 点 ＋ 加入可用</div>'
+    out += '<div><div class="muted" style="font-size:11px;margin-bottom:6px">已拉取待添加（' + rest.length + '）· 点 ＋ 加入可用</div>'
       + '<div class="list" style="max-height:170px;overflow:auto">'
       + rest.slice(0, 80).map(function(m){
           return '<div class="li"><div class="tx"><b style="font-size:12px;overflow-wrap:anywhere">' + esc(m) + '</b></div>'
@@ -8719,8 +9441,10 @@ function switchProvider(k){
     MODEL_ROLES.forEach(function(r){
       var v = memo[r.k];
       /* 内置服务商的预设可能变过，记忆里的名字失效就换回预设第一个 */
+      /* tts 留空就是「用系统语音」，别拿文本对话模型补给它 */
+      if(MODEL_NO_AUTO[r.k] && (v == null || !String(v).trim())){ S.models.tts = ''; return; }
       if(ms.length && ms.indexOf(v) < 0) v = ms[0];
-      S.models[r.k] = (v == null) ? '' : v;
+      S.models[r.k] = (S.models[r.k] === ROLE_OFF) ? ROLE_OFF : ((v == null) ? '' : v);
     });
   } else if(k === 'custom'){
     S.models = {chat:'', summarize:'', plan:'', vision:''};
@@ -8817,26 +9541,26 @@ function fetchFailed(payload){
   var hint = modelErrHint(payload);
   _fetchErr = hint || String(payload || '未知原因');
   _fetching = false;
-  logIt('AI', '拉取失败：' + payload + (hint ? (' \u2192 ' + hint) : ''));
+  logIt('AI', '拉取失败：' + payload + (hint ? (' → ' + hint) : ''));
   renderProviders();
-  toast('\u62c9\u53d6\u5931\u8d25\uff1a' + (_fetchErr.length > 40 ? _fetchErr.slice(0, 40) + '\u2026' : _fetchErr));
+  toast('拉取失败：' + (_fetchErr.length > 40 ? _fetchErr.slice(0, 40) + '…' : _fetchErr));
 }
 /* 原生把结果回吐到这里：ok=false 时 payload 是给人看的错误说明 */
 window.onModelsFetched = function(ok, payload){
   _fetching = false;
   var pid = window.__fetchProvId || S.provider;
   if(!ok){
-    logIt('AI', '\u62c9\u53d6\u5931\u8d25(' + pid + ')\uff1a' + payload);
+    logIt('AI', '拉取失败(' + pid + ')：' + payload);
     _fetchErr = modelErrHint(payload) || String(payload || '');
     renderProviders();
-    toast('\u62c9\u53d6\u5931\u8d25\uff1a' + String(payload || '').slice(0, 40));
+    toast('拉取失败：' + String(payload || '').slice(0, 40));
     return;
   }
   var ids = parseModelIds(payload);
   if(!ids.length){
-    logIt('AI', '\u62c9\u53d6\u7a7a\u5217\u8868(' + pid + ') \u524d200=' + String(payload).slice(0,200));
+    logIt('AI', '拉取空列表(' + pid + ') 前200=' + String(payload).slice(0,200));
     renderProviders();
-    toast('\u8fd4\u56de\u91cc\u6ca1\u6709\u53ef\u7528\u6a21\u578b\u5b57\u6bb5');
+    toast('返回里没有可用模型字段');
     return;
   }
   if(!S.modelList) S.modelList = {};
@@ -8847,7 +9571,7 @@ window.onModelsFetched = function(ok, payload){
   window.__provOpen = pid;
   save();
   renderProviders();
-  toast('\u300c' + providerMeta(pid).n + '\u300d\u62c9\u5230 ' + ids.length + ' \u4e2a\u6a21\u578b\uff0c\u70b9 \uff0b \u52a0\u5165\u53ef\u7528');
+  toast('「' + providerMeta(pid).n + '」拉到 ' + ids.length + ' 个模型，点 ＋ 加入可用');
 };
 
 /* OpenAI / 智谱 / 通义 的返回形状各叫各的，这里都认 */
@@ -8882,7 +9606,11 @@ function renderModels(){
        一刷新页面就被顶掉 —— 用户表现就是「自定义模型名选完就改不了了」。
        名字对不对是服务商说了算，配错了调用时会报错，那时再改也不迟。 */
     var cur = S.models[r.k];
-    if(cur == null || !String(cur).trim()){
+    /* 用户点过「取消选择」的，别再自动补默认 —— 补了就等于撤销他的操作。
+       tts 例外：它的「留空」本身就是一个有意义的选项（= 用系统语音），
+       补一个**文本对话模型**进去，用户会以为「模型朗读」是默认行为，
+       而文本模型走 audio/speech 只会失败 —— 然后被误当成「朗读功能坏了」。 */
+    if(!MODEL_NO_AUTO[r.k] && cur !== ROLE_OFF && (cur == null || !String(cur).trim())){
       S.models[r.k] = pool.length ? pool[0] : '';
     }
     html += '<div class="li tap" onclick="pickModel(\'' + r.k + '\')">'
@@ -8953,12 +9681,31 @@ function renderModelPickSheet(d){
     + '<input class="f" id="mpCustom" style="flex:1;text-align:left" placeholder="或手填模型 ID" />'
     + '<div class="btn ghost" style="flex:none" onclick="applyModelPick(\'' + esc(k) + '\',\'' + esc(pid) + '\', (document.getElementById(\'mpCustom\')||{}).value)">使用</div>'
     + '</div>'
-    + '<div class="btn ghost" style="margin-top:10px" onclick="closeSheet()">关闭</div>';
+    + '<div class="row g6" style="margin-top:10px">'
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="clearModelPick(\'' + esc(k) + '\')">取消选择</div>'
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="closeSheet()">关闭</div>'
+    + '</div>';
 }
 function reopenModelPick(k, pid){
   var v = (document.getElementById('mpCustom')||{}).value;
   openSheet('modelpick', {k:k, pid:pid});
   if(v){ var i = document.getElementById('mpCustom'); if(i) i.value = v; }
+}
+/** 取消这个功能的单独绑定，改为跟随对话模型。
+    两个字段都要清 —— S.models[k] 是老结构残留，只清 roles 的话
+    roleModelName 会从它兜底回来，等于没取消。 */
+function clearModelPick(k){
+  var r = rolesCfg();
+  var p = (r[k] && r[k].p) || S.provider || 'deepseek';
+  r[k] = {p: p, m: ''};
+  S.models = S.models || {};
+  S.models[k] = ROLE_OFF;
+  save();
+  renderModels(); renderAiEntry(); renderProfile();
+  openSheet('modelroles');
+  var nm = MODEL_ROLE_NAME[k] || k;
+  logIt('配置', nm + ' 取消单独绑定 → 跟随对话模型');
+  toast(nm + ' 改为跟随对话模型');
 }
 function applyModelPick(k, pid, model){
   model = String(model||'').trim();
@@ -9636,7 +10383,7 @@ function parseCourse(raw){
   var WD = {'一':0,'二':1,'三':2,'四':3,'五':4,'六':5,'日':6,'天':6};
   var dm = t.match(/(周|星期|礼拜)([一二三四五六日天])/);
   if(dm){ out.day = WD[dm[2]]; out.conf.push('星期'); t = t.replace(dm[0],' '); }
-  var tem = t.match(/([\u4e00-\u9fa5A-Za-z]{1,4})\s*(老师|教授|讲师)/);
+  var tem = t.match(/([一-龥A-Za-z]{1,4})\s*(老师|教授|讲师)/);
   if(tem){ out.teacher = tem[1]; out.conf.push('教师'); t = t.replace(tem[0],' '); }
   /* 周次：单周 / 双周 / 每周 —— 也认「1-8周」「9-16周」「奇数周」「双周课」 */
   var wm = t.match(/(单|奇)\s*周/) || t.match(/双\s*周/) || t.match(/(每|全)\s*周/)
@@ -9795,7 +10542,9 @@ function ocrPipeline(){
     return;
   }
   if(!model || /^(未设置|—)$/.test(model)){
-    toast('「图片 / 题目识别」还没选模型 —— 在 AI 配置里选一个视觉模型');
+    /* 短句：这行原本 31 字宽，toast 会截断成「…在 AI 配」；
+       完整指路靠紧接着的 openView('ai') —— 打开的就是配置页。 */
+    toast('还没选视觉模型，已带你去配置');
     openView('ai');
     return;
   }
@@ -10131,7 +10880,7 @@ function runSolve(){
   renderSolve();
   var role = solveState.ocrOnly ? 'chat' : 'vision';
   var prompt = solveState.ocrOnly ? SOLVE_OCR_PROMPT : SOLVE_PROMPT;
-  logIt('AI', (solveState.ocrOnly?'拍照 OCR · ':'拍照搜题 · ') + '调用 ' + (S.models[role]||''));
+  logIt('AI', (solveState.ocrOnly?'拍照 OCR · ':'拍照搜题 · ') + '调用 ' + (roleModelName(role)||'（跟随对话模型）'));
   aiVision(role, prompt, solveState.img, function(ok, out){
     solveState.busy = false;
     if(!ok){
@@ -10285,6 +11034,13 @@ function initClock(){
   document.getElementById('p1greet').textContent = g + '，' + (S.nick || '同学');
   document.getElementById('p1date').textContent =
     (d.getMonth()+1) + '月' + d.getDate() + '日 周' + '日一二三四五六'[d.getDay()];
+  /* 逾期待办是**算出来**的，所以时间一跨过截止点它就该自己变红。
+     这个 30 秒的心跳顺带重刷一次待办页 —— 否则只有重新进页面才看得到变化。
+     只在待办页可见时刷，不可见时零开销。 */
+  try{
+    var tv = document.getElementById('view-todos');
+    if(tv && tv.classList.contains('show')) renderTodos();
+  }catch(e){}
 }
 function refreshAll(){
   renderStats(); renderSummaryQuick(); renderCourses(); renderPlan();
@@ -10819,6 +11575,20 @@ function todoById(id){
   for(var i=0;i<a.length;i++) if(a[i].id===id) return a[i];
   return null;
 }
+/* 待办是否已超时：**算出来的**，不是存一个标志位。
+   存标志位就意味着每次改时间、勾完成、导入导出都要同步它，漏一处就显示错 ——
+   跟 isHolidayDay 一样的思路：判定只在一处算，别的地方只负责显示。
+   只填了日期没填时刻时，按「当天 23:59」算 —— 这是「截止到那天」的自然读法。 */
+function todoOverdue(t){
+  if(!t || t.done || !t.due) return false;
+  var m = String(t.due).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+  if(!m) return false;
+  var at = new Date(+m[1], (+m[2])-1, +m[3], m[4] == null ? 23 : +m[4], m[5] == null ? 59 : +m[5]);
+  return at.getTime() < Date.now();
+}
+function todoOverdueCount(){
+  return todosAll().filter(todoOverdue).length;
+}
 function fmtTodoDue(due){
   if(!due) return '';
   var m = String(due).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
@@ -10901,18 +11671,24 @@ function renderTodos(){
   var row = function(x){
     var due = fmtTodoDue(x.due);
     var p = todoPri(x);
+    /* 已完成的即使过了时间也不标 —— 完成了就不算逾期 */
+    var over = todoOverdue(x);
     var pBadge = p==='urgent' ? ' <span class="badge orange" style="font-size:10px;padding:1px 5px">急</span>'
       : p==='memo' ? ' <span class="badge plain" style="font-size:10px;padding:1px 5px">备忘</span>' : '';
-    return '<div class="todo-row' + (x.done?' done':'') + '">'
+    var oBadge = over ? ' <span class="badge" style="font-size:10px;padding:1px 5px;background:var(--danger);color:#fff">已超时</span>' : '';
+    return '<div class="todo-row' + (x.done?' done':'') + (over?' overdue':'') + '">'
       + '<div class="ck ' + (x.done?'on':'') + '" onclick="event.stopPropagation();todoToggle(\'' + x.id + '\')">' + (x.done?'✓':'') + '</div>'
       + '<div style="flex:1;min-width:0;cursor:pointer" onclick="todoOpen(\'' + x.id + '\')">'
-      + '<div class="tt">' + esc(x.t || x.title || '未命名') + pBadge + '</div>'
-      + (due ? '<div class="td">截止 ' + esc(due) + '</div>' : '')
+      + '<div class="tt">' + esc(x.t || x.title || '未命名') + pBadge + oBadge + '</div>'
+      + (due ? '<div class="td">' + (over ? '已超过截止 ' : '截止 ') + esc(due) + '</div>' : '')
       + (x.body ? '<div class="td">' + esc(String(x.body).slice(0,28)) + (String(x.body).length>28?'…':'') + '</div>' : '')
       + '</div>'
       + '<span class="arrow" onclick="todoOpen(\'' + x.id + '\')">›</span></div>';
   };
-  box.innerHTML = '<div class="muted" style="font-size:11.5px;margin-bottom:10px">未完成 ' + open.length + ' · 已完成 ' + done.length + ' · 点标题看详情</div>'
+  var overN = todoOverdueCount();
+  box.innerHTML = '<div class="muted" style="font-size:11.5px;margin-bottom:10px">未完成 ' + open.length + ' · 已完成 ' + done.length
+    + (overN ? (' · <b style="color:var(--danger)">已超时 ' + overN + '</b>') : '')
+    + ' · 点标题看详情</div>'
     + '<div class="list">' + open.map(row).join('') + '</div>'
     + (done.length ? '<div class="h2" style="margin-top:16px">已完成</div><div class="list">' + done.map(row).join('') + '</div>' : '')
     + '<div class="btn primary" style="margin-top:14px" onclick="todoAddPrompt()">添加待办</div>';
@@ -12827,6 +13603,7 @@ function setNavAlign(align){
   save();
   logIt('数据', '行程任务键已从星期下标迁到日期');
 })();
+logLoad();   /* 先把上次的日志读回来，否则「重启前最后一次报错」永远看不到 */
 logIt('系统', '学径 ' + APP_VER + ' 启动 · ' + (isApp ? '真机模式' : '浏览器预览'));
 applyLook();
 syncInsets();
