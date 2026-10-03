@@ -65,7 +65,7 @@
 
   #page-chat.active{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:0}
   #page-chat .chat-head,#page-chat .aibar,
-  #page-chat .quickwrap,#page-chat .composer{flex:none}
+  #page-chat .composer,#page-chat .qswrow,#page-chat .attachrow{flex:none}
   #page-chat .msgs{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
     scrollbar-width:none;-webkit-overflow-scrolling:touch}
   #page-chat .msgs::-webkit-scrollbar{display:none}
@@ -230,6 +230,20 @@
   .msg.me .bubble{background:linear-gradient(140deg,var(--brand),var(--brand-2));color:#fff;border-color:transparent;
     border-bottom-right-radius:5px;box-shadow:0 6px 18px rgba(var(--brand-rgb),.28)}
   .msg.ai .bubble{border-bottom-left-radius:5px}
+  /* ---------- 长按反馈：气泡上的蒙版 ---------- */
+  /* 长按的 500ms 里原本没有任何反馈，用户不知道识别到没有，
+     会反复按或干脆放弃。这里给气泡盖一层**渐显**的蒙版：
+     动画时长就是 HOLD_MS（走 --hold-ms，由 JS 写入，单一来源），
+     所以用户看到的进度等价于「还要按多久」，不是单纯的装饰。
+     蒙版用固定深色而不是品牌色：用户气泡本身就是品牌那种紫，
+     叠品牌色完全看不出来；深色在浅色 AI 气泡和紫色气泡上都变暗。 */
+  .bubble[data-hold]{position:relative;transition:transform .12s ease}
+  .bubble[data-hold].holding{transform:scale(.975)}
+  .bubble[data-hold].holding::after{
+    content:'';position:absolute;inset:0;border-radius:inherit;
+    background:#0f172a;opacity:0;pointer-events:none;
+    animation:holdMask var(--hold-ms,500ms) linear forwards}
+  @keyframes holdMask{from{opacity:0}to{opacity:.22}}
   .msg .src{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:10.5px;color:var(--sub);
     display:flex;align-items:center;gap:5px;flex-wrap:wrap}
   /* 系统小条：居中、无气泡 —— 用来提示「AI 记了什么」这类非对话事件 */
@@ -284,6 +298,82 @@
   .livebody .cursor{display:inline-block;width:7px;height:14px;background:var(--brand);
     border-radius:2px;vertical-align:-2px;margin-left:2px;animation:bl 1s infinite}
 
+  /* v0.2.1 快捷开关行：深度思考 / 联网搜索。
+     刻意做成「小胶囊 + 选中填充」而不是开关控件 —— 它是每轮对话都要临时改的
+     战术选项（切模型、改语气那种要进设置页），一眼看到当前状态比动手指重要。 */
+  /* 下边距交给 .composer 自己的 margin-top（8px），这里只管上方的留白 ——
+     两处都留会出现 16px 的空档，和上方内容脱开。 */
+  .qswrow{display:flex;align-items:center;gap:8px;padding:8px 0 0;
+    overflow-x:auto;scrollbar-width:none}
+  .qswrow::-webkit-scrollbar{display:none}
+  .qswrow:empty{display:none}
+  /* 尺寸按「够得着」定：原来是 5px 内边距 + 11.5px 字，胶囊只有 23px 高，
+     比手指小一圈。放到 31px 高、13px 字，是能舒服点中的下限。
+     line-height:1 是必须的 —— 默认行高会把文字撑得比图标高，
+     居中就无从谈起。 */
+  .qsw{flex:none;display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;
+    border:1px solid var(--line);background:var(--card);color:var(--sub);
+    font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:.15s;-webkit-tap-highlight-color:transparent}
+  /* 图标要**自己**也做成 flex + line-height:0。.qi 默认是 inline span，
+     里面的 svg 也是 inline 元素，两者按**行盒基线**对齐 ——
+     行高把内容盒撑高，图标就看起来偏上。
+     只给父级 align-items:center 不够，中间还隔着一层行盒。
+     （朗读按钮踩过同一个坑，这里是复发。） */
+  .qsw .qi{display:flex;align-items:center;justify-content:center;line-height:0;
+    width:15px;height:15px;flex:none}
+  .qsw.on{background:var(--brand);border-color:transparent;color:#fff}
+  /* 「开了但没配好」是个警示态，不该跟正常的开启态长得一样。
+     用虚线描边 + 半透明字，而不是改颜色 —— 在紫色底上换颜色很容易
+     再撞一次对比度。 */
+  .qsw.warn{border-style:dashed;opacity:.9}
+  .qsw.warn .qi{opacity:.85}
+  /* 长按消息弹出的操作框 */
+  .actlist{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:8px}
+  .actrow{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);
+    font-size:13px;cursor:pointer}
+  .actrow:last-child{border-bottom:0}
+  .actrow:active{background:var(--brand-soft)}
+  .actrow .ic{width:30px;height:30px;border-radius:10px;flex:none}
+  .actrow.danger{color:var(--danger)}
+  .actrow .arrow{margin-left:auto;opacity:.4}
+  /* 底部只留朗读：这个按钮要能随时点着打断，所以给足点击面积（36px）。
+     颜色刻意**不用** var(--line) 描边 —— 那个变量和卡片底的对比度只有 1.23:1，
+     按钮会变成一个几乎看不见的方块（截图里就是这样）。
+     这里用 --sub 描边（3.9:1）配 --text 图标（>7:1），深浅色都够。 */
+  /* 36px 是上一版按「旁边还有三个小按钮、怕点不准」定的；
+     现在底部只剩它一个，36px 显得笨重。30px 仍高于 44px 建议下限的 70%，
+     且比旁边的 hint 文字高一档，视觉上不悬空。 */
+  .speakbtn{width:30px;height:30px;border-radius:10px;border:1px solid var(--sub);
+    background:var(--card);color:var(--text);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;
+    -webkit-tap-highlight-color:transparent;line-height:0}
+  /* .sb-i 必须**自己也**做成 flex + line-height:0。
+     它默认是 inline span，里面的 svg 也是 inline 元素，
+     会按行盒基线对齐 —— 行高把内容盒撑高，图标看起来就偏上（用户实测）。
+     只给父级 align-items:center 不够，中间还隔着一层行盒。 */
+  .speakbtn .sb-i{display:flex;align-items:center;justify-content:center;line-height:0}
+  .speakbtn:active{background:var(--brand-soft)}
+  .speakbtn.on{background:var(--brand);border-color:transparent;color:#fff}
+
+  /* 加号菜单：fixed 定位挂在按钮上方。不用 openSheet 是因为它是高频入口，
+     进底部大弹层再点选项等于两次点击。 */
+  .plusmenu{position:fixed;z-index:120;background:var(--card);border:1px solid var(--line);
+    border-radius:16px;box-shadow:0 12px 34px rgba(15,23,42,.18);overflow:hidden;
+    display:none;animation:pmIn .13s ease}
+  .plusmenu.show{display:block}
+  @keyframes pmIn{from{opacity:0;transform:translateY(4px) scale(.98)}to{opacity:1;transform:none}}
+  /* 菜单顶部那条：列出「这是谁的哪条」，不然用户长按后不知道操作对象 */
+  .menuhead{padding:10px 13px 8px;border-bottom:1px solid var(--line);background:var(--card)}
+  .menuhead b{font-size:12.5px;display:block}
+  .menuhead small{display:block;font-size:10.5px;margin-top:2px;line-height:1.4;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 选中行：跟已打开的加号菜单区分开 */
+  .actrow.on{background:var(--brand-soft)}
+  .actrow.on .ic{background:var(--brand);color:#fff}
+  /* 操作菜单要窄一点：长按时菜单会盖住气泡，太宽会盖到别的消息 */
+  #msgMenu{width:250px;max-width:calc(100vw - 20px)}
+  #msgMenu .actrow{padding:11px 13px}
+
   .quickwrap{display:flex;gap:7px;overflow-x:auto;padding:12px 0 0;scrollbar-width:none}
   .quickwrap::-webkit-scrollbar{display:none}
   .quick{flex:none;font-size:11.5px;padding:8px 12px;border-radius:20px;background:var(--card);
@@ -318,6 +408,52 @@
     transition:.2s;box-shadow:0 2px 6px rgba(0,0,0,.22)}
   .switch.on{background:var(--brand)}
   .switch.on::after{left:22px}
+
+  /* ---------- 对话输入框：多行自适应 ---------- */
+  /* textarea 而不是 input —— 单行输入框在「要写一段长问题」时是灾难：
+     看不见自己写了什么、改不了、只能全删重写。行业通行做法是
+     「内容撑高 → 到上限后内部滚动」，这里用 auto-grow 实现。 */
+  textarea#chatInput{flex:1;min-width:0;min-height:38px;max-height:132px;
+    resize:none;overflow-y:hidden;line-height:1.55;
+    -webkit-user-select:text;user-select:text}
+  textarea#chatInput::-webkit-scrollbar{width:3px}
+  textarea#chatInput::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+  /* ---------- 附件胶囊行：显示在输入框**上方** ----------
+     为什么不做成「贴进输入框」：一份文档几千字贴进去，
+     输入框就只剩一条滚动条 —— 用户看不见自己带了什么、改不了、
+     也无法在正文里定位。这条是替换掉那个做法后的形态。 */
+  /* 下方 10px 与 .composer 的 padding-bottom 同值 —— 胶囊到输入框、
+     胶囊到底部的留白才会一样（上方那段留白是 .composer 给的）。 */
+  .attachrow{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding:0 0 10px}
+  .attachrow::-webkit-scrollbar{display:none}
+  .attachrow:empty{display:none}
+  .attach{flex:none;display:flex;align-items:center;gap:7px;max-width:78%;
+    padding:6px 7px 6px 8px;border-radius:11px;background:var(--card);
+    border:1px solid var(--line);cursor:pointer;transition:.14s}
+  .attach:active{background:var(--brand-soft)}
+  .attach .ai{width:26px;height:26px;border-radius:8px;flex:none;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--brand-soft);color:var(--brand)}
+  .attach .an{min-width:0}
+  .attach .an b{display:block;font-size:11.5px;font-weight:650;line-height:1.3;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .attach .an small{display:block;font-size:9.5px;color:var(--sub);line-height:1.3}
+  .attach .ax{width:22px;height:22px;border-radius:7px;flex:none;font-size:16px;
+    display:flex;align-items:center;justify-content:center;color:var(--sub)}
+  .attach .ax:active{background:var(--danger-soft);color:var(--danger)}
+  .attach.busy{opacity:.6;pointer-events:none}
+  /* 文件预览（文本） */
+  .filepeek{background:var(--bg);border:1px solid var(--line);border-radius:11px;
+    padding:12px;max-height:46vh;overflow:auto;white-space:pre-wrap;
+    word-break:break-word;font-size:12px;line-height:1.7;
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    -webkit-user-select:text;user-select:text}
+  /* 文件预览（PDF 页图） */
+  .pdfpages{display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow:auto}
+  .pdfpage{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff}
+  .pdfpage img{width:100%;display:block}
+  .pdfpage .pn{padding:5px 9px;font-size:10px;color:var(--sub);
+    border-bottom:1px solid var(--line);background:var(--card)}
 
   input.f,textarea.f{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--text);
     border-radius:12px;padding:10px 12px;font-size:13px;font-family:inherit;outline:none;
@@ -835,11 +971,23 @@
   .g-tile.is-focus .gi{background:var(--warn-soft);color:var(--warn)}
 
   .sched-grid{display:grid;gap:8px}
-  .sched-grid.grid-mode{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
-  .sched-grid.grid-mode .sched-day{padding:8px 6px}
-  .sched-grid.grid-mode .sched-row{flex-direction:column;gap:2px}
-  .sched-grid.grid-mode .sched-row .st{min-width:0;font-size:9px}
-  .sched-grid.grid-mode .sched-day .dh b{font-size:11px}
+  /* 宫格：原来硬分成 7 等份，手机上每列只剩 ~45px，课程名被压成一两个字、
+     上下两行就撑满，读不出是哪门课。改成**固定列宽 + 横向滚动**：
+     92px 刚好放得下「高等数学」四个字的一半提示 + 时间，
+     看不全就左右滑，比挤成一团强。min-width:0 别去掉 ——
+     grid 子项默认 min-width:auto，不写会让长课程名把列撑破。 */
+  .sched-grid.grid-mode{display:grid;grid-template-columns:repeat(7,minmax(92px,1fr));gap:8px;
+    overflow-x:auto;padding-bottom:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+  .sched-grid.grid-mode::-webkit-scrollbar{display:none}
+  .sched-grid.grid-mode .sched-day{padding:9px 8px}
+  .sched-grid.grid-mode .sched-row{flex-direction:column;gap:3px;padding:7px 0}
+  /* 时间行给足行高，竖排时才不至于糊在一起 */
+  .sched-grid.grid-mode .sched-row .st{min-width:0;font-size:9.5px;line-height:1.35}
+  .sched-grid.grid-mode .sched-row b{font-size:11.5px;line-height:1.35;word-break:break-word}
+  .sched-grid.grid-mode .sched-day .dh b{font-size:11.5px}
+  .sched-grid.grid-mode .sched-day .dh{flex-direction:column;align-items:flex-start;gap:2px;margin-bottom:7px}
+  /* 列内课程块给一点底色，竖排时视觉上能分清是几门课 */
+  .sched-grid.grid-mode .sched-row .sk{width:100%;height:3px;align-self:auto;border-radius:2px}
   .sched-day{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px}
   .sched-day.holiday .dh b{color:var(--brand)}
 .sched-day.holiday .dh small{color:var(--brand)}
@@ -1154,7 +1302,7 @@
             <div style="font-size:14.5px;font-weight:750" id="chatAiName">小径</div>
             <div class="muted row g6" style="font-size:10.5px">
               <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);display:block"></span>
-              <span id="chatModel">deepseek-chat</span>
+              <span id="chatModel">deepseek-v4-flash</span>
             </div>
           </div>
         </div>
@@ -1170,18 +1318,54 @@
 
       <div class="msgs" id="msgs"></div>
 
-      <div class="quickwrap" id="quickwrap"></div>
+      <!-- 两个弹出菜单**不放在这里**。它们是 position:fixed，但祖先的
+           display 决定它们是否参与布局：本页无 .active 时 #page-chat 是
+           display:none，子元素连 offsetWidth 都量到 0，定位全部算错。
+           移到 #screen 层级（见 page-chat 之后）。 -->
+
+      <!-- 每轮对话的临时开关：深度思考 / 联网搜索。
+           放在输入栏**上方**（附件胶囊在输入栏下方）—— 三个功能区各占一行，
+           谁也不压谁。（开关更早放上方时被「提问建议」压住点不准，
+           那个区块已经删掉了，现在这里没有东西跟它抢位置。）
+           渲染在 renderChatSwitches()。 -->
+      <div class="qswrow" id="chatSwitches"></div>
 
       <div class="row g6 composer">
-        <div class="icon-btn" onclick="openCamSheet()" title="拍照给 AI">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.4"/><path d="M9 7l1.4-2h3.2L15 7"/></svg>
+        <!-- 加号菜单：拍照 / 相册 / 上传文件 / 换模型 -->
+        <div class="icon-btn" id="plusBtn" onclick="togglePlusMenu(event)" title="更多">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         </div>
-        <input class="f" id="chatInput" placeholder="问点什么…" style="flex:1" onkeydown="if(event.key==='Enter')send()" />
-        <div class="icon-btn" onclick="send()" style="background:var(--brand);color:#fff;border-color:transparent">
+        <!-- textarea：内容多了自动长高，到上限后内部滚动。
+             Enter 发送 / Shift+Enter 换行；手机上换行键就是换行，
+             发送要点右下角的箭头按钮。 -->
+        <textarea class="f" id="chatInput" rows="1" placeholder="问点什么…"
+          oninput="autoGrowInput(this)"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!isMobile()){event.preventDefault();send()}"></textarea>
+        <!-- 全屏输入：写长问题 / 想看清已写内容时用 -->
+        <div class="icon-btn" onclick="openFullInput()" title="全屏输入">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5.6A1.6 1.6 0 0 0 4 5.6V9M15 4h3.4A1.6 1.6 0 0 1 20 5.6V9M9 20H5.6A1.6 1.6 0 0 1 4 18.4V15M15 20h3.4a1.6 1.6 0 0 0 1.6-1.6V15"/></svg>
+        </div>
+        <div class="icon-btn" onclick="send()" title="发送" style="background:var(--brand);color:#fff;border-color:transparent">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </div>
       </div>
+
+      <!-- 已选附件。点胶囊看内容，点 × 去掉。
+           刻意不塞进输入框正文：几千字贴进去输入框就只剩滚动条。
+           放在输入栏**下方** —— 开关在上、输入框居中、文件在下，
+           三个功能区各占一行，互不遮挡。
+           上下留白都是 10px（上方那段由 .composer 的 padding-bottom 提供），
+           所以胶囊到输入框、胶囊到页面底部的距离一样。 -->
+      <div class="attachrow" id="attachRow"></div>
     </section>
+
+    <!-- 弹出菜单挂在这里：#screen 一直存在，不随底栏切页而 display:none。
+         放 #page-chat 里会出现「量不到尺寸 → 定位全错」——
+         position:fixed 摆脱的是**定位**，摆脱不了祖先的 display。 -->
+    <div class="plusmenu" id="plusMenu"></div>
+    <!-- 长按消息的操作菜单。独立容器而不是复用 plusMenu：
+         两者可能同时需要显示（长按一条消息时加号菜单还开着）。 -->
+    <div class="plusmenu" id="msgMenu"></div>
 
     <!-- ============ 我的 ============ -->
     <section class="page" id="page-me">
@@ -1403,7 +1587,7 @@
           <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.0 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.1 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1486,6 +1670,7 @@
         </div>
         <div id="schedGrid"></div>
         <div class="note2" style="margin-top:14px">点任意一门课可以改时间、地点、周次或删除；课前提醒按本表自动排程。</div>
+        <div class="note2" id="schedSwipeHint" style="margin-top:6px;display:none">← 左右滑动看一周七天 →</div>
       </div>
     </div>
   </div>
@@ -1603,7 +1788,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.2.0 · 开源版</div>
+        <div class="about-ver">v0.2.1 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -1888,7 +2073,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.2.0';
+var APP_VER = 'v0.2.1';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -1911,11 +2096,15 @@ var DEFAULT = {
   modelMemo: {},          // 同上，每个服务商的模型选择各自保留
   keyMemo: {},            // 同上，每个服务商的 API Key 各自保留（各家密钥不通用）
   stream: true,           // 流式输出：边生成边显示，首字更快
+  deepThink: false,       // 对话页「深度思考」快捷开关的默认状态（每轮生效，不是模型选择）
   maxTokens: 0,           // 单次输出上限；0 = 不发送这个参数，用服务商默认
   modelList: {},          // 「拉取模型」拿到的 id 列表，按服务商各存一份
   modelListAt: {},        // 上面那份是什么时候拉的（时间戳），用来提示新鲜度
   apiKey: '',             // 只存本机；备份时可单独导出
-  models: {chat:'deepseek-chat', summarize:'deepseek-chat', plan:'deepseek-reasoner', vision:'qwen-vl-max'},
+  /* 默认模型也跟着官方换代走：DeepSeek 的 chat/reasoner 旧名已排期弃用，
+     千问的 qwen-vl-max 同理。只对**新装用户**生效 —— 老用户 S 里已经有值，
+     改配置要他们自己去「AI 配置」里换。 */
+  models: {chat:'deepseek-v4-flash', summarize:'deepseek-v4-flash', plan:'deepseek-v4-pro', vision:'qwen3.8-max'},
   systemPrompt: '',       // 空 = 用 DEFAULT_SYS_PROMPT；用户可在 AI 配置页改写
   ctx: {schedule:true, summary:true, focus:false, notes:false},
   prefs: {workMin:25, shortMin:5, longMin:15, autoNext:true, classRemind:true, remindBefore:5, endRemind:true, focusNotify:true, islandOn:true,
@@ -1954,20 +2143,40 @@ var ACCENTS = {
   rose:   {n:'海棠', light:['#d94a7c','#f07ba4','#fdeaf1'], dark:['#f274a9','#f79ac0','#3a1f2c']}
 };
 
+/* 各家的主力模型（**2026-10 逐个核对过官方文档**）。
+   ⚠️ 这类列表半年就会过期一轮（DeepSeek 的 deepseek-chat / deepseek-reasoner
+   已被 v4 系列取代、旧名排期弃用），**改之前先去文档站确认，别照抄旧版**；
+   也别因为名字眼熟就留着 —— 已弃用的名字会让用户选完才发现调不通。 */
 var PROVIDERS = {
-  deepseek:{n:'DeepSeek',d:'推理强 / 性价比高',i:'DS',m:['deepseek-chat','deepseek-reasoner','deepseek-coder']},
-  silicon:{n:'硅基流动',d:'国内直连 / 多模型聚合',i:'SF',m:['deepseek-ai/DeepSeek-V3','deepseek-ai/DeepSeek-R1','Qwen/Qwen2.5-7B-Instruct','THUDM/GLM-4-9B-Chat']},
-  zhipu:{n:'智谱 GLM',d:'国内直连 / 稳定',i:'GLM',m:['glm-4-plus','glm-4-flash','glm-4v-plus']},
-  qwen:{n:'通义千问',d:'中文与长文本优秀',i:'QW',m:['qwen-max','qwen-plus','qwen-vl-max']},
+  deepseek:{n:'DeepSeek',d:'推理强 / 性价比高',i:'DS',
+    m:['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp']},
+  silicon:{n:'硅基流动',d:'国内直连 / 多模型聚合',i:'SF',
+    m:['deepseek-ai/DeepSeek-V3.2','deepseek-ai/DeepSeek-R1','Qwen/Qwen3-32B','Qwen/Qwen3-8B']},
+  zhipu:{n:'智谱 GLM',d:'国内直连 / 稳定',i:'GLM',
+    m:['glm-5.2','glm-5.1','glm-5','glm-4.7','glm-4.6','glm-4.5','glm-4v-plus']},
+  qwen:{n:'通义千问',d:'中文与长文本优秀',i:'QW',
+    m:['qwen3.8-max','qwen3.8-flash','qwen3.7-max','qwen3.7-plus']},
+  /* 方舟的模型 ID 带日期版本号，且会随版本下线旧快照 ——
+     这里给的是当前在架的；若提示「模型不存在」，照控制台的模型 ID 改，
+     或者直接填接入点 ID（ep-xxxxxxxx）。 */
+  volcengine:{n:'火山方舟',d:'豆包 / 多模态',i:'DB',
+    m:['doubao-seed-2-1-pro-260628','doubao-seed-2-1-turbo-260628','doubao-seed-2-0-pro-260215','doubao-seed-2-0-lite-260428','doubao-seed-evolving']},
+  xiaomi:{n:'小米 MiMo',d:'小米自研 / 中文友好',i:'MI',
+    m:['mimo-v2.6-pro','mimo-v2.6-flash','mimo-v2.5-pro','mimo-v2.5']},
   /* 自定义走 OpenAI 兼容协议，模型名不预设 —— m 留空表示「由用户手填」 */
   custom:{n:'自定义',d:'OpenAI 兼容 · 自填地址',i:'···',m:[],url:'https://api.example.com/v1',hint:'接口地址（Base URL）'}
 };
-/* 有固定接口地址的服务商：切过去时自动带出来，省得用户记 */
+/* 有固定接口地址的服务商：切过去时自动带出来，省得用户记。
+   ⚠️ 这几个域名**同时是思考参数的识别键**（见 THINK_PLATFORMS）——
+   地址写错就会认不出平台、深度思考开关跟着失效，改这里要两边一起看
+   （`tools/domtest.mjs` 里有断言把这两个表对起来）。 */
 var PROVIDER_URL = {
   deepseek:'https://api.deepseek.com/v1',
   silicon:'https://api.siliconflow.cn/v1',
   zhipu:'https://open.bigmodel.cn/api/paas/v4',
-  qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  qwen:'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  volcengine:'https://ark.cn-beijing.volces.com/api/v3',
+  xiaomi:'https://api.xiaomimimo.com/v1'
 };
 /* 是否允许手填模型名：自定义渠道必须手填，其它渠道用预设列表 */
 function modelFreeform(){ return S.provider === 'custom'; }
@@ -2428,7 +2637,15 @@ function aiText(role, messages, cb, opts){
   if(o.json && !iso) body.response_format = {type:'json_object'};
   /* 流式只给需要的场景开（对话），规划和总结走整包更省事，也没人在等它逐字出 */
   if(aiStreamOn() && o.stream) body.stream = true;
-  aiRequest(body, function(ok, payload){
+  /* 思考模式：**这一行才是真正控制模型思不思考的地方**（system 里那句只是提示）。
+     认平台用接口地址 —— 自定义渠道填官方地址也能认出来。 */
+  var creds = {url: joinApiUrl(rc.url, 'chat') || '', key: rc.key};
+  var thinkPlatform = applyThinkMode(body, model, rc.url || S.baseUrl || '', deepThinkOn());
+  if(!thinkPlatform && !deepThinkOn()){
+    /* 关了却关不掉是最值得记一笔的情况：多半是地址没认出来 */
+    try{ logIt('AI', '接口地址不在内置平台表里，本轮无法强制关闭思考'); }catch(e){}
+  }
+  function handle(ok, payload){
     if(!ok){ cb(false, payload); return; }
     var r = parseChoice(payload);
     if(!r.ok){ cb(false, r.raw || '模型返回的内容看不懂（可能不是 OpenAI 兼容格式）'); return; }
@@ -2444,7 +2661,22 @@ function aiText(role, messages, cb, opts){
       return;
     }
     cb(true, r.content.replace(/\s+$/,''), meta);
-  }, o.onDelta, {url: joinApiUrl(rc.url, 'chat') || '', key: rc.key});
+  }
+  aiRequest(body, function(ok, payload){
+    /* 有些渠道的模型压根不认识思考字段，会直接 400。这时**去掉它重发一次** ——
+       宁可少一个开关，也不能让用户整条对话都用不了。 */
+    if(!ok && thinkPlatform && looksLikeParamReject(payload)){
+      try{ logWarn('思考字段被 ' + thinkPlatform.n + ' 拒绝，去掉后重试：'
+        + String(payload).slice(0, 140), 'AI'); }catch(e){}
+      var safe = {};
+      for(var bk in body){
+        if(bk !== 'thinking' && bk !== 'enable_thinking') safe[bk] = body[bk];
+      }
+      aiRequest(safe, handle, o.onDelta, creds);
+      return;
+    }
+    handle(ok, payload);
+  }, o.onDelta, creds);
 }
 /* 带图片的补全（识图导入 / 拍照搜题） */
 function aiVision(role, prompt, imageDataUrl, cb, opts){
@@ -2779,6 +3011,22 @@ var ICON = {
   flag:    '<path d="M6.2 21V3.6"/><path d="M6.2 4.6h11.4l-1.7 3.6 1.7 3.6H6.2z"/>',
   /* —— 课表与数据 —— */
   upload:  '<path d="M12 16.4V4.2M7.6 8.6 12 4.2l4.4 4.4"/><path d="M4 15.8v3a1.8 1.8 0 0 0 1.8 1.8h12.4a1.8 1.8 0 0 0 1.8-1.8v-3"/>',
+  /* v0.2.1：对话页加号菜单与快捷开关要用的四个。都是 24 网格 / 1.8 描边，
+     和上面同一套画法（圆头圆角、currentColor）。 */
+  plus:    '<path d="M12 5v14M5 12h14"/>',
+  /* 停止：实心方块（跟 volume 配对，朗读时按下就变它） */
+  stop:    '<rect x="6.6" y="6.6" width="10.8" height="10.8" rx="2" fill="currentColor" stroke="none"/>',
+  /* 复制：两张叠放的纸，后一张虚一点表示在底下 */
+  copy:    '<rect x="8.4" y="8.4" width="11.2" height="11.2" rx="2"/><path d="M15.6 8.4V5.6a1.8 1.8 0 0 0-1.8-1.8H5.6a1.8 1.8 0 0 0-1.8 1.8v8.2a1.8 1.8 0 0 0 1.8 1.8h2.8"/>',
+  /* 文档：右上角折角 + 三条文本线（比 upload 更好认，upload 是「箭头进盒子」，
+     这里要表达的是「一个文件」） */
+  file:    '<path d="M13.6 3.2H7a1.8 1.8 0 0 0-1.8 1.8v14a1.8 1.8 0 0 0 1.8 1.8h10a1.8 1.8 0 0 0 1.8-1.8V8.4z"/><path d="M13.6 3.2v5.2h5.2"/><path d="M8.6 13h6.8M8.6 16.6h4.4"/>',
+  /* 喇叭：两段声波。跟 mute（斜杠版）成对，两个只差一个斜杠，
+     这样「开/关」在图例上一眼能看出是同一个东西。 */
+  volume:  '<path d="M4.5 9.4h3.2L12 5.8v12.4l-4.3-3.6H4.5z"/><path d="M15.4 9.4a3.6 3.6 0 0 1 0 5.2"/><path d="M17.9 7a7 7 0 0 1 0 10"/>',
+  /* 脑：侧影轮廓 + 内部折线。用在大脑「深度思考」上。
+     特意不用灯泡（灯泡=灵感）也不用 gear（=设置）。 */
+  brain:   '<path d="M12 5.2a2.7 2.7 0 0 0-5.1 1.3A2.6 2.6 0 0 0 4.4 9a2.7 2.7 0 0 0 .3 4.4A2.8 2.8 0 0 0 6 18.4a2.6 2.6 0 0 0 6 .4z"/><path d="M12 5.2a2.7 2.7 0 0 1 5.1 1.3A2.6 2.6 0 0 1 19.6 9a2.7 2.7 0 0 1-.3 4.4A2.8 2.8 0 0 1 18 18.4a2.6 2.6 0 0 1-6 .4z"/><path d="M12 5.2v13.6"/>',
   compass: '<circle cx="12" cy="12" r="8.8"/><path d="M15.6 8.4l-2 4.6-4.6 2 2-4.6z"/>',
   trash:   '<path d="M4.2 7h15.6"/><path d="M9.6 7V4.6h4.8V7"/><path d="M6.6 7l.9 12.3A1.7 1.7 0 0 0 9.2 21h5.6a1.7 1.7 0 0 0 1.7-1.7L17.4 7"/><path d="M10.2 11v6M13.8 11v6"/>',
   bookmark:'<path d="M6.6 3.4h10.8a1 1 0 0 1 1 1v16.2l-6.4-4-6.4 4V4.4a1 1 0 0 1 1-1z"/>',
@@ -3686,6 +3934,9 @@ function bindPickDrag(){
    ============================================================ */
 function go(tab){
   logIt('页面', '切换底栏 → ' + tab);
+  /* 切页前收起所有弹出菜单。否则菜单是 fixed 定位、跨页「存活」，
+     会出现「已经到别的页面了它还浮在屏幕上」。 */
+  try{ closePlusMenu(); closeMsgMenu(); }catch(e){}
   document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
   var el = document.getElementById('page-'+tab);
   if(!el){ tab = 'home'; el = document.getElementById('page-home'); }
@@ -3706,6 +3957,8 @@ var VIEW_DUR = 220;        // 与样式里 .view 的 transition 时长保持一�
 function _viewEl(id){ return document.getElementById('view-'+id); }
 
 function openView(id){
+  /* 同 go()：进二级页也要收起浮层，否则菜单会跟着飘到新页面上 */
+  try{ closePlusMenu(); closeMsgMenu(); }catch(e){}
   var v = _viewEl(id);
   if(!v) return;
   var b = v.querySelector('.viewbody'); if(b) b.scrollTop = 0;
@@ -4246,13 +4499,17 @@ function renderSheet(kind, data){
     sheet.innerHTML = renderPlanPrefSheet();
     return;
   }
+  /* filebad：内容由 openUnsupportedFile 自己 innerHTML 填（带 onclick 串，
+     放 renderSheet 里会散成两处）。这里给个空壳分支：openSheet 是
+     **先走 renderSheet 再被覆盖**，没分支弹层会先闪一下上次残留 ——
+     那正是下面注释记的那个坑。
+     （同批的 msgact 已被撤掉：长按操作改成了锚点菜单，不再走底部弹层。
+       留着一个没人调用的分支会让人以为长按还走弹层。） */
+  /* fullinput：内容由 openFullInput() 自己 innerHTML 填（同 filebad 的理由） */
+  if(kind === 'filebad' || kind === 'fullinput' || kind === 'filepeek') return '';
+
   /* ----- 以下 8 个分支在 2026-09-22 的备份里都在，重构 renderSheet 时整块丢了 -----
      丢了之后的症状：renderXxx() 还在文件里但没人调用，点开弹层看到的是上一次的残留内容。 */
-  if(kind === 'cam'){
-    /* 对话页相机：弹窗式拍照/相册 + 简易旋转缩放 */
-    sheet.innerHTML = renderCamSheet();
-    return;
-  }
   if(kind === 'chathist'){
     var hist = S.chatHistory || [];
     sheet.innerHTML = '<div class="sh"></div><h3>聊天记录</h3>'
@@ -4499,15 +4756,9 @@ function buildBugReport(){
 }
 function copyBugReport(){
   var txt = buildBugReport();
-  if(isApp && nat('copyText', txt)){ toast('报告已复制，粘贴给作者即可'); return; }
-  try{
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(txt);
-      toast('报告已复制');
-      return;
-    }
-  }catch(e){}
-  /* 复制不了就退到原生分享，让用户自己发给自己再取 */
+  /* 报告比普通文本长，原生分享是第二出路（比截图靠谱）——
+     所以这里不直接用 copyText 的 toast 兜底，而是先问它成没成。 */
+  if(copyText(txt, '报告已复制，粘贴给作者即可', '')) return;
   if(isApp && nat('shareText', '学径-' + APP_VER + '-问题报告.txt', txt)){
     toast('已拉起分享，可先发给自己再复制');
     return;
@@ -4518,21 +4769,32 @@ function clearRunLog(){
   logClear();
   openSheet('diag');
 }
+/* 复制到剪贴板的**唯一出口**。原来 copyBugReport / copyRunLog 各写了一份
+   「原生 → navigator.clipboard → 放弃」的兜底，链一模一样；
+   加第三个功能时又得抄一遍。抽出来以后新功能只管调它，
+   也少一个「改了兜底只改了一处」的分叉点。 */
+function copyText(txt, okMsg, failMsg){
+  txt = String(txt == null ? '' : txt);
+  /* WebView 里 file:// 页面拿不到 navigator.clipboard，必须走原生剪贴板 */
+  if(isApp){
+    try{ if(nat('copyText', txt)){ if(okMsg) toast(okMsg); return true; } }catch(e){}
+  }
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt);
+      if(okMsg) toast(okMsg);
+      return true;
+    }
+  }catch(e){}
+  toast(failMsg || '这台机器没法自动复制，截图也一样');
+  return false;
+}
 function copyRunLog(){
   var txt = RUNTIME_LOG.map(function(x){
     return x.t + ' [' + x.tag + '] ' + x.msg + '  @' + x.layer;
   }).join('\n');
   if(!txt) txt = '(空)';
-  /* WebView 里 file:// 页面拿不到 navigator.clipboard，必须走原生剪贴板 */
-  if(isApp && nat('copyText', txt)){ toast('日志已复制，粘贴给作者就行'); return; }
-  try{
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(txt);
-      toast('日志已复制');
-      return;
-    }
-  }catch(e){}
-  toast('这台机器没法自动复制，截图也一样');
+  copyText(txt, '日志已复制，粘贴给作者就行');
 }
 
 /* ---------- 上课 / 下课提醒卡 ---------- */
@@ -5836,26 +6098,300 @@ function renderMsgs(){
     }
     if(m.r === 'ai'){
       var vote = m.vote || '';
-      return '<div class="msg ai"><div class="avatar sm" style="' + aiAvStyle() + '">' + '' + '</div>'
+      /* 底部只留朗读（可点着打断）。其余四个原来挤成一行小 badge，
+         在手机上每个不到 26px 高、点不准 —— 改成长按气泡弹选择框。
+         气泡上加 data-ix 供长按手势定位，不靠序号算（重排会漂）。 */
+      return '<div class="msg ai" data-ix="' + idx + '">'
+        + '<div class="avatar sm" style="' + aiAvStyle() + '">' + '' + '</div>'
         + '<div style="min-width:0;flex:1">'
-        + '<div class="bubble">'
+        + '<div class="bubble" data-hold="' + idx + '">'
         + (m.think ? thinkBlock(m.think, m.thinkMs) : '')
         + (m.warn ? '<div class="warnline">' + esc(m.warn) + '</div>' : '')
         + m.t
         + (m.src && m.src.length ? '<div class="src">读取了：' + m.src.map(function(s){ return '<b>' + esc(s) + '</b>'; }).join(' · ') + '</div>' : '')
         + '</div>'
-        + '<div class="row g6" style="margin:4px 0 8px;opacity:.8">'
-        + '<span class="badge plain" style="cursor:pointer" onclick="regenChat(' + idx + ')">重新生成</span>'
-        + '<span class="badge plain" style="cursor:pointer" onclick="ttsSpeakForce(plain(msgs[' + idx + '].t||\'\'))">朗读</span>'
-        + '<span class="badge ' + (vote==='up'?'green':'plain') + '" style="cursor:pointer" onclick="rateChat(' + idx + ',\'up\')">赞</span>'
-        + '<span class="badge ' + (vote==='down'?'orange':'plain') + '" style="cursor:pointer" onclick="rateChat(' + idx + ',\'down\')">踩</span>'
+        + '<div class="row g6 msg-tools" style="margin:6px 0 10px;gap:8px">'
+        + '<div class="speakbtn" data-say="' + idx + '" title="朗读（再点一次停止）">'
+        + '<span class="sb-i">' + icSvg('volume', 14) + '</span></div>'
+        + '<span class="muted" style="font-size:10.5px">长按气泡可重新生成、复制、评价</span>'
         + '</div></div></div>';
     }
-    return '<div class="msg me">' + userAvHtml() + '<div class="bubble">' + esc(m.t) + '</div></div>';
+    return '<div class="msg me" data-ix="' + idx + '">' + userAvHtml()
+      + '<div class="bubble" data-hold="' + idx + '">' + esc(m.t) + '</div></div>';
   }).join('');
   bindMdLinks();
+  bindMsgHold();
+  renderChatSwitches();
   scrollMsgs();
 }
+/* ---------- 长按消息 → 操作选择框 ----------
+   手势用 touch + mouse 双通道：桌面预览没有 touch，真机没有 mouse。
+   500ms 触发；移动超过 10px 就取消（那是滚动，不是长按）——
+   少了这个容差，用户想滚动列表却会误弹菜单，比没有长按更烦。 */
+var HOLD_MS = 500, HOLD_SLOP = 10, _holdTimer = null, _holdXY = null, _holdIdx = -1, _holdPt = null, _holdEl = null;
+
+/* ---------- 长按反馈 ----------
+   蒙版是 .holding 上的 ::after 动画做的，而「按多久算长按」在 JS 里（HOLD_MS）。
+   两者**必须同源**：对不上就会出现「蒙版还没显完菜单就弹了」的错位，
+   所以把 HOLD_MS 写进 CSS 变量，由 CSS 去读，别在两处各写一个数。 */
+function holdCssVar(){
+  try{
+    var root = document.documentElement;
+    if(root.style.getPropertyValue('--hold-ms') !== HOLD_MS + 'ms')
+      root.style.setProperty('--hold-ms', HOLD_MS + 'ms');
+  }catch(e){}
+}
+function markHolding(el){
+  clearHoldMark();
+  if(!el || !el.classList) return;
+  _holdEl = el;
+  /* 读一次 offsetWidth 强制重排：连续长按同一条时，类被移除又立刻加回，
+     不重排浏览器会把动画当成「还在继续」而不重播。 */
+  void el.offsetWidth;
+  el.classList.add('holding');
+}
+function clearHoldMark(){
+  if(_holdEl){ try{ _holdEl.classList.remove('holding'); }catch(e){} }
+  _holdEl = null;
+}
+function startHold(idx, x, y, el){
+  _holdIdx = idx; _holdXY = {x:x, y:y};
+  /* 记下按下的坐标与元素框：菜单要出现在**手指附近**。
+     没有 el 就退回坐标点（点本身也可以当锚，不必依赖元素）。 */
+  var r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+  _holdPt = {x:x, y:y, h:(r ? r.height : 0), point:true};
+  /* 立刻给气泡盖蒙版 —— 长按的这几百毫秒里用户看不到任何东西，
+     会以为「没识别到」而松手重按或干脆放弃。 */
+  holdCssVar();
+  markHolding(el);
+  try{ if(_holdTimer) clearTimeout(_holdTimer); }catch(e){}
+  _holdTimer = setTimeout(fireHold, HOLD_MS);
+}
+
+/* 长按满时长：**单独抽出来是为了可测** —— 断言能同步调它走完
+   「清蒙版 → 开菜单」的真实路径，不必在测试里干等 500ms。 */
+function fireHold(){
+  _holdTimer = null;
+  var i = _holdIdx;
+  var p = _holdPt;
+  _holdIdx = -1; _holdPt = null;
+  /* 蒙版到此为止：菜单已经出来了，反馈目标达成，
+     留着会和菜单叠在一起显得脏。 */
+  clearHoldMark();
+  if(i < 0) return;
+  /* 已经开着同一条的菜单 → 当成「关掉」。
+     用户长按可能是「想看看有什么」，看完不想操作 —— 这时再点一下那条
+     消息就该收起，而不是让他去找空白处。 */
+  if(_menuMsgIx === i){
+    closeMsgMenu();
+    return;
+  }
+  openMsgActions(i, p);
+}
+function moveHold(x, y){
+  if(!_holdTimer || !_holdXY) return;
+  if(Math.abs(x - _holdXY.x) > HOLD_SLOP || Math.abs(y - _holdXY.y) > HOLD_SLOP){
+    try{ clearTimeout(_holdTimer); }catch(e){}
+    _holdTimer = null; _holdXY = null;
+    /* 手势作废（用户在滚动列表）→ 蒙版必须撤掉，否则它会一直亮着 */
+    clearHoldMark();
+  }
+}
+function endHold(){
+  try{ if(_holdTimer) clearTimeout(_holdTimer); }catch(e){}
+  _holdTimer = null; _holdXY = null; _holdIdx = -1; _holdPt = null;
+  /* 松手：没到时长就是「没触发」，蒙版撤掉正好告诉用户「刚才不算」 */
+  clearHoldMark();
+}
+function bindMsgHold(){
+  var box = document.getElementById('msgs');
+  if(!box || box.__holdBound) return;
+  box.__holdBound = 1;
+  /* 触摸通道 */
+  box.addEventListener('touchstart', function(e){
+    var el = e.target && e.target.closest ? e.target.closest('[data-hold]') : null;
+    if(!el || !e.touches.length) return;
+    /* 已经按住朗读按钮了就不再叠一层长按计时 */
+    if(e.target && e.target.closest && e.target.closest('[data-say]')) return;
+    startHold(+el.getAttribute('data-hold'), e.touches[0].clientX, e.touches[0].clientY, el);
+  }, {passive:true});
+  box.addEventListener('touchmove', function(e){
+    if(e.touches.length) moveHold(e.touches[0].clientX, e.touches[0].clientY);
+  }, {passive:true});
+  box.addEventListener('touchend', endHold, {passive:true});
+  box.addEventListener('touchcancel', endHold, {passive:true});
+  /* 鼠标通道（桌面预览 / 平板接键鼠）。hold 语义跟 CSS 的 -webkit-touch 无关，
+     自己判断：按下 500ms 且没移动才算。 */
+  box.addEventListener('mousedown', function(e){
+    if(e.button !== 0) return;
+    var el = e.target && e.target.closest ? e.target.closest('[data-hold]') : null;
+    if(!el) return;
+    if(e.target && e.target.closest && e.target.closest('[data-say]')) return;
+    startHold(+el.getAttribute('data-hold'), e.clientX, e.clientY, el);
+  });
+  box.addEventListener('mousemove', function(e){ moveHold(e.clientX, e.clientY); });
+  box.addEventListener('mouseup', endHold);
+  box.addEventListener('mouseleave', endHold);
+  /* 朗读按钮：正在念就打断 */
+  box.addEventListener('click', function(e){
+    var b = e.target && e.target.closest ? e.target.closest('[data-say]') : null;
+    if(!b) return;
+    toggleSpeakMsg(+b.getAttribute('data-say'));
+  });
+  /* 点空白处收起两个菜单（它们在 msgs 容器外面，
+     所以事件要挂 document 而不是 msgs） */
+  document.addEventListener('click', function(e){
+    closeAnyMenu(e.target);
+  });
+  /* 按 Esc 也收 —— 接了键盘的平板/桌面预览上应该能关。
+     用捕获阶段（true）：菜单浮在最上层，冒泡到 document 时可能被中途拦掉。 */
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    closePlusMenu(); closeMsgMenu();
+  }, true);
+}
+
+/* 点任意空白处收起所有弹出菜单 —— **独立成函数**，不挂在 bindMsgHold 里。
+   ① 为什么独立：切页、打开二级页、锁屏回前台…都要收起，
+      塞在「绑长按手势」的函数里，语义不对、也容易漏掉入口。
+   ② 为什么必须写 try/catch：`e.target.closest` 取出方法会丢 this，
+      直接调抛 Illegal invocation —— 异常会中断整个回调，
+      结果是「点了空白完全没反应」而且**没有任何报错提示**
+      （事件回调里的异常不会冒到 console 之外）。
+      本项目就踩过一次：var hit = e.target.closest; 然后 hit('#msgMenu')
+      导致点空白关不掉菜单、Esc 也失效（同一函数后面的语句全没跑到）。 */
+function closeAnyMenu(target){
+  try{
+    var el = target;
+    var inPlus = !!(el && el.closest && el.closest('#plusMenu'));
+    var onPlusBtn = !!(el && el.closest && el.closest('#plusBtn'));
+    var inMsg = !!(el && el.closest && el.closest('#msgMenu'));
+    var pm = document.getElementById('plusMenu');
+    if(pm && pm.classList.contains('show') && !inPlus && !onPlusBtn) closePlusMenu();
+    var mm = document.getElementById('msgMenu');
+    if(mm && mm.classList.contains('show') && !inMsg) closeMsgMenu();
+  }catch(e){
+    /* 收起菜单失败不该影响任何功能，静默重试一次直接关 */
+    try{ closePlusMenu(); closeMsgMenu(); }catch(e2){}
+  }
+}
+
+/* 朗读 / 打断。正在念时点同一个按钮 = 停，这是最省事的打断方式，
+   不用再加一个「停止」按钮把界面搞复杂。
+
+   按钮复位**不依赖朗读引擎回报**（系统 TTS 走原生桥、没有可靠的
+   「念完了」回调，WebView 的 onend 在部分内核上还压根不触发）——
+   靠一个兜底计时器：念完或被打断后最多 N 秒自动复位。
+   靠引擎回调复位的话，引擎不回报时按钮就永远停在「停止」态，
+   下次点会变成调 ttsStop 而不是重新朗读 —— 比不复位更坏。 */
+var _speakingIx = -1, _speakTimer = null;
+var SPEAK_RESET_MS = 60000;   // 兜底上限，够念完一整段
+function toggleSpeakMsg(idx){
+  if(_speakingIx === idx){
+    ttsStop();
+    markSpeaking(-1);
+    return;
+  }
+  var m = msgs[idx];
+  if(!m || m.r !== 'ai') return;
+  ttsStop();
+  markSpeaking(idx);
+  /* 文本越长给越久；正文按 5 字/秒估，再加 5 秒余量 */
+  var n = plain(m.t || '').length;
+  var est = Math.min(SPEAK_RESET_MS, Math.max(8000, (n / 5) * 1000 + 5000));
+  try{ if(_speakTimer) clearTimeout(_speakTimer); }catch(e){}
+  _speakTimer = setTimeout(function(){ _speakTimer = null; markSpeaking(-1); }, est);
+  ttsSpeakForce(plain(m.t || ''), {onEnd: function(){ markSpeaking(-1); }});
+}
+function markSpeaking(idx){
+  _speakingIx = idx;
+  var box = document.getElementById('msgs');
+  if(!box) return;
+  [].forEach.call(box.querySelectorAll('[data-say]'), function(b){
+    b.classList.toggle('on', +b.getAttribute('data-say') === idx);
+    var ic = b.querySelector('.sb-i');
+    if(ic) ic.innerHTML = icSvg(idx >= 0 ? 'stop' : 'volume', 14);
+  });
+}
+
+/* 当前菜单对应的是哪条消息（-1 = 没开）。用于「再点同一条就收起」。 */
+var _menuMsgIx = -1;
+/* 长按弹出的操作框：**锚点菜单**，出现在手指按下的位置附近。
+   原来用底部全屏弹层 —— 长按一条消息后整个对话被盖住，
+   用户失去「我按的是哪一条」的视觉锚点，改个赞都要重新找。
+   点空白处收起由 bindMsgHold 里那个 document 级 click 处理器负责。 */
+function openMsgActions(idx, at){
+  var m = msgs[idx];
+  if(!m) return;
+  closePlusMenu();
+  closeMsgMenu();
+  _menuMsgIx = idx;
+  var isAi = m.r === 'ai';
+  var vote = m.vote || '';
+  var rows = [];
+  if(isAi){
+    rows.push({i:'refresh', t:'重新生成', d:'用同样的问题再答一次', run:"closeMsgMenu();regenChat(" + idx + ")"});
+    rows.push({i:'copy', t:'复制内容', d:'复制成纯文本', run:"closeMsgMenu();copyMsg(" + idx + ")"});
+    rows.push({i:'volume', t:'朗读这条', d:'再点一次可以打断', run:"closeMsgMenu();toggleSpeakMsg(" + idx + ")"});
+    rows.push({i:'heart', t:(vote === 'up' ? '取消赞' : '答得不错'),
+      d:'记下来，以后少犯同样的错', run:"closeMsgMenu();rateChat(" + idx + ",'up')"});
+    rows.push({i:'flag', t:(vote === 'down' ? '取消踩' : '不太对'),
+      d:'记下来，我少这样答', run:"closeMsgMenu();rateChat(" + idx + ",'down')"});
+  }else{
+    rows.push({i:'pencil', t:'编辑这条提问', d:'改完重新发，AI 会看到新问题', run:"closeMsgMenu();editUserMsg(" + idx + ")"});
+    rows.push({i:'copy', t:'复制', d:'复制这条消息', run:"closeMsgMenu();copyMsg(" + idx + ")"});
+  }
+  rows.push({i:'trash', t:'删除', d:'只删这一条，后面的对话不动', run:"closeMsgMenu();delMsg(" + idx + ")", danger:true});
+  var box = document.getElementById('msgMenu');
+  if(!box) return;
+  var body = (isAi ? plain(m.t) : (m.t || '')) || '（空）';
+  openAnchorMenu(box, at || {x:window.innerWidth/2, y:window.innerHeight/2, h:0}, {
+    centerOn: !!(at && at.point),
+    /* 气泡自己会随键盘/重排移动，重排时按它的**当前位置**重新贴一次 */
+    resolve: function(){
+      var el = document.querySelector('[data-hold="' + idx + '"]');
+      if(!el) return null;
+      var q = el.getBoundingClientRect();
+      if(!q.height) return null;
+      return {x:q.left + q.width/2, y:q.top + 8, h:q.height, point:true};
+    },
+    html: '<div class="menuhead"><b>' + (isAi ? 'AI 回复' : '你的提问') + '</b>'
+         + '<small class="muted">' + esc(body.slice(0, 40)) + (body.length > 40 ? '…' : '') + '</small></div>'
+         + menuRowsHtml(rows)
+  });
+  logIt('对话', '长按消息操作 ' + idx);
+}
+function closeMsgMenu(){
+  var box = document.getElementById('msgMenu');
+  if(box) box.classList.remove('show');
+  _menuMsgIx = -1;
+}
+function copyMsg(idx){
+  var m = msgs[idx];
+  if(!m) return;
+  var s = String(m.t || '');
+  copyText(s);
+  logIt('对话', '复制消息 ' + idx);
+}
+function editUserMsg(idx){
+  var m = msgs[idx];
+  if(!m || m.r !== 'me') return;
+  msgs.splice(idx, 1);
+  renderMsgs();
+  var inp = document.getElementById('chatInput');
+  if(inp){ inp.value = m.t || ''; inp.focus(); }
+  logIt('对话', '编辑提问 ' + idx);
+}
+function delMsg(idx){
+  if(idx < 0 || idx >= msgs.length) return;
+  msgs.splice(idx, 1);
+  /* 只删这一条时，如果删掉的是系统消息（工具结果），留着后面的 AI 回复会
+     显得答非所问 —— 但删多于一整轮需要用户确认，所以这里只提示一下。 */
+  renderMsgs();
+  if(_speakingIx >= 0) markSpeaking(-1);
+  logIt('对话', '删除消息 ' + idx);
+}
+
 /* 思考过程折叠块（推理模型才有） */
 function fmtThinkMs(ms){
   var s = (ms || 0) / 1000;
@@ -5964,17 +6500,10 @@ function clearChat(){
   msgs = [];
   renderMsgs(); toast('已开启新对话');
 }
-function renderQuick(){
-  var q = [];
-  if(hasCourseData()){
-    q.push('今天该复习什么？', '帮我排明天的时间表', '我今天的专注情况怎么样');
-  } else {
-    q.push('学径能帮我做什么？', '怎么导入课表？');
-  }
-  document.getElementById('quickwrap').innerHTML = q.map(function(x){
-    return '<div class="quick" onclick="send(\'' + x.replace(/'/g,'') + '\')">' + x + '</div>';
-  }).join('');
-}
+/* 对话页的「提问建议」气泡（原 renderQuick）已删除 ——
+   它压在深度思考/联网搜索两颗开关上面，用户点开关时会点到建议上。
+   要引导新用户，用欢迎语里的文字，别在图区里塞可点元素。
+   注意：课表导入页（impChat）的示例气泡**保留**，那是另一回事。 */
 /* ============================================================
    AI 长期记忆
    ------------------------------------------------------------
@@ -7619,6 +8148,198 @@ function sysPrompt(tools){
     /* 格式铁律放在系统提示的最后：离生成位置最近，自带工具调用习惯的模型才压得住 */
     + (tools ? ('\n' + toolFormatLaw() + TOOL_BAN) : '');
 }
+/* ---------- 输入框：自动长高 + 全屏输入 ----------
+   auto-grow 的做法：内容超出 max-height 就让框自己变高，到顶后
+   overflow-y:auto 内部滚动。用 scrollHeight 量真实内容高度 ——
+   关键是**先把 height 置回 auto**，否则只会越来越高、回不去。 */
+var INPUT_MIN_H = 38, INPUT_MAX_H = 132;
+function autoGrowInput(el){
+  if(!el) return;
+  el.style.height = 'auto';
+  var over = el.scrollHeight > INPUT_MAX_H;
+  el.style.height = Math.max(INPUT_MIN_H, Math.min(el.scrollHeight + 2, INPUT_MAX_H)) + 'px';
+  /* 到上限后才允许滚动；没到上限时留 hidden 免得出现空滚动条 */
+  el.style.overflowY = over ? 'auto' : 'hidden';
+}
+function isMobile(){
+  return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+      || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+/* ---------- 全屏输入：**实时同步**，不是「编辑副本 + 确认」----------
+   早先做成「编辑一份副本，点『用这段』才写回」—— 那是错的：
+   用户写了一整段，手滑点到弹层外面的遮罩就全丢了，也没有任何提示。
+   **全屏输入只是输入框的另一种展现形态**，两边必须同一份内容，
+   所以每次输入直接写回主输入框。这样点空白 / 返回键 / 切页都不会丢，
+   也就不需要「确认」按钮了（内容早就同步了，确认没有意义），只留「完成」收起。 */
+function openFullInput(){
+  var inp = document.getElementById('chatInput');
+  openSheet('fullinput');
+  var box = document.getElementById('sheet');
+  if(!box) return;
+  box.innerHTML = '<div class="sh"></div><h3>全屏输入</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:4px">'
+    + '与下方输入框实时同步，随时关上都不会丢</div>'
+    + '<textarea id="fullInputTa" class="f" rows="12" '
+    + 'style="margin-top:12px;min-height:34vh;line-height:1.7;font-size:14px;'
+    + 'text-align:left;resize:none;max-height:52vh;overflow-y:auto" '
+    + 'placeholder="在这里写…" oninput="syncFullInput(this)"></textarea>'
+    + '<div class="btn primary" style="margin-top:12px" onclick="closeSheet()">完成</div>';
+  var ta = document.getElementById('fullInputTa');
+  if(ta){
+    ta.value = (inp && inp.value) || '';
+    /* 立刻 focus 会顶掉弹层顶栏，延后一点再聚焦 */
+    setTimeout(function(){ try{ ta.focus(); }catch(e){} }, 280);
+  }
+}
+/* 全屏框 → 主输入框。每次输入都同步，所以「关掉弹层」永远不丢内容。 */
+function syncFullInput(ta){
+  var inp = document.getElementById('chatInput');
+  if(!inp || !ta) return;
+  inp.value = ta.value;
+  autoGrowInput(inp);
+}
+/* 反向：主输入框被程序改了（比如发送后清空）时也刷到全屏框上，
+   否则两边会不一致 —— 全屏开着时发送，框里还挂着旧文字。 */
+function syncInputToFull(){
+  var ta = document.getElementById('fullInputTa');
+  var inp = document.getElementById('chatInput');
+  if(!ta || !inp) return;
+  ta.value = inp.value;
+}
+
+/* ---------- 每轮对话的快捷开关（深度思考 / 联网搜索） ----------
+   两个开关都**不新增状态源**，直接驱动各自唯一的判据：
+     · 联网搜索 → webSearchCfg().on（webSearchReady() 是消费方）
+     · 深度思考 → 只是一个「这一轮要不要先想」的开场指令，见 deepThinkOn()。
+   另存一份状态就等于多一处可能和真值分叉的地方 —— 和本项目
+   「语义单一口」的思路一样。 */
+function deepThinkOn(){ return !!S.deepThink; }
+
+/* ---------- 思考模式的**真正**开关 ----------
+   光在 system 里写一句「请先思考」是**控制不了**模型的：DeepSeek V4 和
+   GLM-4.5+ 都**默认开启思考**，不给参数它就一路想下去 —— 开关关掉时
+   模型照样思考，这正是「开关没生效」的原因。要关就必须按各家的官方字段关。
+
+   **认平台靠接口地址，不靠用户选的那个渠道名** —— 很多人是用「自定义渠道」
+   把官方地址填进来的（provider 是 custom），按渠道名分支就认不出来；
+   地址骗不了人，所以以它为准。（2026-10 逐个核对过官方文档。）
+   同一件事各家字段不同：
+     · thinking：DeepSeek / 智谱 GLM / 火山方舟 / 小米 MiMo
+       （火山方舟的 type 还支持 auto「模型自行判断」，我们只用两档）
+     · enable_thinking：通义千问 / 硅基流动（Qwen 系）
+   注意小米有两个入口：官方 api.xiaomimimo.com 用 thinking，
+   而走阿里云百炼（dashscope 域名）的 MiMo 用 enable_thinking ——
+   域名不同，正好分得开。 */
+var THINK_PLATFORMS = [
+  {n:'DeepSeek',  d:['deepseek.com'],                     k:'thinking'},
+  {n:'智谱 GLM',  d:['bigmodel.cn', 'z.ai'],              k:'thinking'},
+  {n:'火山方舟',  d:['volces.com'],                       k:'thinking'},
+  {n:'小米 MiMo', d:['xiaomimimo.com'],                   k:'thinking'},
+  {n:'通义千问',  d:['dashscope.aliyuncs.com'],           k:'enable_thinking'},
+  {n:'硅基流动',  d:['siliconflow.cn', 'siliconflow.com'], k:'enable_thinking'}
+];
+function apiHost(url){
+  var s = String(url || '').trim();
+  if(!s) return '';
+  try{ return new URL(s).hostname.toLowerCase(); }catch(e){}
+  /* 用户可能只填了域名没带协议，兜一下 */
+  var m = s.match(/^(?:https?:\/\/)?([^\/?#:]+)/i);
+  return m ? m[1].toLowerCase() : '';
+}
+/* 域名匹配用「等于 或 以 .片段 结尾」—— 这样 api.deepseek.com 命中，
+   而 fakedeepseek.com 不会（只写 includes 就会误判成同一家）。 */
+function thinkPlatformOf(url){
+  var h = apiHost(url);
+  if(!h) return null;
+  for(var i = 0; i < THINK_PLATFORMS.length; i++){
+    var p = THINK_PLATFORMS[i];
+    for(var j = 0; j < p.d.length; j++){
+      var frag = p.d[j];
+      if(h === frag || h.slice(-(frag.length + 1)) === '.' + frag) return p;
+    }
+  }
+  return null;
+}
+/* 返回命中的平台（没命中或不该发则返回 null）。
+   不发参数的两类例外：
+     ① **纯推理模型**（deepseek-reasoner / qwq / glm-z1…）没有「不思考」这个档位，
+        发了要么被忽略、要么直接 400 —— 开关对它们无效，UI 上如实说明。
+     ② **认不出的地址**（中转、自建、海外服务商）不知道对方吃哪一套，
+        宁可不发，也别把请求打回去。 */
+function applyThinkMode(body, model, apiUrl, on){
+  var p = thinkPlatformOf(apiUrl);
+  if(!p) return null;
+  if(modelIsReasoning(model)) return null;
+  if(p.k === 'thinking') body.thinking = {type: (on ? 'enabled' : 'disabled')};
+  else body.enable_thinking = !!on;
+  return p;
+}
+/* 服务端「不认识这个字段」的判定：既要提到我们的字段名，又要说它不合法。
+   两个条件都要 —— 只看关键词会在模型正常聊到 thinking 时误判。 */
+function looksLikeParamReject(payload){
+  var s = String(payload || '').toLowerCase();
+  if(!s) return false;
+  var namesIt = /(thinking|enable_thinking)/.test(s);
+  var rejects = /(unknown|unsupported|unrecognized|invalid|not support|不支持|无效|unexpected)/.test(s);
+  return namesIt && rejects;
+}
+
+/* 深度思考的开场指令。**只在非推理模型时注入**：
+   推理模型本来就自带 reasoning_content，再塞一遍「请先思考」只是浪费 token
+   （而且部分网关会因为多了这段而在 max_tokens 里先把它算掉）。 */
+var DEEP_THINK_BLOCK =
+  '\n\n【本轮要求】先在内部想清楚再作答：\n'
+  + '1. 动手前先复述你对这个问题的真实理解，确认没理解错；\n'
+  + '2. 列出你会用到的关键前提与可能踩的坑；\n'
+  + '3. 确认推理没有矛盾后，再给出最终答案。\n'
+  + '不要把上述过程原样写出来 —— 我要的是结论和必要的推导，不是过程复述。';
+function deepThinkSystem(base){
+  if(!deepThinkOn()) return base;
+  if(modelIsReasoning(roleModelName('chat') || S.models.chat)) return base;
+  return String(base || '') + DEEP_THINK_BLOCK;
+}
+function setChatSwitch(k, on){
+  if(k === 'search'){
+    var c = webSearchCfg();
+    c.on = !!on;
+    /* 打开却没配 Key/地址时要说清，而不是让人以为联网了但模型没搜 */
+    if(c.on && !webSearchReady()){
+      toast('联网搜索已开，但还没配服务');
+      logIt('配置', '对话页开启联网搜索（缺配置）');
+    }else{
+      toast(on ? '这一轮会联网查' : '已关掉联网搜索');
+    }
+  } else if(k === 'deep'){
+    S.deepThink = !!on;
+    var m = roleModelName('chat') || S.models.chat;
+    var alwaysThink = modelIsReasoning(m);
+    /* 纯推理模型没有「不思考」这一档，关不掉就直说 ——
+       否则用户以为关了，实际上模型还在想，会怀疑开关坏了。 */
+    toast(on
+      ? (alwaysThink ? '已开深度思考（这个模型本来就一直在想）' : '已开深度思考')
+      : (alwaysThink ? '这个模型只会思考，关不掉' : '已关深度思考，这一轮直接答'));
+  }
+  save();
+  renderChatSwitches();
+  logIt('对话', (k === 'deep' ? '深度思考 ' : '联网搜索 ') + (on ? '开' : '关'));
+}
+function renderChatSwitches(){
+  var box = document.getElementById('chatSwitches');
+  if(!box) return;
+  var deep = deepThinkOn();
+  var wsOn = !!webSearchCfg().on;
+  var wsReady = webSearchReady();
+  var m = roleModelName('chat') || S.models.chat;
+  var deepNote = (deep && m && !modelIsReasoning(m)) ? '' : '';
+  box.innerHTML =
+      '<div class="qsw' + (deep ? ' on' : '') + '" onclick="setChatSwitch(\'deep\',' + (!deep) + ')">'
+    + '<span class="qi">' + icSvg('brain', 15) + '</span>深度思考' + deepNote + '</div>'
+    + '<div class="qsw' + (wsOn ? ' on' : '') + (wsOn && !wsReady ? ' warn' : '') + '"'
+    + ' onclick="setChatSwitch(\'search\',' + (!wsOn) + ')">'
+    + '<span class="qi">' + icSvg('globe', 15) + '</span>联网搜索'
+    + (wsOn && !wsReady ? '（未配置）' : '') + '</div>';
+}
+
 /* 对话页顶部的状态条：一眼看出 AI 通没通，点进去看设定 */
 function renderChatAiBar(){
   var el = document.getElementById('chatAiBar');
@@ -7936,8 +8657,19 @@ function send(preset, opts){
   opts = opts || {};
   var input = document.getElementById('chatInput');
   var text = (typeof preset === 'string') ? preset : input.value.trim();
-  if(!text) return;
-  if(typeof preset !== 'string') input.value = '';
+  /* 只有「用户什么都没输入」且「也没附件」才真的无事可做。
+     光有附件时也允许直接发 —— 附件本身就是完整的问题。 */
+  var ap = attachPayload();
+  if(!text && !ap.text && !ap.images.length) return;
+  if(text) text = text + (ap.text ? ('\n\n' + ap.text) : '');
+  else text = ap.text;
+  if(typeof preset !== 'string'){
+    input.value = '';
+    autoGrowInput(input);
+    /* 全屏框可能正开着：它是同一份内容的另一个视图，必须一起清，
+       否则发完还挂着一屏旧文字（用户会以为没发出去）。 */
+    syncInputToFull();
+  }
   /* noPush：重新生成时复用已经存在的用户消息，不再插入一条新的 ——
      否则 send 会把它再 push 一遍，页面上就出现两条一模一样的用户消息。 */
   if(!opts.noPush){ msgs.push({r:'me', t:text}); renderMsgs(); }
@@ -7979,8 +8711,39 @@ function send(preset, opts){
   }
   turns = turns.slice(-(CHAT_HISTORY_TURNS - 1));
   turns.forEach(function(t){ if(t.content.length > 1200) t.content = t.content.slice(0,1200)+'…'; });
-  turns.push({role:'user', content: text});
-  logIt('AI', '对话请求 · ' + S.models.chat + ' · ' + turns.length + ' 条消息');
+  /* 有图片时走 OpenAI 的多模态 content 数组（text 段 + image_url 段）。
+     没图就还是纯字符串 —— 有些网关对数组格式支持不好，
+     没必要为一张图冒险。 */
+  if(ap.images.length){
+    var segs = [{type:'text', text:text}];
+    ap.images.forEach(function(u){ segs.push({type:'image_url', image_url:{url:u}}); });
+    turns.push({role:'user', content:segs});
+  }else{
+    turns.push({role:'user', content: text});
+  }
+  logIt('AI', '对话请求 · ' + S.models.chat + ' · ' + turns.length + ' 条消息'
+    + (ap.names.length ? (' · 附件 ' + ap.names.join('/')) : '')
+    + (ap.images.length ? (' · ' + ap.images.length + ' 张图') : ''));
+
+  /* 本轮用的模式，在气泡上标出来 —— 开关是「这一轮」的，
+     不标出来用户分不清上条答案是深思模式还是随手答的。 */
+  var usedDeep = deepThinkOn();
+  var usedSearch = webSearchReady();
+  if(usedDeep) logIt('AI', '本轮开了深度思考');
+
+  /* 本轮用的模式，在气泡上标出来 —— 开关是「这一轮」的，
+     不标出来用户分不清上条答案是深思模式还是随手答的。 */
+  var usedDeep = deepThinkOn();
+  if(usedDeep) logIt('AI', '本轮开了深度思考');
+
+  /* 请求参数**只在这里组装一次**，重试与联网后的第二轮都复用它 ——
+     原来第二轮是另写一遍调用，如果只改第一处，联网搜完那轮就会丢掉新参数。 */
+  var askOpts = {
+    stream: true, tools: true, onDelta: onDelta,
+    /* 深度思考：只改 system，不动 tools / stream。
+       放进 sysPrompt 本身会污染其它功能（周总结、行程规划不该被对话页的临时开关影响）。 */
+    system: deepThinkSystem(sysPrompt(true))
+  };
 
   var attempt = 0;
   /* 联网搜索只跑一轮：模型说「我要搜」→ 搜 → 再问一次，然后无论它还说什么都不再搜，
@@ -8101,6 +8864,9 @@ function send(preset, opts){
       if(toolMsg) srcs.push('工具');
       if(searched) srcs.push('联网搜索');
       if(meta && meta.reasoningModel) srcs.push('推理模型');
+      /* 「深度思考」和「推理模型」是两回事：前者是我们加的指令，
+         后者是模型自带的思考过程。同一轮可能两个都有，所以分开标。 */
+      if(usedDeep) srcs.push('深度思考');
       /* meta.fallback = 正文为空、只能拿思考过程顶上：这时别再把同一段文字
          折叠成「思考过程」，否则同一内容出现两遍 */
       /* 思考过程也要过清洗：模型常把工具协议整块写进 reasoning，
@@ -8122,8 +8888,9 @@ function send(preset, opts){
       try{ ttsSpeak(body || ''); }catch(e){}
       renderMsgs();
       memTick(text);
+      clearAttach();
       try{ save(); }catch(e){}
-    }, {stream:true, tools:true, onDelta:onDelta});
+    }, askOpts);
   }
   askOnce();
 }
@@ -8790,12 +9557,12 @@ function ttsSpeak(text, opt){
     ttsModelSpeak(rc, s.slice(0, 500), function(ok, why){
       if(!ok){
         logWarn('模型合成失败（' + (why || '未知') + '），回落到系统引擎', '语音');
-        ttsSystemSpeak(s);
-      }
+        ttsSystemSpeak(s, opt);
+      }else if(opt.onEnd){ opt.onEnd(true); }
     });
     return true;
   }
-  return ttsSystemSpeak(s);
+  return ttsSystemSpeak(s, opt);
 }
 
 /* 清洗待读文本：代码块、链接、图片标记读出来只是噪声 */
@@ -8811,14 +9578,15 @@ function ttsClean(text){
 }
 
 /* 系统引擎：原生优先；原生不可用时退回 WebView。返回是否已提交。 */
-function ttsSystemSpeak(s){
+function ttsSystemSpeak(s, opt){
+  opt = opt || {};
   if(isApp && NATIVE && typeof NATIVE.ttsSpeak === 'function'){
     var st = TTS.status;
     if(st === 'unknown' || st === 'pending'){
       ttsInit();
       /* 引擎还没就绪就把这次朗读挂起来，ready 事件到了自动补上 —— 不要直接丢弃 */
       _ttsWaiter = function(r){
-        if(r === 'ready') ttsSystemSpeak(s);
+        if(r === 'ready') ttsSystemSpeak(s, opt);
         else ttsFail(TTS.err || '语音引擎不可用');
       };
       toast('正在启动语音引擎…');
@@ -8837,10 +9605,11 @@ function ttsSystemSpeak(s){
     ttsFail(TTS.err || '语音引擎不可用', {help:true});
     return false;
   }
-  return ttsWebSpeak(s);
+  return ttsWebSpeak(s, opt);
 }
 
-function ttsWebSpeak(s){
+function ttsWebSpeak(s, opt){
+  opt = opt || {};
   if(!window.speechSynthesis){
     ttsFail('当前环境不支持语音合成', {help:true});
     return false;
@@ -8849,7 +9618,7 @@ function ttsWebSpeak(s){
   if(!vs.length){
     /* 首次必然是空的。等 voiceschanged 到了再读一次，别直接判死刑。 */
     setTimeout(function(){
-      if(ttsWebVoices().length) ttsWebSpeak(s);
+      if(ttsWebVoices().length) ttsWebSpeak(s, opt);
       else ttsFail('系统没有可用音色。请到「设置 → 系统 → 语言和输入法 → 文字转语音」'
         + '确认已安装语音引擎，并下载中文语音包。', {help:true});
     }, 700);
@@ -8865,6 +9634,12 @@ function ttsWebSpeak(s){
     if(v){ u.voice = v; u.lang = v.lang; }
     u.rate = Math.max(0.5, Math.min(2, +t.rate || 1));
     u.pitch = Math.max(0.4, Math.min(2, +t.pitch || 1));
+    /* onEnd：对话页的朗读按钮靠它复位。这是 WebView 这条路**唯一**可靠的
+       结束信号（原生桥那条还在用兜底计时器），漏了按钮会一直停在停止态。 */
+    if(opt.onEnd){
+      u.onend = function(){ try{ opt.onEnd(true); }catch(e){} };
+      u.onerror = function(){ try{ opt.onEnd(false); }catch(e){} };
+    }
     window.speechSynthesis.speak(u);
     logIt('语音', '走浏览器语音合成：' + (v ? v.name : '默认音色'));
     return true;
@@ -8924,7 +9699,14 @@ window.onTtsResult = function(ok, path, why){
   if(window.__ttsDone) window.__ttsDone(!!ok, path, why || '');
 };
 
-function ttsSpeakForce(text){ ttsSpeak(text, {force:true}); }
+/* opt 透传是必须的：对话页的朗读按钮要靠 onEnd 把图标从「停止」复位回「喇叭」，
+   被打断时也得复位 —— 不然点一次打断之后按钮就一直停在停止态，
+   下次点会调 ttsStop 而不是重新朗读。 */
+function ttsSpeakForce(text, opt){
+  var o = opt || {};
+  o.force = true;
+  ttsSpeak(text, o);
+}
 
 /* ---------- 设置项 ---------- */
 function ttsVoiceOptions(){
@@ -9936,7 +10718,7 @@ function doClearAll(){
    ============================================================ */
 var BACKUP_KEYS = {
   /* termStart / memory / summaries / notes / todos / skills 都是换机要带走的学习状态 */
-  study: ['nick','avatar','aiName','aiCall','callLocked','courses','days','tasks','classes','goal','prefs','theme','accent','termStart','memory','summaries','notes','todos','skills','chatHistory','feedback'],
+  study: ['nick','avatar','aiName','aiCall','callLocked','courses','days','tasks','classes','goal','prefs','theme','accent','termStart','memory','summaries','notes','todos','skills','chatHistory','feedback','deepThink'],
   ai:    ['provider','baseUrl','apiKey','keyMemo','stream','maxTokens','models','modelList','modelListAt','ctx','systemPrompt','urlMemo','modelMemo']
 };
 var BACKUP_LABELS = {
@@ -10548,7 +11330,8 @@ function ocrPipeline(){
     openView('ai');
     return;
   }
-  /* DeepSeek 没有多模态模型：默认填入的 qwen-vl-max 只对 qwen / openai / zhipu 生效。
+  /* DeepSeek 的视觉模型还是实验版（deepseek-v4-flash-vision-exp）——
+     默认填入的 qwen3.8-max 只在 qwen / 智谱 这类有视觉模型的渠道有效。
      这不是硬错（用户也可能自填了一个），靠服务商自己报错；先给一句提示能少踩坑。 */
   var needsSwitch = (S.provider === 'deepseek');
 
@@ -10565,7 +11348,7 @@ function ocrPipeline(){
     + '</div><div class="progline"><i id="pbar" style="width:30%"></i></div>'
     + '<div class="note2"><b>说明：</b>图片只在识别时传给所选服务商，学径不保存原图；'
     + '返回结果会先让你逐条确认，不会直接写进课表。'
-    + (needsSwitch ? '<br/><b style="color:var(--warn)">提示：DeepSeek 没有视觉模型，调用失败就把服务商切到 通义千问 / 智谱 / OpenAI。</b>' : '')
+    + (needsSwitch ? '<br/><b style="color:var(--warn)">提示：DeepSeek 的视觉模型还是实验版，调用失败就把服务商切到 通义千问 / 智谱 / 火山方舟。</b>' : '')
     + '</div></div>';
   var mark = function(id, pct){
     var el = document.getElementById(id); if(el) el.classList.add('ok');
@@ -10639,109 +11422,504 @@ function solveHasVision(){
   return aiReady() && !!(S.models.vision && String(S.models.vision).trim());
 }
 /* ---------- 对话页拍照：弹窗 + 简易编辑，不再进复杂二级页 ---------- */
-var camState = {img:'', rot:0, scale:1, busy:false, ocrOnly:false};
-function openCamSheet(){
-  camState = {img:'', rot:0, scale:1, busy:false, ocrOnly: !solveHasVision()};
-  openSheet('cam');
+/* ---------- 加号菜单（v0.2.1）----------
+   原来输入栏左边是相机按钮，点开只有「拍照/相册」两个选择；
+   现在扩成一张菜单：拍照、相册选图、**上传文件**、历史提问。
+   菜单挂在按钮正上方的绝对定位层里，不用 openSheet ——
+   openSheet 是底部大弹层，选完要点两次（进弹层 → 再点选项），
+   这么高频的入口应该一次点完就走。 */
+/* ---------- 锚点菜单（加号菜单 / 长按操作框共用）----------
+   两处都用它，因为它们要解决的是同一个问题：**菜单出现在操作发生的地方，
+   而不是屏幕底部**。长按一条消息后弹底部大弹层会把对话整个盖住 ——
+   用户想看的是「刚按的那条消息」，不是被遮住的列表。
+   定位策略：优先出现在锚点上方，放不下就翻到下方，再放不下就贴边。 */
+var MENU_EDGE = 10, MENU_GAP = 8;
+function openAnchorMenu(box, anchor, opts){
+  opts = opts || {};
+  /* 只在**传了** html 时才写内容。写成 opts.html || '' 会在
+     「调用方自己填好了内容、只想借用定位」时把内容清空 ——
+     而 openAnchorMenu 内部 add('show') 之后才量尺寸，
+     清空后量到 0，于是 top/left 全部算到 0 位置。
+     查这个坑花了几轮：症状是「菜单高=2、定位全错」。 */
+  if(opts.html != null) box.innerHTML = opts.html;
+  /* 先显示再量：display:none 时 offsetWidth/Height 全是 0，定位会算到 0 位置 */
+  box.classList.add('show');
+  /* 定位按「当前锚点」现场算一次，并记到元素上 —— 之后视口变化时
+     可以再调一次 __place，用的是那时重新求出来的锚点。 */
+  box.__place = function(a){
+    var w = box.offsetWidth || 250;
+    var h = box.offsetHeight || 220;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var top, left;
+    if(opts.centerOn){
+      /* 点在气泡上：菜单以按点为中心。锚点往上挪 h*0.22 ——
+         直接以按点为中心时，高菜单（长按有 6 项 ≈ 400px）会整体偏上，
+         顶到状态栏/顶栏。往下偏一点让它整体落在对话区里，
+         同时仍然盖住气泡（保持「我按的是哪条」的视觉锚点）。 */
+      top = a.y - h * 0.22;
+    }else{
+      top = a.y - h - MENU_GAP;      // 优先上方
+      if(top < MENU_EDGE) top = a.y + (a.h || 0) + MENU_GAP;   // 上方不够就下方
+    }
+    if(opts.rightOf) left = a.x;
+    else left = a.x - w / 2;
+    /* 贴边收拢：贴边时留 MENU_EDGE 内边距，别让菜单圆角顶到屏幕外 */
+    box.style.top = Math.max(MENU_EDGE, Math.min(top, vh - h - MENU_EDGE)) + 'px';
+    box.style.left = Math.max(MENU_EDGE, Math.min(left, vw - w - MENU_EDGE)) + 'px';
+    box.style.width = Math.min(w, vw - MENU_EDGE*2) + 'px';
+    return box;
+  };
+  box.__anchor = anchor || {x: window.innerWidth/2, y: window.innerHeight/2, h: 0};
+  box.__resolve = opts.resolve || null;
+  reflowMenu(box, true);      // 首次：锚点求不出来时退回调用方给的坐标
+  bindMenuReflow();
+  return box;
 }
-function camPick(kind){
-  /* 动态创建 input + display:none 时很多 WebView 不认 capture。
-     点的时候临时挂到 body 上，相机必须带 capture=environment。 */
-  var old = document.getElementById('camLiveInput');
-  if(old) old.remove();
+
+/* 用**最新的**锚点重排一个已打开的菜单。
+   为什么需要这个：菜单是 position:fixed，而 top/left 是打开那一刻算好写死的。
+   键盘弹出/收起会改变可视区（本 App 用 adjustResize，布局会重排），
+   输入框和加号按钮整体位移，菜单却留在原地 —— 看起来就是「悬在半空」。
+   锚点失效（按钮/气泡已经不在了）时返回 false，调用方把菜单收掉。 */
+function reflowMenu(box, first){
+  if(!box || !box.classList.contains('show') || !box.__place) return false;
+  var a = box.__anchor;
+  if(box.__resolve){
+    var got = null;
+    try{ got = box.__resolve(); }catch(e){ got = null; }
+    if(!got){
+      /* 首次打开时求不出锚点（元素此刻不参与布局，比如页面还没切过来），
+         就退回调用方给的坐标 —— 一个字都不定位比位置差点糟得多。
+         但**重排**时求不出来说明锚真的没了（气泡被删了、按钮没了），
+         得返回 false 让调用方把菜单收掉，别让它飘在空处。 */
+      if(!first) return false;
+      got = a;
+    }
+    a = got;
+    box.__anchor = got;      // 记住最新值，下一帧没有 resolve 也能用
+  }
+  box.__place(a);
+  return true;
+}
+var _menuReflowBound = false, _menuReflowRaf = null;
+function scheduleMenuReflow(){
+  if(_menuReflowRaf) return;
+  _menuReflowRaf = requestAnimationFrame(function(){
+    _menuReflowRaf = null;
+    ['plusMenu', 'msgMenu'].forEach(function(id){
+      var box = document.getElementById(id);
+      if(!box || !box.classList.contains('show')) return;
+      if(!reflowMenu(box)) box.classList.remove('show');
+    });
+  });
+}
+function bindMenuReflow(){
+  if(_menuReflowBound) return;
+  _menuReflowBound = true;
+  window.addEventListener('resize', scheduleMenuReflow);
+  /* keyboard 弹出/收起走的就是窗口尺寸变化。visualViewport 那条是兜底：
+     有些内核只改视觉视口、不改布局视口，不监听的话菜单照样会飘。
+     键盘动画期间 resize 会连发，用 rAF 合并成每帧一次，看起来是平滑跟随。 */
+  try{
+    if(window.visualViewport) visualViewport.addEventListener('resize', scheduleMenuReflow);
+  }catch(e){}
+}
+/* 菜单行 HTML。加号菜单与长按操作框的差别只有「标题/副标题」，
+   结构完全一样 —— 写成一处，两边共用。 */
+function menuRowsHtml(items){
+  return items.map(function(x){
+    return '<div class="actrow' + (x.danger ? ' danger' : '') + (x.on ? ' on' : '') + '"'
+      + ' onclick="' + x.run + '">'
+      + '<div class="ic">' + icSvg(x.i, 16) + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:600">' + x.t
+      + (x.badge ? ' <span class="badge ' + (x.badgeOk ? 'green' : 'plain')
+          + '" style="font-size:9px;padding:0 4px">' + esc(x.badge) + '</span>' : '')
+      + '</div>'
+      + (x.d ? '<small class="muted" style="font-size:10.5px;line-height:1.4">' + esc(x.d) + '</small>' : '')
+      + '</div>'
+      + (x.on ? '<span class="badge green" style="flex:none">当前</span>' : '<span class="arrow">›</span>')
+      + '</div>';
+  }).join('');
+}
+function togglePlusMenu(ev){
+  if(ev){ ev.stopPropagation(); }
+  var btn = document.getElementById('plusBtn');
+  var box = document.getElementById('plusMenu');
+  if(!btn || !box) return;
+  /* 判断「是否已打开」要查 class，不是查元素存在 ——
+     元素一直在 DOM 里，查存在就永远走 close 分支，菜单永远打不开。 */
+  if(box.classList.contains('show')){ closePlusMenu(); return; }
+  var items = [
+    {i:'camera', t:'拍照', d:'直接打开相机拍一张', run:"plusCamera()"},
+    {i:'image',  t:'相册', d:'从手机相册里挑一张', run:"plusAlbum()"},
+    {i:'file',   t:'上传文件', d:'课程资料、代码、文档（文本类）', run:"plusFile()"},
+    {i:'wand',   t:'换个模型', d:'当前：' + esc(chatModelName()), run:"plusModelMenu()"}
+  ];
+  var r = btn.getBoundingClientRect();
+  openAnchorMenu(box, {x:r.left, y:r.top, h:r.height}, {
+    html: menuRowsHtml(items),
+    /* 键盘一收/一弹，输入栏整体上下移动，加号按钮跟着走 ——
+       菜单要重新贴回按钮上，否则就留在了半空。 */
+    resolve: function(){
+      var b = document.getElementById('plusBtn');
+      if(!b) return null;
+      var q = b.getBoundingClientRect();
+      if(!q.width || !q.height) return null;   // 按钮不在了/没布局 → 收起菜单
+      return {x:q.left, y:q.top, h:q.height};
+    }
+  });
+  logIt('对话', '打开加号菜单');
+}
+function closePlusMenu(){
+  var box = document.getElementById('plusMenu');
+  if(box) box.classList.remove('show');
+}
+/* 顶栏显示的模型名（可能是「渠道 · 模型」两段，这里给菜单标题用短名） */
+function chatModelName(){
+  var rc = roleCreds('chat');
+  if(rc.model) return rc.model;
+  return '未选模型';
+}
+/* ---------- 模型快捷切换 ----------
+   不复用 modelpick 那个弹层：它是**双列**（渠道 + 模型）加手填 ID，
+   塞进 250px 宽的小菜单里会挤成两行、每行只看得见三个字。
+   这里只列**当前渠道下已知的模型**，够日常切换；
+   要换渠道 / 手填 ID，再从最后一项进原弹层。 */
+function plusModelMenu(){
+  closePlusMenu();
+  var box = document.getElementById('plusMenu');
+  if(!box) return;
+  var rc = roleCreds('chat');
+  var list = providerModelsOf(rc.provider) || [];
+  var pname = providerMeta(rc.provider).n || rc.provider;
+  var items = [];
+  if(!rc.url || !rc.key){
+    items.push({i:'key', t:'还没配好 API', d:'点了没反应，先去配置', run:"closePlusMenu();openAiConfig()"});
+  }else if(!list.length){
+    items.push({i:'key', t:'这个渠道还没有模型列表', d:'去渠道里选，或手填模型 ID', run:"closePlusMenu();pickModel('chat')"});
+  }else{
+    items = list.map(function(m){
+      var on = (m === rc.model);
+      return {i:(on ? 'check' : 'chat'), t:esc(String(m)),
+        d:on ? '' : '切到这个模型',
+        on:on, run:"applyQuickModel('" + esc(String(m).replace(/'/g, "\'")) + "')"};
+    });
+  }
+  items.push({i:'sliders', t:'更多选择', d:'换渠道 / 手填模型 ID', run:"closePlusMenu();pickModel('chat')"});
+  var r = (document.getElementById('plusBtn') || {}).getBoundingClientRect
+           ? document.getElementById('plusBtn').getBoundingClientRect() : null;
+  openAnchorMenu(box,
+    r ? {x:r.left, y:r.top, h:r.height} : {x:window.innerWidth/2, y:window.innerHeight*0.6, h:0},
+    {html: '<div class="menuhead"><b>' + esc(pname) + '</b>'
+         + '<small class="muted">共 ' + list.length + ' 个模型</small></div>'
+         + menuRowsHtml(items)});
+  logIt('对话', '打开模型快捷切换（' + pname + ' · ' + list.length + ' 个）');
+}
+function applyQuickModel(m){
+  closePlusMenu();
+  var rc = roleCreds('chat');
+  var cur = rc.model;
+  if(cur === m){ toast('已经在用这个模型'); return; }
+  applyModelPick('chat', rc.provider, m);
+  renderChatAiBar();
+  logIt('对话', '对话模型切到 ' + rc.provider + '/' + m);
+  toast('已切到 ' + m);
+}
+/* 拍照 / 相册：**直接唤起系统相机或图库**，选完的图直接变成附件。
+   原来这两项会先开一个「确认图片」弹层（带旋转/缩放），再点发送 ——
+   那是给早期「拍照搜题」设计的一次性问答流程。
+   现在图片天然就是附件，多一层确认只是多两次点击，
+   而且用户明确说了「不要再多此一举」。 */
+function plusCamera(){ closePlusMenu(); pickChatImage('camera'); }
+function plusAlbum(){ closePlusMenu(); pickChatImage('album'); }
+function plusFile(){ closePlusMenu(); pickChatFile(); }
+
+/* 唤起相机 / 图库。动态建 input + display:none 时很多 WebView 不认 capture，
+   所以点的时候临时挂到 body 上；相机必须带 capture=environment。 */
+function pickChatImage(kind){
+  var old = document.getElementById('chatImgInput');
+  if(old){ try{ old.remove(); }catch(e){} }
   var el = document.createElement('input');
   el.type = 'file';
-  el.id = 'camLiveInput';
+  el.id = 'chatImgInput';
   el.accept = 'image/*';
   if(kind === 'camera') el.setAttribute('capture', 'environment');
   el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;z-index:-1';
   el.onchange = function(){
-    onCamFile(el, kind === 'camera' ? 1 : 0);
-    setTimeout(function(){ try{ el.remove(); }catch(e){} }, 800);
+    var f = el.files && el.files[0];
+    /* 先取到 File 再移除节点：onchange 之后再读 el.files 可能已经是空 */
+    setTimeout(function(){ try{ el.remove(); }catch(e){} }, 900);
+    if(f) onChatImage(f);
+  };
+  document.body.appendChild(el);
+  el.click();
+  logIt('对话', kind === 'camera' ? '唤起相机' : '唤起图库');
+}
+
+/* 图片 → 附件。三个入口（相机 / 相册 / 文件）共用。
+   压缩到 IMAGE_MAX_PX / 0.86：原图动辄几 MB，塞进 dataURL 又占内存又费 token。 */
+function onChatImage(f){
+  if(!f) return;
+  var name = f.name || ('照片-' + (new Date().getMonth()+1) + (new Date().getDate()) + '.jpg');
+  if(f.size > 12*1024*1024){ toast('图片太大了，换一张小一点的'); return; }
+  readFileAs(f, function(d){
+    if(!d || d.slice(0, 12) !== 'data:image/'){ openUnsupportedFile(name, '图片读不出来'); return; }
+    compressImg(d, IMAGE_MAX_PX, 0.86, function(small){
+      if(!small || String(small).slice(0, 12) !== 'data:image/'){
+        openUnsupportedFile(name, '图片处理失败'); return;
+      }
+      addAttach({kind:'image', name:name, size:f.size, dataUrl:small});
+      toast('图片已加上');
+    });
+  });
+}
+
+/* ---------- 上传文件 ----------
+   能力边界说清楚，别让用户传完才发现「读不了」：
+     · 文本类（txt/md/json/csv/py/js/代码…）→ 直接读进对话上下文，最有用
+     · 图片 → 走视觉模型（复用 aiVision 那条路）
+     · 其它（pdf/doc/zip…）→ 明确告知暂不支持，说明原因
+   超过长度会截断，但**先告诉用户截了多少** —— 静默截断会让人以为
+   模型看到了全文却答不出来。 */
+var FILE_TEXT_MAX = 12000;   // 约 6k 汉字，塞进上下文还留得下对话历史
+var FILE_TEXT_EXT = /\.(txt|md|markdown|json|js|ts|css|html?|xml|ya?ml|csv|tsv|log|py|java|c|cpp|h|hpp|go|rs|sh|sql|ini|toml|conf|tex|rtf|vue|svelte|jsx|tsx)$/i;
+function pickChatFile(){
+  /* 动态 input：display:none 的在部分 WebView 里唤不起选择器（同笔记插图的老坑） */
+  var old = document.getElementById('chatFileLive');
+  if(old) old.remove();
+  var el = document.createElement('input');
+  el.type = 'file';
+  el.id = 'chatFileLive';
+  el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;z-index:-1';
+  el.onchange = function(){
+    onChatFile(el.files && el.files[0]);
+    setTimeout(function(){ try{ el.remove(); }catch(e){} }, 600);
   };
   document.body.appendChild(el);
   el.click();
 }
-function renderCamSheet(){
-  var ocr = !solveHasVision();
-  var files = '';
-  if(!camState.img){
-    return files + '<div class="sh"></div><h3>拍照给 AI</h3>'
-      + '<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.7">'
-      + (ocr ? '未配置视觉模型：将做 <b>仅 OCR</b> 文字转写。' : '由视觉模型讲解题目。')
-      + '</div>'
-      + '<div class="row g6" style="margin-top:16px">'
-      + '<div class="btn primary" style="flex:1" onclick="camPick(\'camera\')">拍照</div>'
-      + '<div class="btn ghost" style="flex:1" onclick="camPick(\'album\')">相册</div></div>'
-      + (ocr ? '<div class="badge orange" style="margin-top:12px;display:inline-block">仅 OCR</div>' : '')
-      + '<div class="btn ghost" style="margin-top:14px" onclick="closeSheet()">取消</div>';
+/* ---------- 附件系统 ----------
+   三种类型，统一成「胶囊挂件」，发送时才拼进请求：
+     1. 文本类 → 读成字符串，随消息发出（超过上限截断并说明）
+     2. 图片   → 压成 dataURL，走 image_url
+     3. PDF    → **原生 PdfRenderer 逐页渲染成 PNG**，再走 image_url
+   为什么第 3 类要绕这一圈：视觉模型的接口只收图片（image_url），
+   不收 PDF 二进制。而本项目零外部依赖（没有 pdf.js），
+   所以用系统自带的 android.graphics.pdf.PdfRenderer 在原生侧渲染。
+   代价：多了一步渲染，页数多了会明显慢 —— 所以限页并如实告知。 */
+var ATTACH = [];        // {id, kind:'text'|'image'|'pdf', name, size, text|dataUrls, pages, truncated}
+var _attachSeq = 0;
+var PDF_MAX_PAGES = 6; // 超过这个页数就只渲染前几页并说明
+var IMAGE_MAX_PX = 1400;
+
+function attachRow(){
+  var box = document.getElementById('attachRow');
+  if(!box) return;
+  if(!ATTACH.length){ box.innerHTML = ''; return; }
+  box.innerHTML = ATTACH.map(function(a){
+    var ic = a.kind === 'pdf' ? 'paper' : (a.kind === 'image' ? 'image' : 'file');
+    /* 页数从 dataUrls.length 取 —— 渲染失败的页会被剔掉，
+       拿 a.pages（选文件时就写的预估数）会显示 0 页。 */
+    var sub = a.kind === 'pdf'
+      ? ('PDF · ' + ((a.dataUrls || []).length) + ' 页' + (a.truncated ? '（较长，只转了前几页）' : ''))
+      : (a.kind === 'image' ? '图片' : (Math.max(1, Math.round((a.text || '').length / 1024)) + ' KB 文本'
+          + (a.truncated ? '（已截断）' : '')));
+    return '<div class="attach' + (a.busy ? ' busy' : '') + '" onclick="peekAttach(' + a.id + ')">'
+      + '<div class="ai">' + icSvg(ic, 15) + '</div>'
+      + '<div class="an"><b>' + esc(a.name) + '</b><small>' + esc(sub) + '</small></div>'
+      + '<div class="ax" onclick="event.stopPropagation();removeAttach(' + a.id + ')">×</div>'
+      + '</div>';
+  }).join('');
+}
+function addAttach(a){
+  a.id = ++_attachSeq;
+  ATTACH.push(a);
+  attachRow();
+  logIt('对话', '添加附件 ' + a.name + '（' + a.kind + '）');
+  return a;
+}
+function removeAttach(id){
+  ATTACH = ATTACH.filter(function(a){ return a.id !== id; });
+  attachRow();
+}
+function clearAttach(){
+  ATTACH = [];
+  attachRow();
+}
+/* 点胶囊看内容。文本给全文（截断过的如实标注），PDF 给渲染出来的页图。 */
+function peekAttach(id){
+  var a = ATTACH.filter(function(x){ return x.id === id; })[0];
+  if(!a) return;
+  openSheet('filepeek');
+  var box = document.getElementById('sheet');
+  if(!box) return;
+  var body = '';
+  if(a.kind === 'pdf'){
+    body = '<div class="pdfpages">'
+      + (a.dataUrls || []).map(function(u, i){
+          return '<div class="pdfpage"><div class="pn">第 ' + (i+1) + ' 页</div>'
+            + '<img src="' + u + '" /></div>';
+        }).join('')
+      + '</div>';
+    if(a.truncated){
+      body += '<div class="note2" style="margin-top:10px">这份 PDF 超过 '
+        + PDF_MAX_PAGES + ' 页，只渲染了前 ' + (a.dataUrls || []).length
+        + ' 页。完整内容请在电脑上打开后复制文字。</div>';
+    }
+  }else if(a.kind === 'image'){
+    body = '<div class="pdfpage"><img src="' + a.dataUrl + '" /></div>';
+  }else{
+    var t = a.text || '';
+    body = '<div class="filepeek">' + esc(t) + '</div>';
+    if(a.truncated){
+      body += '<div class="note2" style="margin-top:10px">内容较长，'
+        + '发给模型的是前 ' + FILE_TEXT_MAX + ' 字符。</div>';
+    }
   }
-  /* 预览 + 简易编辑：旋转 / 缩放 */
-  return files + '<div class="sh"></div><h3>确认图片</h3>'
-    + '<div style="position:relative;margin-top:12px;border-radius:14px;overflow:hidden;background:#111;max-height:42vh;display:flex;align-items:center;justify-content:center">'
-    + '<img id="camPreview" src="' + camState.img + '" style="max-width:100%;max-height:42vh;transform:rotate(' + camState.rot + 'deg) scale(' + camState.scale + ');transition:transform .18s" />'
+  box.innerHTML = '<div class="sh"></div><h3>' + esc(a.name) + '</h3>'
+    + '<div class="muted" style="font-size:11px;margin-top:4px">'
+    + (a.kind === 'pdf' ? ('已渲染 ' + (a.dataUrls || []).length + ' 页，可直接让视觉模型读')
+        : (a.kind === 'image' ? '图片会随消息一起发出' : '文本会随消息一起发出'))
     + '</div>'
-    + (ocr ? '<div class="badge orange" style="margin-top:10px;display:inline-block">仅 OCR · 未配视觉模型</div>' : '')
-    + '<div class="row g6" style="margin-top:12px;flex-wrap:wrap">'
-    + '<div class="btn ghost" onclick="camRot(-90)">↺ 左转</div>'
-    + '<div class="btn ghost" onclick="camRot(90)">↻ 右转</div>'
-    + '<div class="btn ghost" onclick="camZoom(-0.15)">缩小</div>'
-    + '<div class="btn ghost" onclick="camZoom(0.15)">放大</div>'
-    + '</div>'
-    + '<div class="row g6" style="margin-top:14px">'
-    + '<div class="btn ghost" onclick="camState.img=\'\';camState.rot=0;camState.scale=1;renderSheet(\'cam\')">重选</div>'
-    + '<div class="btn primary" style="flex:1" onclick="camSend()">' + (ocr?'发送 OCR':'发送解题') + '</div></div>';
+    + '<div style="margin-top:12px">' + body + '</div>'
+    + '<div class="row g6" style="margin-top:12px">'
+    + '<div class="btn ghost" style="flex:1;margin-top:0" onclick="closeSheet()">关闭</div>'
+    + '<div class="btn ghost" style="flex:1;margin-top:0;color:var(--danger)" '
+    + 'onclick="removeAttach(' + a.id + ');closeSheet()">移除</div></div>';
 }
-function camRot(d){
-  camState.rot = (camState.rot + d) % 360;
-  var im = document.getElementById('camPreview');
-  if(im) im.style.transform = 'rotate(' + camState.rot + 'deg) scale(' + camState.scale + ')';
+/* 发送时把附件拼成消息文本 + 多模态内容。
+   返回 {text, images[]}：text 进 turns，images 走 image_url。 */
+function attachPayload(){
+  var out = { text:'', images:[], names:[] };
+  if(!ATTACH.length) return out;
+  var lines = [];
+  ATTACH.forEach(function(a){
+    if(a.kind === 'text'){
+      lines.push('【附件：' + a.name + '（' + (a.truncated ? '已截断' : '全文') + '）】\n'
+        + (a.text || ''));
+    }else if(a.kind === 'image'){
+      out.images.push(a.dataUrl);
+      lines.push('【附件：图片 ' + a.name + '】');
+    }else if(a.kind === 'pdf'){
+      /* PDF：每页一段文字说明 + 图片。让模型知道有几页、看到的是哪些页。 */
+      lines.push('【附件：PDF ' + a.name + '（共渲染 ' + (a.dataUrls || []).length
+        + ' 页' + (a.truncated ? '，文档更长' : '') + '）】请按顺序阅读下面的页面图片。');
+      (a.dataUrls || []).forEach(function(u){ out.images.push(u); });
+    }
+  });
+  out.names = ATTACH.map(function(a){ return a.name; });
+  out.text = lines.join('\n\n');
+  return out;
 }
-function camZoom(d){
-  camState.scale = Math.max(0.5, Math.min(2.5, camState.scale + d));
-  var im = document.getElementById('camPreview');
-  if(im) im.style.transform = 'rotate(' + camState.rot + 'deg) scale(' + camState.scale + ')';
-}
-function onCamFile(inp, isCam){
-  var f = inp.files && inp.files[0];
+
+function onChatFile(f){
   if(!f) return;
-  var fr = new FileReader();
-  fr.onload = function(){
-    compressImg(fr.result, 1400, 0.88, function(small){
-      camState.img = small; camState.rot = 0; camState.scale = 1;
-      openSheet('cam');
-    });
-  };
-  fr.readAsDataURL(f);
-  inp.value = '';
-}
-function camSend(){
-  if(!camState.img){ toast('先选图'); return; }
-  var ocr = !solveHasVision();
-  camState.busy = true;
-  camState.ocrOnly = ocr;
-  var sheet = document.getElementById('sheet');
-  if(sheet){
-    sheet.innerHTML = '<div class="sh"></div><h3>发送中…</h3>'
-      + '<div class="muted" style="margin-top:8px;font-size:12px">' + (ocr?'OCR 转写':'解题') + ' · 请稍候</div>';
+  var name = f.name || '文件';
+  var lower = name.toLowerCase();
+  /* 图片 → 直接变成附件（相机/相册/文件三个入口共用这一条路） */
+  if(/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(lower)){
+    onChatImage(f);
+    return;
   }
-  var role = ocr ? 'chat' : 'vision';
-  var prompt = ocr ? SOLVE_OCR_PROMPT : SOLVE_PROMPT;
-  logIt('AI', '对话拍照 · ' + (ocr?'OCR':'解题'));
-  aiVision(role, prompt, camState.img, function(ok, out){
-    camState.busy = false;
-    closeSheet();
-    if(!ok){
-      msgs.push({r:'ai', t: renderAiText('图片处理失败：\n' + out), src:[]});
-      renderMsgs();
+  /* PDF → 原生渲染成页图 */
+  if(/\.pdf$/i.test(lower) || f.type === 'application/pdf'){
+    pickPdfAttach(f);
+    return;
+  }
+  if(!(f.type && /text\//.test(f.type)) && !FILE_TEXT_EXT.test(lower)){
+    openUnsupportedFile(name);
+    return;
+  }
+  if(f.size > 4*1024*1024){
+    openUnsupportedFile(name, '文件超过 4MB，模型一次读不完');
+    return;
+  }
+  readFileAs(f, function(d){
+    if(d == null || d === ''){
+      openUnsupportedFile(name, '读不出内容，可能是空文件或编码不对');
       return;
     }
-    msgs.push({r:'me', t:'[图片] ' + (ocr ? '请识别图中文字' : '请讲解这道题')});
-    msgs.push({r:'ai', t: renderAiText(stripToolLine(out)), src: ocr ? ['图片 · 仅 OCR'] : ['图片 · 视觉模型']});
-    renderMsgs();
-    memTick('[图片题目]');
+    /* 截断在**挂载时**做，并把 truncated 标记带到胶囊上 ——
+       用户在胶囊上就能看到「已截断」，不用等到模型答不出来才发现。 */
+    var trunc = d.length > FILE_TEXT_MAX;
+    addAttach({kind:'text', name:name, size:f.size,
+      text: trunc ? d.slice(0, FILE_TEXT_MAX) : d, truncated: trunc, rawLen: d.length});
+    toast(trunc ? '文件太长，只带了前面一部分' : '文件已加上');
   });
 }
+/* PDF：走原生桥渲染页图 */
+function pickPdfAttach(f){
+  if(!isApp || !NATIVE || typeof NATIVE.pdfPreview !== 'function'){
+    /* 浏览器预览没有原生桥，说清限制而不是假装不支持 PDF */
+    openUnsupportedFile(f.name,
+      'PDF 逐页转图片需要系统能力，手机上可用。');
+    return;
+  }
+  if(f.size > 20*1024*1024){
+    openUnsupportedFile(f.name, 'PDF 超过 20MB，转图会很慢'); return;
+  }
+  var placeholder = addAttach({kind:'pdf', name:f.name, size:f.size, busy:true, dataUrls:[]});
+  toast('正在把 PDF 转成图片…');
+  var fr = new FileReader();
+  fr.onload = function(){
+    var b64 = String(fr.result || '').split(',')[1] || '';
+    nat('pdfPreview', b64, String(PDF_MAX_PAGES));
+  };
+  fr.onerror = function(){
+    placeholder.busy = false; removeAttach(placeholder.id);
+    openUnsupportedFile(f.name, 'PDF 读取失败');
+  };
+  try{ fr.readAsDataURL(f); }catch(e){
+    placeholder.busy = false; removeAttach(placeholder.id);
+    openUnsupportedFile(f.name, 'PDF 读取失败');
+  }
+}
+/* 原生回调：window.onPdfPreview */
+window.onPdfPreview = function(res){
+  var pages = (res && res.pages) || [];
+  var a = ATTACH.filter(function(x){ return x.kind === 'pdf'; }).pop();
+  if(!a) return;
+  a.busy = false;
+  if(!pages.length){
+    removeAttach(a.id);
+    openUnsupportedFile(a.name, (res && res.err) ? res.err : '没能从这个 PDF 里读出页面');
+    return;
+  }
+  a.dataUrls = pages;
+  a.truncated = !!(res && res.more);
+  attachRow();
+  toast(res && res.more ? ('已转出前 ' + pages.length + ' 页') : ('PDF 已转成 ' + pages.length + ' 张图片'));
+  logIt('对话', 'PDF 转图 ' + a.name + ' · ' + pages.length + ' 页'
+    + (a.truncated ? '（有截断）' : ''));
+};
+function readFileAs(f, cb){
+  var fr = new FileReader();
+  fr.onload = function(){ cb(String(fr.result || '')); };
+  fr.onerror = function(){ cb(null); };
+  try{ fr.readAsText(f); }catch(e){ cb(null); }
+}
+/* 旧实现（把文件正文贴进输入框）已删除。
+   原因：一份几千字的文档贴进去，输入框就只剩一条滚动条 ——
+   用户看不见自己带了什么、改不了正文、也没法在中间定位。
+   现在是「输入框上方的胶囊」，点开能预览全文。 */
+function openUnsupportedFile(name, why){
+  closeSheet();
+  openSheet('filebad');
+  var box = document.getElementById('sheet');
+  if(!box) return;
+  box.innerHTML = '<div class="sh"></div><h3>这个文件暂时读不了</h3>'
+    + '<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.8">'
+    + '<b>' + esc(name) + '</b><br/>'
+    + (why ? (esc(why) + '<br/>') : '')
+    + '现在支持：<b>PDF</b>（逐页转成图片交给视觉模型读）、<b>图片</b>、'
+    + '<b>文本类</b>（txt / md / 代码 / csv / json 等）。<br/>'
+    + 'Word、Excel、PPT 这些还不行 —— 它们是压缩包格式，'
+    + '要在手机上解开再抽文字，代价太大。'
+    + '临时办法：在电脑上打开它，复制正文粘进输入框，效果一样。</div>'
+    + '<div class="btn primary" style="margin-top:16px" onclick="closeSheet()">知道了</div>';
+}
+
 
 function openSolve(){
   /* 保留二级页入口（我的/识图等仍可用）；对话页已改走弹窗 */
@@ -11538,6 +12716,9 @@ function renderSchedule(){
     } else {
       html += list.map(function(c){
         var wTag = courseWeekTag(c);
+        /* 宫格里只显示「单/双」—— 数字周次（1、2…）在「当前教学周」这张表里
+           没有参照物，一列写着 [1] 看着像出错；数字周次留给列表模式。 */
+        var wShort = (wTag === '单' || wTag === '双') ? wTag : '';
         /* 每行可点开编辑：data-key 用「时间段+名称+周次」当身份，
            不放下标 —— 列表是按时间排序的副本，下标会漂。 */
         return '<div class="sched-row tap' + (courseIsOver(c, d) ? ' done' : '') + '"'
@@ -11546,7 +12727,7 @@ function renderSchedule(){
           + '<div class="sk" style="background:' + paintOf(c.c) + '"></div>'
           + '<div class="st">' + esc(c.t) + (wTag && !grid ? ' ['+wTag+']' : '') + '</div>'
           + '<div style="flex:1;min-width:0"><b>' + esc(c.n) + coursePriBadge(c) + '</b>'
-          + (grid && wTag ? ' ['+wTag+']' : '')
+          + (grid && wShort ? ' <span class="badge plain" style="font-size:9px;padding:0 4px">' + wShort + '</span>' : '')
           + (grid ? '' : '<div class="muted" style="font-size:10.5px">' + esc(c.loc||'') + '</div>')
           + '</div>'
           + '<span class="arrow" style="opacity:.5">›</span></div>';
@@ -11557,6 +12738,22 @@ function renderSchedule(){
   box.innerHTML = html;
   var ct = document.getElementById('schedCount');
   if(ct) ct.textContent = total + ' 门（本周）';
+  /* 宫格改成横向滚动后，「今天」那列可能落在屏幕外。
+     进来就把它滚到可见位置（今天在周中，一屏放不下 7 列），
+     否则用户每次都要自己滑到今天。scrollLeft 含列间距，逐列算。 */
+  /* 只有真溢出时才提示可滑动。放死了反而在宽屏（平板）上多一句废话。 */
+  var hint = document.getElementById('schedSwipeHint');
+  if(hint) hint.style.display = (grid && box.scrollWidth > box.clientWidth + 4) ? '' : 'none';
+  if(grid && todayI > 0){
+    var cell = box.children[todayI];
+    if(cell){
+      var left = 0;
+      for(var k = 0; k < todayI; k++) left += box.children[k].offsetWidth + 8;
+      /* 目标是「靠左可见」而不是「居中」：居中在窄屏上会让前面的列露出来，
+         反而更难分辨今天在哪一列 */
+      box.scrollLeft = Math.max(0, left - 6);
+    }
+  }
 }
 function openSchedule(){ openView('schedule'); renderSchedule(); }
 
@@ -13614,7 +14811,7 @@ setInterval(initClock, 30000);
 if(!S.termStart){ S.termStart = defaultTermStart(); save(); }
 renderIcons();
 renderWeek(); renderCourses(); renderPlan();
-renderQuick(); renderMsgs(); renderPromptPreview();
+renderMsgs(); renderPromptPreview();
 renderProfile(); refreshAll();
 nat('setPrefs', JSON.stringify(S.prefs));
 pushScheduleToNative();

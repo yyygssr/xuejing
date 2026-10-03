@@ -415,6 +415,906 @@ const ASSERTS = String.raw`
         + ' 提示=' + JSON.stringify(tip.slice(0, 22)) };
   });
 
+  // ---------- 对话页增强：加号菜单 / 快捷开关 / 长按操作 / 文件上传 ----------
+
+  T('对话：加号菜单含拍照·相册·文件·换模型，图标都画出来了', function(){
+    var btn = document.getElementById('plusBtn');
+    var menu = document.getElementById('plusMenu');
+    if(!btn || !menu) return { ok:false, info:'加号按钮或菜单容器缺失' };
+    /* 原来这里是相机按钮，现在必须是加号 —— SVG 路径要对 */
+    var isPlus = /M12 5v14M5 12h14/.test(btn.innerHTML);
+    togglePlusMenu();
+    var shown = menu.classList.contains('show');
+    var labels = [].map.call(menu.querySelectorAll('.actrow'), function(r){
+      var d = r.querySelector('div[style*="font-weight"]');
+      return d ? d.textContent : '';
+    });
+    /* 每行都要有真图标（空心方框 = 图标没灌上，openSheet 修过同类坑） */
+    var svgs = menu.querySelectorAll('.actrow .ic svg');
+    var iconsOk = svgs.length === 4 && [].every.call(svgs, function(s){
+      return s && s.innerHTML.length > 4;
+    });
+    var joined = labels.join('|');
+    var want = ['拍照','相册','上传文件','换个模型'];
+    var hasAll = want.every(function(w){ return joined.indexOf(w) >= 0; });
+    /* 历史对话在左上角已有一个入口（openChatHistory）——
+       这里再放一个既重复又多点一次，用户明确要求删掉。 */
+    var noDup = joined.indexOf('历史对话') < 0;
+    var posOk = !!(menu.style.top && menu.style.left && menu.style.width);
+    closePlusMenu();
+    var closed = !menu.classList.contains('show');
+    return { ok: isPlus && shown && hasAll && noDup && iconsOk && posOk && closed,
+      info: '加号=' + isPlus + ' 弹出=' + shown + ' 项=' + joined
+        + ' 无重复历史入口=' + noDup
+        + ' 图标数=' + svgs.length + ' 图标有内容=' + iconsOk
+        + ' 定位=' + posOk + ' 收起=' + closed };
+  });
+
+  T('对话：三个菜单里的入口都指向真实存在的函数', function(){
+    /* 踩过：写了 openView("chatHistory")，那个视图压根不存在，
+       点一下什么都不会发生。这里把 onclick 串里的函数名全抠出来验。
+       **三个菜单都要扫**（加号 / 模型 / 长按）——
+       只扫一个就是半个守卫，剩下的照样可能写错名字。 */
+    var keepRoles = S.roles, keepList = S.providerModels;
+    var keepKey = S.apiKey, keepUrl = S.baseUrl;
+    S.roles = {chat:{p:'deepseek', m:'m1'}};
+    S.providerModels = {deepseek: ['m1', 'm2']};
+    S.apiKey = 'sk-t'; S.baseUrl = 'https://e.invalid';
+    var names = [];
+    function collect(menu){
+      [].forEach.call(menu.querySelectorAll('.actrow'), function(r){
+        var oc = r.getAttribute('onclick') || '';
+        /* 一行里可能有多个调用（如 closePlusMenu();openChatHistory()），
+           只取第一个会漏掉后面那个 —— 漏掉就等于这条守卫失效。 */
+        var re = /([A-Za-z_$][\w$]*)\s*\(/g, m2;
+        while((m2 = re.exec(oc))){
+          if(m2[1] !== 'if' && m2[1] !== 'function') names.push(m2[1]);
+        }
+      });
+    }
+    togglePlusMenu();
+    collect(document.getElementById('plusMenu'));
+    closePlusMenu();
+    plusModelMenu();
+    collect(document.getElementById('plusMenu'));
+    closePlusMenu();
+    msgs = [{r:'me', t:'问'}, {r:'ai', t:'答'}];
+    renderMsgs();
+    openMsgActions(1, {x:200, y:200, h:20, point:true});
+    collect(document.getElementById('msgMenu'));
+    closeMsgMenu();
+    var missing = names.filter(function(n){
+      return typeof window[n] !== 'function' && typeof eval(n) !== 'function';
+    });
+    var uniq = names.filter(function(n, i){ return names.indexOf(n) === i; });
+    S.roles = keepRoles; S.providerModels = keepList;
+    S.apiKey = keepKey; S.baseUrl = keepUrl;
+    /* 期望 8 个不同函数：加号 3（camera/album/file）+ 模型 3（quick/more/close）
+       + 长按 4（regen/copy/speak/rate…）—— 少于 8 说明有一处菜单没扫到 */
+    return { ok: !missing.length && uniq.length >= 8,
+      info: '共 ' + names.length + ' 处调用 / ' + uniq.length + ' 个不同函数：'
+        + uniq.join(',') + ' 缺失=' + (missing.join(',') || '无') };
+  });
+
+  T('对话：模型快捷菜单列出当前渠道的模型，且能真切换', function(){
+    /* 模型列表来自 providerModelsOf，测试里造两个假模型 */
+    var keepP = S.provider, keepList = S.providerModels, keepKey = S.apiKey;
+    S.provider = 'deepseek';
+    S.providerModels = {deepseek: ['fast-a', 'smart-b']};
+    S.apiKey = 'sk-test'; S.baseUrl = 'https://example.invalid';
+    var keepRoles = S.roles;
+    /* 当前模型要绑在 roles.chat.m 上：roleModelName() **优先**读它，
+       S.models.chat 只是回落项 —— 而同文件里别的断言会改 S.models.chat，
+       用它当基准会读到别人的值。 */
+    S.roles = {chat:{p:'deepseek', m:'fast-a'}};
+    closePlusMenu();
+    plusModelMenu();
+    var box = document.getElementById('plusMenu');
+    var txt = box.textContent;
+    /* 头部要写清是哪个渠道，否则用户看到一串模型名不知道属于谁 */
+    var hasHead = txt.indexOf('DeepSeek') >= 0 || txt.indexOf('deepseek') >= 0;
+    var listsBoth = txt.indexOf('fast-a') >= 0 && txt.indexOf('smart-b') >= 0;
+    /* 当前模型要标出来，且那一行带 on（选中态） */
+    var onRows = box.querySelectorAll('.actrow.on');
+    var curMarked = onRows.length === 1 && box.querySelector('.actrow.on').textContent.indexOf('fast-a') >= 0;
+    /* 必须留「更多选择」出口：换渠道 / 手填 ID 只能从那儿走 */
+    var hasMore = txt.indexOf('更多选择') >= 0;
+    var iconsOk = [].every.call(box.querySelectorAll('.actrow .ic svg'), function(s){
+      return s && s.innerHTML.length > 4;
+    });
+    /* 真切一次：smart-b 应当写进 roles.chat.m */
+    applyQuickModel('smart-b');
+    var switched = (rolesCfg().chat || {}).m === 'smart-b';
+    /* 再点当前模型不该改动（幂等 + 提示） */
+    applyQuickModel('smart-b');
+    var stillOne = (rolesCfg().chat || {}).m === 'smart-b';
+    closePlusMenu();
+    S.provider = keepP; S.providerModels = keepList; S.apiKey = keepKey;
+    S.roles = keepRoles;
+    return { ok: hasHead && listsBoth && curMarked && hasMore && iconsOk
+        && switched && stillOne,
+      info: '含渠道名=' + hasHead + ' 列出模型=' + listsBoth
+        + ' 当前项标记=' + curMarked + ' 有更多出口=' + hasMore
+        + ' 图标=' + iconsOk + ' 切换生效=' + switched + ' 重复点击不变=' + stillOne };
+  });
+
+  T('对话：模型快捷菜单在没配 Key 时直接引导去配置', function(){
+    var keepList = S.providerModels, keepKey = S.apiKey, keepUrl = S.baseUrl;
+    var keepAcc = providerAccs().deepseek;
+    S.provider = 'deepseek';
+    S.providerModels = {deepseek: ['m1']};
+    S.apiKey = ''; S.baseUrl = '';
+    closePlusMenu();
+    plusModelMenu();
+    var box = document.getElementById('plusMenu');
+    var txt = box.textContent;
+    /* 没配好时列模型没意义（点了也不通），要直接说清并给出路 */
+    var guides = txt.indexOf('还没配好') >= 0 && txt.indexOf('配置') >= 0;
+    closePlusMenu();
+    S.providerModels = keepList; S.apiKey = keepKey; S.baseUrl = keepUrl;
+    if(keepAcc) { S.apiKey = keepAcc.key || ''; S.baseUrl = keepAcc.url || ''; }
+    return { ok: guides, info: '引导去配置=' + guides };
+  });
+
+  T('对话：深度思考开关只改 system，不动 tools/stream', function(){
+    var base = 'BASE_SYSTEM';
+    var keep = S.deepThink;
+    S.deepThink = false;
+    var off = deepThinkSystem(base);
+    S.deepThink = true;
+    var on = deepThinkSystem(base);
+    /* 推理模型自带 reasoning，再注入一遍只是浪费 token */
+    /* roleModelName('chat') 读的是 roles.chat.m，不是 S.models.chat ——
+       两条都得改，只改一条会读到旧值（第一次写这条断言时就这么错的）。 */
+    var m = S.models.chat, rm = (S.roles && S.roles.chat) ? S.roles.chat.m : undefined;
+    S.models.chat = 'deepseek-r1';
+    if(S.roles && S.roles.chat) S.roles.chat.m = '';
+    var onReasoning = deepThinkSystem(base);
+    S.models.chat = m;
+    if(S.roles && S.roles.chat) S.roles.chat.m = rm;
+    S.deepThink = keep;
+    return { ok: off === base && on !== base && on.indexOf('BASE_SYSTEM') === 0
+        && onReasoning === base,
+      info: '关时原样=' + (off === base) + ' 开时追加=' + (on !== base)
+        + ' 原前缀保留=' + (on.indexOf('BASE_SYSTEM') === 0)
+        + ' 推理模型不重复注入=' + (onReasoning === base) };
+  });
+
+  T('对话：联网搜索开关驱动 webSearchCfg 而不另存一份', function(){
+    var c = webSearchCfg(), keep = c.on, hadKey = c.key;
+    c.on = false;
+    renderChatSwitches();
+    var row = document.getElementById('chatSwitches');
+    var txt = row ? row.textContent : '';
+    var hasBoth = txt.indexOf('深度思考') >= 0 && txt.indexOf('联网搜索') >= 0;
+    var svgs = row ? row.querySelectorAll('.qsw svg') : [];
+    var icons = svgs.length === 2 && [].every.call(svgs, function(s){
+      return s && s.innerHTML.length > 4;
+    });
+    /* 打开但没配 Key 时要写「未配置」，不能让用户以为联网了 */
+    c.on = true; c.key = '';
+    renderChatSwitches();
+    var notes = (row ? row.textContent : '').indexOf('未配置') >= 0;
+    c.on = keep; c.key = hadKey;
+    renderChatSwitches();
+    return { ok: hasBoth && icons && notes,
+      info: '两项=' + hasBoth + ' 图标数=' + svgs.length + ' 图标有内容=' + icons
+        + ' 缺配置提示=' + notes };
+  });
+
+  T('对话：长按消息弹锚点菜单（不遮全屏），底部只剩朗读', function(){
+    msgs = [
+      {r:'me', t:'今天要背哪几个词'},
+      {r:'ai', t:'先背 Unit 1 的十个，明天再复习一遍。'}
+    ];
+    renderMsgs();
+    var box = document.getElementById('msgs');
+    var says = box.querySelectorAll('[data-say]');
+    /* 原来有四个 badge（重新生成/朗读/赞/踩），现在一个都不该剩 */
+    var oldBadges = box.querySelectorAll('.msg.ai > div > div > div > .badge');
+    var holds = box.querySelectorAll('[data-hold]');
+    /* **必须先切到对话页**：页面容器要有 .active 才 display:flex，
+       否则 getBoundingClientRect 全返回 0 —— 量不到位置就等于没量。
+       这是本项目的老坑：断言里凡是要量尺寸/坐标，先确认元素可见。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    bubble = box.querySelectorAll('[data-hold]')[1];
+    var br = bubble.getBoundingClientRect();
+    var visible = br.height > 0 && br.width > 0;
+    /* 按在气泡中间偏上：菜单应该出现在附近，而不是屏幕底部 */
+    var at = {x: br.left + br.width/2, y: br.top + 10, h: br.height, point:true};
+    openMsgActions(1, at);
+    var menu = document.getElementById('msgMenu');
+    var shown = menu.classList.contains('show');
+    var joined = menu.textContent;
+    var want = ['重新生成','复制内容','朗读这条','答得不错','不太对','删除'];
+    var hasAll = want.every(function(w){ return joined.indexOf(w) >= 0; });
+    var svgs = menu.querySelectorAll('.actrow .ic svg');
+    var iconsOk = svgs.length === 6 && [].every.call(svgs, function(s){
+      return s && s.innerHTML.length > 4;
+    });
+    /* **关键回归**：菜单必须出现在按下的位置附近。
+       底部弹层会把整个对话盖住，用户失去「我按的是哪条」的视觉锚点。 */
+    var mh = menu.offsetHeight, mtop = parseFloat(menu.style.top) || 0;
+    var nearAnchor = mtop < window.innerHeight * 0.62;
+    /* 头部要标明这是谁的哪条 */
+    var hasHead = menu.querySelector('.menuhead') !== null;
+    /* 底部弹层不该被打开 */
+    var sheetOpen = (document.getElementById('sheet') || {}).classList
+                     && document.getElementById('sheet').classList.contains('show');
+    /* 用户消息是另一套（编辑/复制/删除），不该有「重新生成」 */
+    closeMsgMenu();
+    openMsgActions(0, at);
+    var t2 = (document.getElementById('msgMenu') || {}).textContent || '';
+    var userOk = t2.indexOf('编辑这条提问') >= 0 && t2.indexOf('重新生成') < 0;
+    closeMsgMenu();
+    if(keepTab && keepTab !== 'page-chat') go(keepTab.replace('page-', ''));
+    return { ok: says.length === 1 && oldBadges.length === 0 && holds.length === 2
+        && shown && hasAll && iconsOk && nearAnchor && hasHead && !sheetOpen
+        && userOk && visible && mh > 0,
+      info: '元素可见=' + visible + ' 菜单高=' + mh
+        + ' 朗读按钮=' + says.length + ' 旧badge=' + oldBadges.length
+        + ' 可长按=' + holds.length + ' 锚点菜单弹出=' + shown
+        + ' AI项齐全=' + hasAll + ' 图标数=' + svgs.length
+        + ' 靠近按点=' + nearAnchor + '（顶=' + Math.round(mtop)
+        + '/' + window.innerHeight + ' 高=' + mh + '）'
+        + ' 有头部=' + hasHead + ' 未开底部弹层=' + (!sheetOpen) + ' 用户项=' + userOk };
+  });
+
+  T('对话：朗读按钮可点第二次打断，图标变回喇叭', function(){
+    /* 先切到对话页，否则量到的全是 0（#page-chat 无 .active 时不布局） */
+    var keepTab2 = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    msgs = [{r:'ai', t:'这是一段用来测试打断的文字'}];
+    renderMsgs();
+    /* 尺寸：底部只剩它一个按钮，36px 显得笨重；收到 30px。
+       但不能低于 28px —— 再小就难点了，等于把「点不准」问题换回来。 */
+    var sz = document.querySelector('[data-say="0"]').getBoundingClientRect();
+    var btnW = Math.round(sz.width), btnH = Math.round(sz.height);
+    var sizeOk = btnW >= 28 && btnW <= 32 && btnW === btnH;
+    var stopped = 0, realStop = ttsStop;
+    ttsStop = function(){ stopped++; };
+    toggleSpeakMsg(0);
+    var b1 = document.querySelector('[data-say="0"]');
+    var onFirst = b1.classList.contains('on');
+    var ico1 = b1.querySelector('.sb-i').innerHTML;
+    var isStop = ico1.indexOf('<rect') >= 0;
+    toggleSpeakMsg(0);
+    var b2 = document.querySelector('[data-say="0"]');
+    var onSecond = b2.classList.contains('on');
+    var ico2 = b2.querySelector('.sb-i').innerHTML;
+    ttsStop = realStop;
+    if(keepTab2 && keepTab2 !== 'page-chat') go(keepTab2.replace('page-', ''));
+    /* 打断必须真调了 ttsStop，且按钮复位成喇叭 ——
+       不复位的话下次点会变成「再停一次」而不是重新朗读。 */
+    return { ok: onFirst && isStop && stopped >= 2 && !onSecond
+        && ico2.indexOf('M4.5 9.4') >= 0 && sizeOk,
+      info: '尺寸=' + btnW + 'x' + btnH + '（28~32 且为正方形=' + sizeOk + '）'
+        + ' 首次高亮=' + onFirst + ' 图标变停止=' + isStop
+        + ' ttsStop调用=' + stopped + ' 二次后复位=' + (!onSecond)
+        + ' 图标回喇叭=' + (ico2.indexOf('M4.5 9.4') >= 0) };
+  });
+
+  T('对话：附件做成胶囊挂件，不塞进输入框', function(){
+    /* 旧做法（已删）：把文件正文贴进输入框。几千字一贴，
+       输入框就只剩滚动条 —— 看不见、改不了、无法定位。
+       现在是输入框上方的胶囊，点开能预览。 */
+    var inp = document.getElementById('chatInput');
+    var row = document.getElementById('attachRow');
+    if(!row) return { ok:false, info:'附件行容器缺失' };
+    inp.value = '';
+    clearAttach();
+    var emptyHidden = row.innerHTML === '';
+
+    addAttach({kind:'text', name:'讲义.txt', size:2048,
+      text:'x'.repeat(500), truncated:false});
+    addAttach({kind:'pdf', name:'实验指导.pdf', size:900000,
+      dataUrls:['data:image/jpeg;base64,AAAA'], pages:1});
+    var capsules = row.querySelectorAll('.attach');
+    var txt = row.textContent;
+    /* 每个胶囊都要有：图标 + 文件名 + 可点的预览 + 一个 × 移除 */
+    var iconsOk = [].every.call(row.querySelectorAll('.attach .ai svg'), function(s){
+      return s && s.innerHTML.length > 4;
+    });
+    var hasNames = txt.indexOf('讲义.txt') >= 0 && txt.indexOf('实验指导.pdf') >= 0;
+    var hasMeta = txt.indexOf('KB 文本') >= 0 && txt.indexOf('PDF') >= 0;
+    var hasRemove = row.querySelectorAll('.attach .ax').length === 2;
+    /* 输入框正文一个字都不能被塞进去 */
+    var inputClean = inp.value === '';
+
+    /* 点胶囊 → 预览弹层；点 × → 只移除自己 */
+    peekAttach(ATTACH[0].id);
+    var peekSheet = document.getElementById('sheet');
+    var peekOk = !!(peekSheet && peekSheet.textContent.indexOf('讲义.txt') >= 0
+      && peekSheet.querySelector('.filepeek'));
+    closeSheet();
+    removeAttach(ATTACH[0].id);
+    var afterRemove = row.querySelectorAll('.attach').length === 1;
+    var firstGone = row.textContent.indexOf('讲义.txt') < 0;
+    clearAttach();
+    var cleared = row.innerHTML === '';
+    inp.value = '';
+    return { ok: emptyHidden && capsules.length === 2 && iconsOk && hasNames
+        && hasMeta && hasRemove && inputClean && peekOk && afterRemove
+        && firstGone && cleared,
+      info: '空时隐藏=' + emptyHidden + ' 胶囊数=' + capsules.length
+        + ' 图标=' + iconsOk + ' 文件名=' + hasNames + ' 副标题=' + hasMeta
+        + ' 可移除=' + hasRemove + ' 输入框未被污染=' + inputClean
+        + ' 预览弹层=' + peekOk + ' 移除其一=' + afterRemove
+        + ' 只剩一个=' + firstGone + ' 清空=' + cleared };
+  });
+
+  T('对话：附件能正确拼进请求（文本进正文、图片进多模态）', function(){
+    clearAttach();
+    addAttach({kind:'text', name:'a.txt', text:'第一章 绪论', truncated:false});
+    addAttach({kind:'image', name:'b.png', dataUrl:'data:image/jpeg;base64,BBBB'});
+    var p1 = attachPayload();
+    /* 文本 → 正文；图片 → images 数组（视觉模型只认 image_url） */
+    var textIn = p1.text.indexOf('第一章 绪论') >= 0;
+    var nameIn = p1.text.indexOf('a.txt') >= 0;
+    var imgIn = p1.images.length === 1 && p1.images[0].indexOf('data:image/') === 0;
+    var namesList = p1.names.join(',') === 'a.txt,b.png';
+    /* 纯文本附件时不该凭空造出 images */
+    clearAttach();
+    addAttach({kind:'text', name:'c.txt', text:'只有文本'});
+    var p2 = attachPayload();
+    var noImg = p2.images.length === 0;
+    /* PDF：每页都进 images，并在正文里说明共几页 */
+    clearAttach();
+    addAttach({kind:'pdf', name:'d.pdf', dataUrls:['data:image/jpeg;base64,C','data:image/jpeg;base64,D'], truncated:true});
+    var p3 = attachPayload();
+    var pdfImgs = p3.images.length === 2;
+    var pdfExplained = p3.text.indexOf('共渲染 2 页') >= 0 && p3.text.indexOf('文档更长') >= 0;
+    clearAttach();
+    return { ok: textIn && nameIn && imgIn && namesList && noImg && pdfImgs && pdfExplained,
+      info: '文本进正文=' + textIn + ' 带文件名=' + nameIn
+        + ' 图片进多模态=' + imgIn + ' 名单=' + namesList
+        + ' 纯文本不造images=' + noImg
+        + ' PDF每页成图=' + pdfImgs + ' PDF说明了页数=' + pdfExplained };
+  });
+
+  T('对话：长文本附件截断时如实标注', function(){
+    clearAttach();
+    var long = new Array(FILE_TEXT_MAX + 500).join('y');
+    addAttach({kind:'text', name:'big.txt', text: long.slice(0, FILE_TEXT_MAX),
+      truncated:true, rawLen: long.length});
+    var row = document.getElementById('attachRow');
+    var marked = row.textContent.indexOf('已截断') >= 0;
+    /* 预览里也要说明「发给模型的是前 N 字符」 */
+    peekAttach(ATTACH[0].id);
+    var sheet = document.getElementById('sheet');
+    var peekSays = !!(sheet && sheet.textContent.indexOf('发给模型的是前') >= 0);
+    closeSheet();
+    clearAttach();
+    return { ok: marked && peekSays, info: '胶囊标注已截断=' + marked + ' 预览说明截断=' + peekSays };
+  });
+
+  T('对话：输入框随内容长高，到顶后内部滚动', function(){
+    /* 必须先切到对话页：#page-chat 无 .active 时不布局，量到的全是 0 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    var inp = document.getElementById('chatInput');
+    if(!inp) return { ok:false, info:'输入框不是 textarea' };
+    var isTa = inp.tagName === 'TEXTAREA';
+    /* 单行：约等于最小高 */
+    inp.value = '';
+    autoGrowInput(inp);
+    var h1 = Math.round(inp.getBoundingClientRect().height);
+    /* 多行：应该变高 */
+    inp.value = new Array(6).join('这是一行比较长的文字用来把输入框撑开看看效果');
+    autoGrowInput(inp);
+    var h6 = Math.round(inp.getBoundingClientRect().height);
+    /* 极长：到上限就停住，不再继续长 */
+    inp.value = new Array(120).join('很多很多很多很多很多字');
+    autoGrowInput(inp);
+    var hMax = Math.round(inp.getBoundingClientRect().height);
+    var scrolls = inp.style.overflowY === 'auto';
+    /* 清空后要能缩回去 —— auto-grow 最常见的 bug 是「只涨不跌」 */
+    inp.value = '';
+    autoGrowInput(inp);
+    var hBack = Math.round(inp.getBoundingClientRect().height);
+    if(keepTab && keepTab !== 'page-chat') go(keepTab.replace('page-', ''));
+    return { ok: isTa && h6 > h1 && hMax <= INPUT_MAX_H + 2
+        && hMax >= INPUT_MAX_H - 2 && scrolls && hBack === h1,
+      info: 'textarea=' + isTa
+        + ' 单行高=' + h1 + ' 六行高=' + h6
+        + ' 封顶高=' + hMax + '(上限' + INPUT_MAX_H + ')'
+        + ' 到顶可滚动=' + scrolls
+        + ' 清空缩回=' + hBack + '(==' + h1 + ')' };
+  });
+
+  T('对话：全屏输入与输入框**实时同步**（关掉不丢内容）', function(){
+    /* 先切到对话页：#page-chat 无 .active 时不布局，
+       textarea 的 scrollHeight 量到 0，auto-grow 就算不出高度。
+       （本轮第三次踩这个坑，已写进技能。） */
+    var keepTab3 = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    var inp = document.getElementById('chatInput');
+    var keep = inp.value;
+    inp.value = '小框里原有的字';
+    openFullInput();
+    var ta = document.getElementById('fullInputTa');
+    var opened = !!ta;
+    /* 打开时应该把现有内容带上去（不是空白重来） */
+    var carried = opened && ta.value === '小框里原有的字';
+    /* **核心**：在全屏框里打字，必须【立刻】同步到主输入框，
+       不需要点任何按钮 —— 全屏输入只是同一份内容的另一种形态。 */
+    ta.value = '全屏里写的一大段文字\n第二行\n第三行';
+    ta.dispatchEvent(new Event('input', {bubbles:true}));
+    var liveSync = inp.value === '全屏里写的一大段文字\n第二行\n第三行';
+    /* 模拟「误点弹层外面的遮罩」：直接关掉，不点任何确认。
+       内容必须还在 —— 这正是改成实时同步要解决的问题。 */
+    closeSheet();
+    var survived = inp.value === '全屏里写的一大段文字\n第二行\n第三行';
+    /* 反向：程序改主输入框（如发送后清空）时，全屏框要跟着走 */
+    openFullInput();
+    var ta2 = document.getElementById('fullInputTa');
+    var reopenCarried = !!ta2 && ta2.value === inp.value;
+    inp.value = '';
+    syncInputToFull();
+    var reverseSync = (document.getElementById('fullInputTa') || {}).value === '';
+    closeSheet();
+    var back = survived;
+    /* 三行字在最小高度里放得下，高度本来就该不变 ——
+       「高度变了」不是正确判据，**换回的字一字不差**才是。
+       高度只在内容真的超高时才该涨。 */
+    var hNow = parseInt(inp.style.height, 10) || 0;
+    var sane = hNow >= INPUT_MIN_H && hNow <= INPUT_MAX_H + 2;
+    /* 真正超高时才该涨 */
+    inp.value = new Array(20).join('很长很长很长很长很长很长很长的文字');
+    autoGrowInput(inp);
+    var grew = parseInt(inp.style.height, 10) > INPUT_MIN_H;
+    inp.value = keep;
+    autoGrowInput(inp);
+    if(keepTab3 && keepTab3 !== 'page-chat') go(keepTab3.replace('page-', ''));
+    return { ok: opened && carried && liveSync && survived && reopenCarried
+        && reverseSync && back && sane && grew,
+      info: '弹层打开=' + opened + ' 带出原有内容=' + carried
+        + ' **打字即时同步=' + liveSync + '**'
+        + ' 误关不丢=' + survived
+        + ' 重开仍带出=' + reopenCarried
+        + ' 反向同步=' + reverseSync
+        + ' 高度合理=' + sane + '(' + hNow + 'px)'
+        + ' 超长时变高=' + grew };
+  });
+
+  T('架构：菜单能被空白/切页/再点同条关掉', function(){
+    /* 用户实测反馈：点空白关不掉、切页还留着。
+       根因是 var hit = e.target.closest 取出了方法、丢了 this，
+       后面 hit('#msgMenu') 抛 Illegal invocation，
+       同一函数里后面的语句全没跑到（而且**没有任何报错**）。 */
+    msgs = [{r:'me', t:'问'}, {r:'ai', t:'答'}];
+    renderMsgs();
+    go('chat');
+    var mm = document.getElementById('msgMenu');
+    function openOn(ix){
+      var list = document.querySelectorAll('[data-hold]');
+      if(!list[ix]) return false;
+      var b = list[ix];
+      var r = b.getBoundingClientRect();
+      openMsgActions(+b.getAttribute('data-hold'),
+        {x:r.left+r.width/2, y:r.top+8, h:r.height, point:true});
+      return mm.classList.contains('show');
+    }
+    var out = [];
+    // 1) 点空白
+    var opened = openOn(1);
+    closeAnyMenu(document.getElementById('quickwrap'));
+    out.push('点空白关=' + !mm.classList.contains('show'));
+    // 2) 切页
+    openOn(1);
+    go('me');
+    out.push('切页关=' + !mm.classList.contains('show'));
+    go('chat');
+    // 3) 进二级页
+    renderMsgs();
+    openOn(1);
+    openView('schedule');
+    out.push('进二级页关=' + !mm.classList.contains('show'));
+    closeView('schedule');
+    go('chat');
+    // 4) 点菜单内部不该关
+    renderMsgs();
+    openOn(1);
+    var head = document.querySelector('#msgMenu .menuhead');
+    if(head) closeAnyMenu(head);
+    out.push('点菜单内不关=' + mm.classList.contains('show'));
+    // 5) 再点同一条 = 收起（「只是想看看有什么」的路径）
+    closeMsgMenu();
+    renderMsgs();
+    startHold(1, 100, 100, document.querySelectorAll('[data-hold]')[1]);
+    startHold(1, 100, 100, document.querySelectorAll('[data-hold]')[1]);
+    out.push('再点同条关=' + !mm.classList.contains('show'));
+    endHold();
+    closeMsgMenu();
+    // 6) 关键：源码里不能再出现「取出方法再裸调」的写法
+    var html = document.documentElement.innerHTML;
+    var bad = /var\s+\w+\s*=\s*\w+\.closest\s*;/.test(html);
+    out.push('无裸调closest=' + (!bad));
+    var all = out.every(function(x){ return x; });
+    return { ok: all && opened, info: out.join(' | ') };
+  });
+
+  T('架构：弹出菜单挂在 #screen 下，不在 #page-chat 里', function(){
+    /* 查源码结构而不是运行时：#page-chat 无 .active 时是 display:none，
+       子元素连 offsetWidth 都量到 0 → openAnchorMenu 的定位全部算错。
+       position:fixed 摆脱的是**定位**，摆脱不了祖先的 display。
+       运行时难复现（要看当时在哪个页面），源码结构一查就清。 */
+    var d = document;
+    var menu = d.getElementById('msgMenu');
+    var plus = d.getElementById('plusMenu');
+    if(!menu || !plus) return { ok:false, info:'菜单容器缺失' };
+    /* 判据：父节点不是 #page-chat（#page-chat 自己会被 display:none） */
+    var p1 = menu.parentElement, p2 = plus.parentElement;
+    var chat = d.getElementById('page-chat');
+    var outOfChat = p1 !== chat && p2 !== chat;
+    /* 再退一步：即使不是直接子节点，祖先里也不能有 page-chat */
+    function hasChatAncestor(el){
+      while(el && el !== d.body){
+        if(el === chat) return true;
+        el = el.parentElement;
+      }
+      return false;
+    }
+    var noAncestor = !hasChatAncestor(menu) && !hasChatAncestor(plus);
+    /* 运行时复现：切到别的页，菜单仍能量到尺寸 */
+    msgs = [{r:'me', t:'问'}, {r:'ai', t:'答'}];
+    go('home');
+    var stillMeasurable = false;
+    try{
+      openMsgActions(1, {x:100, y:100, h:20, point:true});
+      stillMeasurable = menu.offsetWidth > 100 && menu.offsetHeight > 30;
+      closeMsgMenu();
+    }catch(e){}
+    go('chat');
+    return { ok: outOfChat && noAncestor && stillMeasurable,
+      info: '父节点=' + (p1 && p1.id || p1 && p1.className)
+        + ' 不在page-chat里=' + outOfChat
+        + ' 祖先无page-chat=' + noAncestor
+        + ' 切到首页仍能量到尺寸=' + stillMeasurable
+        + '（' + (menu.offsetWidth) + 'x' + (menu.offsetHeight) + '）' };
+  });
+
+  T('对话：锚点菜单贴边时不越出屏幕', function(){
+    /* 按在左上角 / 右下角 / 正中，菜单都要留在视口内 ——
+       越界的话最后几项点不到。菜单挂在 body 上，不受 #page-chat 布局影响。 */
+    function probe(ax, ay){
+      var box = document.getElementById('msgMenu');
+      /* 要给真内容（多几行）才量得到高度；空壳量到 0，定位断言就是空的 */
+      /* 用 menuRowsHtml 生成，别手拼 <div>：.ic 里没有 svg 时没有尺寸，
+         整行会塌成 0 高，量出来的定位就是假的（这个坑踩过一次）。 */
+      box.innerHTML = '<div class="menuhead"><b>操作</b><small class="muted">测试</small></div>'
+        + menuRowsHtml([
+            {i:'refresh', t:'第一项', d:'说明一', run:'x'},
+            {i:'copy',    t:'第二项', d:'说明二', run:'x'},
+            {i:'trash',   t:'第三项', d:'说明三', run:'x'}
+          ]);
+      openAnchorMenu(box, {x:ax, y:ay, h:20, point:true}, {centerOn:true});
+      var r = {t: parseFloat(box.style.top), l: parseFloat(box.style.left),
+               w: box.offsetWidth, h: box.offsetHeight};
+      closeMsgMenu();
+      return r;
+    }
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var a = probe(2, 2);              // 左上角
+    var b = probe(vw - 2, vh - 2);    // 右下角
+    var c = probe(vw / 2, vh / 2);    // 正中
+    function inView(r){
+      return r.t >= 8 && r.l >= 8
+        && r.t + r.h <= vh - 8 + 1
+        && r.l + r.w <= vw - 8 + 1;
+    }
+    var allIn = inView(a) && inView(b) && inView(c);
+    /* 正中时应该真的居中，而不是被边距推走 */
+    var centered = Math.abs((c.l + c.w/2) - vw/2) < 3;
+    /* 高度量到 0 的话定位断言没意义 —— 必须真量到 */
+    var measured = c.h > 30 && c.w > 100;
+    return { ok: allIn && centered && measured,
+      info: '左上=' + JSON.stringify(a) + ' 右下=' + JSON.stringify(b)
+        + ' 正中=' + JSON.stringify(c)
+        + ' 全部在视口内=' + allIn + ' 正中居中=' + centered
+        + ' 量到真实尺寸=' + measured + '（菜单高 ' + c.h + '）' };
+  });
+
+  T('对话：长按有移动容差（滚动不该误弹操作框）', function(){
+    /* 少了容差，用户想滚动列表却会误弹菜单 —— 比没有长按更烦 */
+    return { ok: typeof HOLD_MS === 'number' && HOLD_MS >= 350
+        && typeof HOLD_SLOP === 'number' && HOLD_SLOP >= 6
+        && typeof startHold === 'function' && typeof moveHold === 'function'
+        && typeof endHold === 'function'
+        && typeof fireHold === 'function',
+      info: 'HOLD_MS=' + HOLD_MS + 'ms 容差=' + HOLD_SLOP + 'px 三函数齐备' };
+  });
+
+  T('AI：思考开关按接口地址认出平台，发对应那家的字段', function(){
+    /* 锁的是「开关真的能控制模型思考」—— 光在 system 里写「请先思考」是
+       控制不了的：DeepSeek V4 / GLM-4.5+ 默认就开着思考。
+       字段名来自各家官方文档（2026-10 逐个核对），改之前先去核对，别凭印象。
+       **认平台靠地址而不是渠道下拉框** —— 很多人是用「自定义渠道」把官方地址
+       填进来的，按渠道名分支就认不出来。 */
+    function probe(url, model, on){
+      var b = {};
+      var hit = applyThinkMode(b, model, url, on);
+      return { hit: hit, body: b };
+    }
+    var DS = 'https://api.deepseek.com/v1';
+    var d1 = probe(DS, 'deepseek-v4-flash', false);
+    var d2 = probe(DS, 'deepseek-v4-flash', true);
+    var z1 = probe('https://open.bigmodel.cn/api/paas/v4', 'glm-5.2', false);
+    var v1 = probe('https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-2-1-pro-260628', false);
+    var m1 = probe('https://api.xiaomimimo.com/v1', 'mimo-v2.6-pro', false);
+    var q1 = probe('https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen3.8-max', false);
+    var s1 = probe('https://api.siliconflow.cn/v1', 'Qwen/Qwen3-8B', false);
+    var thinkFam = function(r){
+      return !!r.hit && r.body.thinking && r.body.thinking.type === 'disabled'
+        && !('enable_thinking' in r.body);
+    };
+    var ethFam = function(r){
+      return !!r.hit && r.body.enable_thinking === false && !('thinking' in r.body);
+    };
+    /* 纯推理模型没有「不思考」这一档，发了要么被忽略要么 400 */
+    var r1 = probe(DS, 'deepseek-reasoner', false);
+    var r2 = probe('https://open.bigmodel.cn/api/paas/v4', 'glm-z1-air', false);
+    /* 认不出的地址（中转 / 自建 / 仿冒域名）宁可不发，也不能把请求打回去 */
+    var c1 = probe('https://my-proxy.example.com/v1', 'my-model', false);
+    var c2 = probe('https://fakedeepseek.com/v1', 'x', false);
+    var ok = thinkFam(d1) && d1.body.thinking.type === 'disabled'
+      && d2.hit && d2.body.thinking.type === 'enabled'
+      && thinkFam(z1) && thinkFam(v1) && thinkFam(m1)
+      && ethFam(q1) && ethFam(s1)
+      && !r1.hit && !Object.keys(r1.body).length
+      && !r2.hit && !Object.keys(r2.body).length
+      && !c1.hit && !Object.keys(c1.body).length
+      && !c2.hit && !Object.keys(c2.body).length;
+    return { ok: ok,
+      info: 'DeepSeek关=' + JSON.stringify(d1.body)
+        + ' 开=' + JSON.stringify(d2.body)
+        + ' 智谱=' + JSON.stringify(z1.body)
+        + ' 方舟=' + JSON.stringify(v1.body)
+        + ' 小米=' + JSON.stringify(m1.body)
+        + ' 千问=' + JSON.stringify(q1.body)
+        + ' 硅基=' + JSON.stringify(s1.body)
+        + ' 纯推理不发=' + (!r1.hit && !r2.hit)
+        + ' 认不出的地址不发=' + (!c1.hit && !c2.hit) };
+  });
+
+  T('AI：内置渠道的地址都能被思考参数表认出来（两张表联动）', function(){
+    /* 渠道表（PROVIDERS/PROVIDER_URL）和思考参数表（THINK_PLATFORMS）是两份
+       手写数据，靠域名串起来。改了一边忘了另一边 = 那个渠道的深度思考开关
+       静默失效（不报错，只是关不掉）。所以把两张表对起来验。 */
+    var miss = [];
+    Object.keys(PROVIDER_URL).forEach(function(k){
+      if(!PROVIDERS[k]){ miss.push(k + '(渠道表里没有)'); return; }
+      if(!thinkPlatformOf(PROVIDER_URL[k])) miss.push(k);
+    });
+    /* 反向：每个平台的域名片段都得能匹配到它自己的地址 */
+    var badMatch = [];
+    THINK_PLATFORMS.forEach(function(pl){
+      if(!thinkPlatformOf('https://' + pl.d[0] + '/v1')) badMatch.push(pl.n);
+    });
+    /* 自定义渠道的示例地址不该被认成任何一家 */
+    var customHit = thinkPlatformOf(PROVIDERS.custom.url);
+    return { ok: !miss.length && !badMatch.length && !customHit,
+      info: '渠道数=' + Object.keys(PROVIDER_URL).length
+        + ' 各平台数=' + THINK_PLATFORMS.length
+        + ' 有地址却认不出=' + (miss.join(',') || '无')
+        + ' 平台表自匹配失败=' + (badMatch.join(',') || '无')
+        + ' 自定义示例地址没被误认=' + !customHit };
+  });
+
+  T('AI：思考字段被服务端拒绝时能识别出来（好去掉重试）', function(){
+    /* 有的渠道的模型不认识这个字段会 400。识别得准，才能「去掉参数重发一次」
+       而不是让用户整条对话都用不了。判据要求**既提到字段名、又说它不合法** ——
+       只看关键词会在模型正常聊到 thinking 时误判。 */
+    var yes = [
+      '{"error":{"message":"Unknown parameter: thinking"}}',
+      '{"error":{"message":"enable_thinking is not supported for this model"}}',
+      '{"error":{"message":"unrecognized field thinking"}}'
+    ];
+    var no = [
+      '{"error":{"message":"Invalid API key"}}',
+      '{"error":{"message":"Rate limit exceeded"}}',
+      '深度思考模式已启用',
+      ''
+    ];
+    var badYes = yes.filter(function(s){ return !looksLikeParamReject(s); });
+    var badNo = no.filter(function(s){ return looksLikeParamReject(s); });
+    return { ok: !badYes.length && !badNo.length,
+      info: '该识别漏掉=' + (badYes.length ? badYes.length + ' 条' : '无')
+        + ' 误判=' + (badNo.length ? badNo.length + ' 条' : '无') };
+  });
+
+  T('对话：弹出菜单能在锚点移动后重新贴回去', function(){
+    /* 键盘弹出/收起会改变可视区（本 App 用 adjustResize），输入栏整体位移，
+       而菜单的 top/left 是打开那一刻算好写死的 —— 不重排就会「悬在半空」。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    togglePlusMenu();
+    var box = document.getElementById('plusMenu');
+    if(!box || !box.classList.contains('show')) return { ok:false, info:'加号菜单没打开' };
+    var wired = typeof box.__place === 'function' && typeof box.__resolve === 'function';
+    var boundOnce = _menuReflowBound === true;
+
+    /* 把按钮推下去 40px（用 transform：不改布局但会改 getBoundingClientRect，
+       正是锚点求值读的东西），菜单应当跟着走 40px */
+    var btn = document.getElementById('plusBtn');
+    var keepTf = btn.style.transform;
+    var top1 = box.getBoundingClientRect().top;
+    btn.style.transform = 'translateY(40px)';
+    var moved = reflowMenu(box);
+    var top2 = box.getBoundingClientRect().top;
+    var followed = Math.abs((top2 - top1) - 40) <= 4;
+    btn.style.transform = keepTf;
+
+    /* 贴边收拢之后也要仍在可视区内 */
+    var r = box.getBoundingClientRect();
+    var inside = r.top >= 0 && r.left >= 0
+      && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+    closePlusMenu();
+
+    /* 锚点失效（消息被清掉，气泡不在了）→ reflowMenu 必须返回 false，
+       调用方据此把菜单收掉，而不是让它飘在空处 */
+    msgs = [{ r:'me', t:'问' }];
+    renderMsgs();
+    openMsgActions(0, { x:100, y:200, h:20, point:true });
+    var mm = document.getElementById('msgMenu');
+    var opened = !!mm && mm.classList.contains('show');
+    /* 直接把气泡从 DOM 里摘掉 —— 不能用 msgs=[] 再 renderMsgs()：
+       那个函数在 msgs 为空时会**自动补一条欢迎语**，气泡还在，
+       锚点根本没失效（第一次就是这么误判的）。 */
+    var b0 = document.querySelector('[data-hold="0"]');
+    if(b0 && b0.parentNode) b0.parentNode.removeChild(b0);
+    var gone = reflowMenu(mm) === false;
+    closeMsgMenu();
+
+    if(keepTab && keepTab !== 'page-chat') go(keepTab.replace('page-', ''));
+    return { ok: wired && boundOnce && moved && followed && inside && opened && gone,
+      info: '挂了重排钩子=' + wired + ' resize监听只绑一次=' + boundOnce
+        + ' 锚点移动后跟随=' + followed
+        + '（' + top1.toFixed(0) + '→' + top2.toFixed(0) + 'px）'
+        + ' 收拢后不越界=' + inside
+        + ' 锚失效能判出=' + gone };
+  });
+
+  T('对话：开关在输入栏上方、附件在下方，胶囊上下留白相等', function(){
+    /* 这三块的位置关系被用户要求过两次（先移到下面、再移回上面），
+       属于「会反复调」的地方 —— 必须锁住，否则下次挪动没人发现。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    renderChatSwitches();
+    ATTACH.length = 0;
+    addAttach({ kind:'text', name:'第三章-换元积分法.txt', text:'换元积分法的核心是变量代换', truncated:false });
+
+    var row  = document.getElementById('chatSwitches');
+    var comp = document.querySelector('#page-chat .composer');
+    var att  = document.getElementById('attachRow');
+    if(!row || !comp || !att) return { ok:false, info:'三块区域有缺失' };
+
+    /* ① DOM 顺序：开关 → 输入栏 → 附件 */
+    function after(a, b){
+      return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }
+    var order = after(row, comp) && after(comp, att);
+
+    /* ② 左边缘与输入栏里的按钮对齐（不对齐看着就像「歪出去一块」） */
+    var L = function(x){ return x.getBoundingClientRect().left; };
+    var leftGap = Math.abs(L(row.querySelector('.qsw')) - L(document.getElementById('plusBtn')));
+
+    /* ③ 胶囊与输入框、与页面底部的留白要**相等** —— 这是用户明确要求的那条 */
+    var inp  = document.getElementById('chatInput').getBoundingClientRect();
+    var chip = document.querySelector('#attachRow .attach');
+    if(!chip) return { ok:false, info:'胶囊没渲染出来' };
+    var cr   = chip.getBoundingClientRect();
+    var page = document.getElementById('page-chat').getBoundingClientRect();
+    var up   = cr.top - inp.bottom;
+    var down = page.bottom - cr.bottom;
+    var even = Math.abs(up - down) <= 1;
+
+    /* ④ 没附件时整行不占位（:empty 隐藏），否则输入框下方会空一条 */
+    ATTACH.length = 0;
+    attachRow();
+    var collapsed = att.getBoundingClientRect().height === 0;
+
+    if(keepTab && keepTab !== 'page-chat') go(keepTab.replace('page-', ''));
+    return { ok: order && leftGap <= 1 && even && collapsed,
+      info: '顺序 开关→输入栏→附件=' + order
+        + ' 左边缘差=' + leftGap.toFixed(1) + 'px'
+        + ' 上留白=' + up.toFixed(1) + 'px 下留白=' + down.toFixed(1) + 'px 相等=' + even
+        + ' 空附件不占位=' + collapsed };
+  });
+
+  T('对话：快捷开关的图标与文字在同一水平线上，且够大', function(){
+    /* 必须在对话页量：容器没有 .active 时不参与布局，量出来全是 0。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('chat');
+    renderChatSwitches();
+    var row = document.getElementById('chatSwitches');
+    if(!row) return { ok:false, info:'开关行缺失' };
+    var sw = row.querySelector('.qsw');
+    var qi = sw && sw.querySelector('.qi');
+    var svg = qi && qi.querySelector('svg');
+    if(!svg) return { ok:false, info:'图标没画出来' };
+    /* 文字是裸文本节点，只能用 Range 量 */
+    var tn = null;
+    for(var i = 0; i < sw.childNodes.length; i++){
+      var n = sw.childNodes[i];
+      if(n.nodeType === 3 && n.textContent.trim()){ tn = n; break; }
+    }
+    if(!tn) return { ok:false, info:'找不到开关文字' };
+    var rg = document.createRange();
+    rg.selectNodeContents(tn);
+    function mid(x){ return x.top + x.height / 2; }
+    var r = sw.getBoundingClientRect();
+    var s = svg.getBoundingClientRect();
+    var tr = rg.getBoundingClientRect();
+    /* 三者中心要在一条线上。.qi 是 inline span、里面 svg 也是 inline 时，
+       会按**行盒基线**对齐，图标整体偏上 —— 这正是原来的毛病。 */
+    var dIcon = Math.abs(mid(s) - mid(r));
+    var dText = Math.abs(mid(tr) - mid(r));
+    var aligned = dIcon <= 1.5 && dText <= 1.5;
+    /* 原来只有 23px 高（5px 内边距 + 11.5px 字），比手指小一圈 */
+    var big = r.height >= 30 && parseFloat(getComputedStyle(sw).fontSize) >= 12.5;
+    var iconBig = s.width >= 15;
+    if(keepTab && keepTab !== 'page-chat') go(keepTab.replace('page-', ''));
+    return { ok: aligned && big && iconBig,
+      info: '胶囊=' + r.width.toFixed(0) + 'x' + r.height.toFixed(0)
+        + ' 图标=' + s.width.toFixed(0) + 'x' + s.height.toFixed(0)
+        + ' 图标偏心=' + dIcon.toFixed(2) + 'px 文字偏心=' + dText.toFixed(2) + 'px'
+        + ' 够大=' + big };
+  });
+
+  T('对话：长按气泡有蒙版反馈，四种走法都要对', function(){
+    msgs = [{ r:'me', t:'问' }, { r:'ai', t:'答' }];
+    renderMsgs();
+    go('chat');
+    var b = document.querySelectorAll('[data-hold]')[1];
+    if(!b) return { ok:false, info:'气泡缺失' };
+
+    /* ① 按下【立刻】有反馈 —— 这是本条断言存在的理由：
+          没有它用户不知道有没有识别到，会反复按或放弃。 */
+    startHold(1, 100, 300, b);
+    var marked = b.classList.contains('holding');
+    var cs = getComputedStyle(b, '::after');
+    var hasMask = cs.animationName === 'holdMask';
+    /* ② 动画时长必须与 HOLD_MS **同源**：错开了就会出现
+          「蒙版还没显完菜单就弹了」，那比没有反馈更困惑。 */
+    var durMs = parseFloat(cs.animationDuration) * 1000;
+    var sameOrigin = Math.abs(durMs - HOLD_MS) < 1
+      && getComputedStyle(document.documentElement)
+           .getPropertyValue('--hold-ms').trim() === HOLD_MS + 'ms';
+    /* 蒙版要真的能看见：有底色、且压在气泡上 */
+    var visible = cs.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      && parseFloat(cs.opacity) >= 0 && cs.pointerEvents === 'none';
+    var scaled = getComputedStyle(b).transform !== 'none';
+
+    /* ③ 松手但没到时长 = 没触发，蒙版必须撤掉（顺便告诉用户「刚才不算」） */
+    endHold();
+    var afterUp = !b.classList.contains('holding')
+      && !document.getElementById('msgMenu').classList.contains('show');
+
+    /* ④ 手指滑走（滚动列表）也算作废，且绝不该弹菜单 */
+    startHold(1, 100, 300, b);
+    var markedAgain = b.classList.contains('holding');
+    moveHold(100 + HOLD_SLOP + 20, 300);
+    var afterMove = markedAgain && !b.classList.contains('holding')
+      && !document.getElementById('msgMenu').classList.contains('show');
+
+    /* ⑤ 满时长：清蒙版 **且** 菜单弹出 */
+    closeMsgMenu();
+    startHold(1, 100, 300, b);
+    fireHold();
+    var afterFire = !b.classList.contains('holding')
+      && document.getElementById('msgMenu').classList.contains('show');
+    closeMsgMenu();
+
+    return { ok: marked && hasMask && sameOrigin && visible && scaled
+        && afterUp && afterMove && afterFire,
+      info: '按下即蒙版=' + marked + ' 蒙版在=' + hasMask
+        + ' 时长同源=' + sameOrigin + '(' + durMs + 'ms)'
+        + ' 可见=' + visible + ' 缩放=' + scaled
+        + ' 松手撤=' + afterUp + ' 滑走撤=' + afterMove + ' 到点清+弹菜单=' + afterFire };
+  });
+
   T('语音：待读文本清洗（代码块/链接/标签不该被念出来）', function(){
     /* 反引号必须运行时拼 —— 本文件整段断言是 String.raw 模板，
        在这里直接写代码围栏会把模板截断（踩过一次，注释里写也不行）。 */
@@ -688,9 +1588,10 @@ const ASSERTS = String.raw`
     return { ok: used.length > 0 && miss.length === 0,
       info: '被打开 ' + used.length + ' 种 / 分支 ' + branches.length + ' 个' + (miss.length ? '；缺失=[' + miss.join(' ') + ']' : '') };
   });
-  T('相机等 8 个曾丢分支的弹层能真正渲染出内容', function(){
+  T('7 个曾丢分支的弹层能真正渲染出内容', function(){
+    /* 'cam'（拍照给 AI 的确认弹层）已删除：拍照/相册改成直接唤起系统相机，
+       图片直接用胶囊附件带走，不再经过确认弹层。 */
     var cases = [
-      ['cam', '拍照给 AI', {}],
       ['chathist', '聊天记录', {}],
       ['todoform', '添加待办', {}],
       ['tableform', '插入表格', {}],

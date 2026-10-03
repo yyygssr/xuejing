@@ -115,6 +115,37 @@ public class NativeBridge {
         return sb.toString();
     }
 
+    /**
+     * PDF 逐页转成图片，结果由 window.onPdfPreview({pages, more, err}) 接收。
+     *
+     * 走这条路而不是在前端解析，是因为：① 视觉模型的接口只收图片，
+     * 不收 PDF 二进制；② 本项目零外部依赖（没有 pdf.js），
+     * 而系统自带的 PdfRenderer（API 21+）就能做，不需要引库。
+     *
+     * 故意不声明成同步返回：渲染一页可能要几百毫秒，
+     * 同步会卡住 WebView 的 JS 线程（页面会假死一瞬）。
+     */
+    @JavascriptInterface
+    public void pdfPreview(final String b64, final int maxPages) {
+        if (!PdfPreview.supported()) {
+            sendPdfResult(new PdfPreview.Result(null, false,
+                    "这台设备的系统版本太老（Android 5.0 以下），做不了 PDF 转图"));
+            return;
+        }
+        PdfPreview.render(act, b64, maxPages, new PdfPreview.Callback() {
+            @Override
+            public void onDone(final PdfPreview.Result r) {
+                sendPdfResult(r);
+            }
+        });
+    }
+
+    private void sendPdfResult(final PdfPreview.Result r) {
+        final String js = "window.onPdfPreview && window.onPdfPreview("
+                + PdfPreview.toJsArgs(r) + ")";
+        MainActivity.execOnMain(act, js);
+    }
+
     /** 精确闹钟授权状态（JSON）：sdk / canExact。
      * 没有这个授权时，排下去的课表提醒会退化成系统的宽窗口非精确闹钟，
      * 在 Doze 里可能晚十几分钟 —— 用户感受到的就是「到时间提醒不及时」。
