@@ -466,6 +466,29 @@
   #nickInput,#aiNameInput,#callInput,#baseUrl,#apiKey,#termStartInput{
     text-align:center!important;text-align-last:center}
   .field label{font-size:11px;color:var(--sub);font-weight:700;display:block;margin:0 0 6px 2px}
+  /* 「我的」页的两级标题 —— 组标题**必须比小节标题大**，否则等于白加一层。
+     第一版把组标题写成 12.5px，而全局 .h2 是 15px，结果组标题反而更小、
+     两级看起来一模一样（截图一眼就看出层级是反的）。现在：组 16px 实色，
+     小节 12px 灰色，相差足够大。 */
+  .mgroup{display:flex;align-items:center;gap:9px;margin:30px 0 7px}
+  .mgroup:first-child{margin-top:18px}
+  /* 左侧主色小竖条 = 「新一组的起点」。光靠字号和颜色还不够 ——
+     上下滚动时需要一个不依赖阅读的视觉锚点，一眼就知道组换了。 */
+  .mgroup::before{content:'';width:3px;height:14px;border-radius:2px;background:var(--brand);flex:none}
+  .mgroup b{font-size:16px;font-weight:800;color:var(--text);letter-spacing:.2px;white-space:nowrap}
+  .mgroup i{flex:1;height:1px;background:var(--line);display:block}
+  /* 组标题下面紧跟的第一个 .h2 不用再撑那么高（.h2 默认 margin-top 22px） */
+  .mgroup + .h2{margin-top:9px}
+  /* 组内的小节标题降一级：上面已经有组标题了，它只负责「这一段是什么」 */
+  #page-me .h2{font-size:12px;font-weight:700;color:var(--sub);
+    margin:16px 0 7px;letter-spacing:.3px}
+  /* 密钥行：输入框 + 显示/隐藏 + 复制。
+     按钮高度跟着输入框 stretch，不做成小方块 —— 这两个按钮是「填错时唯一的救急出口」，
+     点不准等于没有。宽度 40px 是因为图标 17px 居中后两侧还留得住手指。 */
+  .keyrow{display:flex;gap:7px;align-items:stretch}
+  .keyrow .f{flex:1;min-width:0}
+  .keyrow .icon-btn{width:40px;height:auto}
+  .keyrow .icon-btn.on{background:var(--brand-soft);border-color:transparent;color:var(--brand)}
 
   .prov{display:grid;grid-template-columns:1fr 1fr;gap:9px}
   .prov .p{border:1.5px solid var(--line);border-radius:16px;padding:12px;background:var(--card);cursor:pointer;
@@ -1385,18 +1408,43 @@
            （分组是手排的 —— 自动 masonry 会在列表中间断开，观感更差） -->
       <div class="me-cols">
       <div class="col">
-      <div class="h2">个人资料</div>
+
+      <!-- 按「这是谁的事」分组，而不是按功能模块堆叠。
+           原来十几个平级分区扫视时找不到落脚点，现在先分四组再往下看。 -->
+      <div class="mgroup"><b>小径</b><i></i></div>
+
+      <div class="h2">AI 配置</div>
+      <div class="list" id="aiEntry"></div>
+
+      <div class="h2">记忆</div>
       <div class="list">
-        <div class="li" style="border-bottom:0">
-          <div class="ic" data-i="user"></div>
-          <div class="tx"><b>我的昵称</b><small>用于问候语和你自己的显示名</small></div>
+        <div class="li">
+          <div class="ic" data-i="chip"></div>
+          <div class="tx"><b>让 AI 记住我</b><small>记住你的偏好、目标与长期约束，对话和行程规划都会参考</small></div>
+          <div class="switch" id="swMemOn" onclick="toggleMem('on',this)"></div>
         </div>
-        <div class="li" style="padding-top:0;border:0">
-          <input class="f" id="nickInput" maxlength="16" placeholder="点这里设置昵称" />
+        <div class="li">
+          <div class="ic" data-i="wand"></div>
+          <div class="tx"><b>自动记忆</b><small id="memAutoHint">对话中自动提取值得记住的信息</small></div>
+          <div class="switch" id="swMemAuto" onclick="toggleMem('auto',this)"></div>
+        </div>
+        <div class="li tap" onclick="openMemory()">
+          <div class="ic" data-i="chip"></div>
+          <div class="tx"><b>管理记忆</b><small id="memCount">还没有任何记忆</small></div>
+          <div class="val"><span class="badge" id="memBadge">0 条</span><span class="arrow">›</span></div>
         </div>
       </div>
 
-      <div class="h2">AI 个性化</div>
+      <div class="h2">技能</div>
+      <div class="list">
+        <div class="li tap" onclick="openSkills()">
+          <div class="ic" data-i="puzzle"></div>
+          <div class="tx"><b>管理技能</b><small id="skillCountHint">自定义方法注入对话；支持 AI 生成与 JSON 导入</small></div>
+          <div class="val"><span class="badge" id="skillBadge">0</span><span class="arrow">›</span></div>
+        </div>
+      </div>
+
+      <div class="h2">它的身份</div>
       <div class="list">
         <div class="li" style="border-bottom:0">
           <div class="ic" data-i="bot"></div>
@@ -1425,6 +1473,19 @@
         </div>
       </div>
 
+      <div class="mgroup"><b>我</b><i></i></div>
+
+      <div class="h2">昵称</div>
+      <div class="list">
+        <div class="li" style="border-bottom:0">
+          <div class="ic" data-i="user"></div>
+          <div class="tx"><b>我的昵称</b><small>用于问候语和你自己的显示名</small></div>
+        </div>
+        <div class="li" style="padding-top:0;border:0">
+          <input class="f" id="nickInput" maxlength="16" placeholder="点这里设置昵称" />
+        </div>
+      </div>
+
       <div class="h2">外观</div>
       <div class="list">
         <div class="li" style="flex-direction:column;align-items:stretch;gap:11px">
@@ -1446,8 +1507,13 @@
         </div>
         <div class="accents" id="accentList"></div>
       </div>
+      </div>
 
-      <div class="h2">专注与提醒</div>
+      <div class="col">
+
+      <div class="mgroup"><b>专注与学习</b><i></i></div>
+
+      <div class="h2">番茄节奏</div>
       <div class="list">
         <div class="li tap" onclick="pickPrefNum('workMin')">
           <div class="ic" data-i="timer"></div>
@@ -1464,19 +1530,15 @@
           <div class="tx"><b>长休时长</b><small>每 4 个番茄后</small></div>
           <div class="val"><span id="vLongMin">15 分钟</span><span class="arrow">›</span></div>
         </div>
-        <div class="li">
+        <div class="li" style="border-bottom:0">
           <div class="ic" data-i="loop"></div>
           <div class="tx"><b>自动开始下一轮</b><small>一轮结束后直接进入休息</small></div>
           <div class="switch" id="swAutoNext" onclick="togglePref('autoNext',this)"></div>
         </div>
-        <div class="li" style="border-bottom:0">
-          <div class="ic" data-i="calendar"></div>
-          <div class="tx"><b>学期起始日</b><small>用于判断单/双周课程今天该不该上</small></div>
-          <div class="val"><span id="vTermStart">—</span><span class="arrow">›</span></div>
-        </div>
-        <div class="li" style="padding-top:0;border:0">
-          <input class="f" type="date" id="termStartInput" onchange="setTermStart(this.value)" />
-        </div>
+      </div>
+
+      <div class="h2">上课提醒</div>
+      <div class="list">
         <div class="li">
           <div class="ic" data-i="bell"></div>
           <div class="tx"><b>上课提醒</b><small>课前通知，可一键开始记录专注</small></div>
@@ -1492,11 +1554,15 @@
           <div class="tx"><b>下课提醒</b><small>下课时通知询问是否结束专注</small></div>
           <div class="switch" id="swEndRemind" onclick="togglePref('endRemind',this)"></div>
         </div>
-        <div class="li">
+        <div class="li" style="border-bottom:0">
           <div class="ic" data-i="belloff"></div>
           <div class="tx"><b>上课静音</b><small>预约/开始上课专注时尝试静音，结束后恢复（需系统允许）</small></div>
           <div class="switch" id="swClassMute" onclick="togglePref('classMute',this)"></div>
         </div>
+      </div>
+
+      <div class="h2">通知与系统</div>
+      <div class="list">
         <div class="li">
           <div class="ic" data-i="megaph"></div>
           <div class="tx"><b>计时通知</b><small>专注期间在通知栏显示倒计时</small></div>
@@ -1507,24 +1573,32 @@
           <div class="tx"><b>准点提醒</b><small id="exactHint">检查系统的精确闹钟授权</small></div>
           <div class="val"><span class="badge" id="exactBadge">检查中</span><span class="arrow">›</span></div>
         </div>
-        <div class="li">
+        <div class="li" style="border-bottom:0">
           <div class="ic" data-i="dynamic"></div>
           <div class="tx"><b>灵动岛上岛</b><small id="islandHint">计时与上课提醒尝试显示为系统焦点/实况（需机型白名单）</small></div>
           <div class="switch" id="swIslandOn" onclick="togglePref('islandOn',this)"></div>
         </div>
       </div>
-      </div>
 
-      <div class="col">
-      <div class="h2">AI 配置</div>
-      <div class="list" id="aiEntry"></div>
-
-      <div class="h2">AI 技能</div>
+      <div class="h2">学期与节假日</div>
       <div class="list">
-        <div class="li tap" onclick="openSkills()">
-          <div class="ic" data-i="puzzle"></div>
-          <div class="tx"><b>管理技能</b><small id="skillCountHint">自定义方法注入对话；支持 AI 生成与 JSON 导入</small></div>
-          <div class="val"><span class="badge" id="skillBadge">0</span><span class="arrow">›</span></div>
+        <div class="li" style="border-bottom:0">
+          <div class="ic" data-i="calendar"></div>
+          <div class="tx"><b>学期起始日</b><small>用于判断单/双周课程今天该不该上</small></div>
+          <div class="val"><span id="vTermStart">—</span><span class="arrow">›</span></div>
+        </div>
+        <div class="li" style="padding-top:0;border:0">
+          <input class="f" type="date" id="termStartInput" onchange="setTermStart(this.value)" />
+        </div>
+        <div class="li">
+          <div class="ic" data-i="holiday"></div>
+          <div class="tx"><b>节假日模式</b><small id="holidayHint">法定节假日自动隐藏当天课程</small></div>
+          <div class="switch" id="swHoliday" onclick="toggleHolidayMode(this)"></div>
+        </div>
+        <div class="li tap" onclick="openSheet('holidays')" style="border-bottom:0">
+          <div class="ic" data-i="holiday"></div>
+          <div class="tx"><b>节假日设置</b><small id="holidayCountHint">还没同步</small></div>
+          <div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1538,7 +1612,7 @@
             <span class="badge plain" style="cursor:pointer" onclick="setNavSide('right');renderProfile()">右</span>
           </div>
         </div>
-        <div class="li">
+        <div class="li" style="border-bottom:0">
           <div class="ic" data-i="align"></div>
           <div class="tx"><b>侧栏按钮对齐</b><small>贴顶 / 垂直居中 / 贴底</small></div>
           <div class="val" style="gap:6px">
@@ -1549,45 +1623,15 @@
         </div>
       </div>
 
-      <div class="h2">AI 记忆</div>
-      <div class="list">
-        <div class="li">
-          <div class="ic" data-i="chip"></div>
-          <div class="tx"><b>让 AI 记住我</b><small>记住你的偏好、目标与长期约束，对话和行程规划都会参考</small></div>
-          <div class="switch" id="swMemOn" onclick="toggleMem('on',this)"></div>
-        </div>
-        <div class="li">
-          <div class="ic" data-i="wand"></div>
-          <div class="tx"><b>自动记忆</b><small id="memAutoHint">对话中自动提取值得记住的信息</small></div>
-          <div class="switch" id="swMemAuto" onclick="toggleMem('auto',this)"></div>
-        </div>
-        <div class="li tap" onclick="openMemory()">
-          <div class="ic" data-i="chip"></div>
-          <div class="tx"><b>管理记忆</b><small id="memCount">还没有任何记忆</small></div>
-          <div class="val"><span class="badge" id="memBadge">0 条</span><span class="arrow">›</span></div>
-        </div>
-      </div>
+      <div class="mgroup"><b>数据</b><i></i></div>
 
-      <div class="h2">课表与数据</div>
+      <div class="h2">课表</div>
       <div class="list">
         <div class="li tap" onclick="openImport(0)">
           <div class="ic" data-i="upload"></div><div class="tx"><b>导入课表</b><small>手动录入 / 对话式录入 / 识图导入</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
-        <div class="li tap" onclick="openOnboard()">
+        <div class="li tap" onclick="openOnboard()" style="border-bottom:0">
           <div class="ic" data-i="compass"></div><div class="tx"><b>重看新手引导</b><small>昵称、头像与课表导入</small></div><div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li">
-          <div class="ic" data-i="holiday"></div>
-          <div class="tx"><b>节假日模式</b><small id="holidayHint">法定节假日自动隐藏当天课程</small></div>
-          <div class="switch" id="swHoliday" onclick="toggleHolidayMode(this)"></div>
-        </div>
-        <div class="li tap" onclick="openSheet('holidays')">
-          <div class="ic" data-i="holiday"></div>
-          <div class="tx"><b>节假日设置</b><small id="holidayCountHint">还没同步</small></div>
-          <div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li tap" onclick="openView('about')">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.1 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
 
@@ -1607,10 +1651,17 @@
         <div class="li tap" onclick="doBackup('full')">
           <div class="ic" data-i="archive"></div><div class="tx"><b>导出完整备份</b><small>上面两份合成一个文件</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
-        <div class="li tap" onclick="document.getElementById('restoreFile').click()">
+        <div class="li tap" onclick="document.getElementById('restoreFile').click()" style="border-bottom:0">
           <div class="ic" data-i="restore"></div><div class="tx"><b>从文件恢复</b><small>自动识别是学习数据、AI 服务还是完整备份</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
         <input type="file" id="restoreFile" accept=".json,application/json" style="display:none" onchange="onRestoreFile(this)" />
+      </div>
+
+      <div class="h2">关于</div>
+      <div class="list">
+        <div class="li tap" onclick="openView('about')" style="border-bottom:0">
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.2 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+        </div>
       </div>
       <div style="height:6px"></div>
       </div>
@@ -1788,7 +1839,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.2.1 · 开源版</div>
+        <div class="about-ver">v0.2.2 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -2073,7 +2124,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.2.1';
+var APP_VER = 'v0.2.2';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -3018,6 +3069,11 @@ var ICON = {
   stop:    '<rect x="6.6" y="6.6" width="10.8" height="10.8" rx="2" fill="currentColor" stroke="none"/>',
   /* 复制：两张叠放的纸，后一张虚一点表示在底下 */
   copy:    '<rect x="8.4" y="8.4" width="11.2" height="11.2" rx="2"/><path d="M15.6 8.4V5.6a1.8 1.8 0 0 0-1.8-1.8H5.6a1.8 1.8 0 0 0-1.8 1.8v8.2a1.8 1.8 0 0 0 1.8 1.8h2.8"/>',
+  /* 显示密钥：一只眼睛 */
+  eye:     '<path d="M2.4 12S6 5.9 12 5.9 21.6 12 21.6 12 18 18.1 12 18.1 2.4 12 2.4 12Z"/><circle cx="12" cy="12" r="3.1"/>',
+  /* 隐藏密钥：同一只眼睛加一道斜杠 —— 两个图标必须**同源**，
+     换个完全不同的图形会让人以为是两个功能，而不是同一个开关的两态 */
+  eyeOff:  '<path d="M10.7 6.2A8.7 8.7 0 0 1 12 6.1c6 0 9.6 5.9 9.6 5.9a17.7 17.7 0 0 1-2.9 3.4"/><path d="M6.2 7.6A17.5 17.5 0 0 0 2.4 12s3.6 6.1 9.6 6.1a8.9 8.9 0 0 0 3.3-.7"/><path d="M3.5 3.5l17 17"/>',
   /* 文档：右上角折角 + 三条文本线（比 upload 更好认，upload 是「箭头进盒子」，
      这里要表达的是「一个文件」） */
   file:    '<path d="M13.6 3.2H7a1.8 1.8 0 0 0-1.8 1.8v14a1.8 1.8 0 0 0 1.8 1.8h10a1.8 1.8 0 0 0 1.8-1.8V8.4z"/><path d="M13.6 3.2v5.2h5.2"/><path d="M8.6 13h6.8M8.6 16.6h4.4"/>',
@@ -4781,13 +4837,40 @@ function copyText(txt, okMsg, failMsg){
   }
   try{
     if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(txt);
+      /* writeText 返回的是 **Promise** —— 外面这层同步 try/catch 抓不到它的失败。
+         权限被拒（非安全上下文、headless、隐私模式）时会变成一个**未处理的
+         rejection**，而且下面那句「已复制」已经说出口了，等于骗用户。
+         所以补一个 catch：失败了就**改口**，告诉他复制没成。 */
+      var pr = navigator.clipboard.writeText(txt);
+      if(pr && pr.catch){
+        pr.catch(function(){ toast(failMsg || '这台机器没法自动复制，截图也一样'); });
+      }
       if(okMsg) toast(okMsg);
       return true;
     }
   }catch(e){}
   toast(failMsg || '这台机器没法自动复制，截图也一样');
   return false;
+}
+/* ---------- 密钥的显示 / 复制 ----------
+   密码框解决了「别人偷看」，但顺手把「我自己也看不了」一起解决了：
+   填错一个字符只能整段删掉重填，想复制到别处更是不可能。
+   所以给两个出口：看（切 type）和拿（走 copyText 那一个剪贴板出口）。 */
+function toggleKeyVisible(inputId, btn){
+  var el = document.getElementById(inputId);
+  if(!el) return;
+  /* 只改 type，**绝不碰 value** —— 看一眼不该改动密钥本身 */
+  var show = el.type === 'password';
+  el.type = show ? 'text' : 'password';
+  if(btn){
+    btn.classList.toggle('on', show);
+    btn.innerHTML = icSvg(show ? 'eyeOff' : 'eye', 17);
+  }
+  logIt('配置', '密钥' + (show ? '已显示' : '已隐藏'));
+}
+function copyKey(inputId){
+  var el = document.getElementById(inputId);
+  copyText(el ? String(el.value || '') : '', '密钥已复制');
 }
 function copyRunLog(){
   var txt = RUNTIME_LOG.map(function(x){
@@ -6618,8 +6701,17 @@ function memoryBlock(){
   if(!memOn()) return '';
   var arr = memItems();
   if(!arr.length) return '';
-  return '【关于你的长期记忆】（这些是你之前记下来的，回答时请自然地带入，不要生硬复述）\n'
-    + arr.map(function(x){ return '· [' + memCatName(x.cat) + '] ' + x.text; }).join('\n') + '\n';
+  /* 措辞是**压住**模型主动提这些事的唯一手段。
+     早先写的是「回答时请自然地带入」——「带入」本身就是鼓励性指令，
+     结果模型几乎每句话都要捎带一条（用户反馈「几乎每句话都会提到」）。
+     现在改成三段式：**默认用不上** → **只在直接相关时参考** → **不许主动提起**。
+     标题里也把「你的」改成「用户的」：让模型把它当成第三方背景资料看，
+     而不是「你俩之间的事」——后者更容易被拿来做寒暄。 */
+  return '【关于用户的长期记忆】（背景资料，大多数回答用不上）\n'
+    + arr.map(function(x){ return '· [' + memCatName(x.cat) + '] ' + x.text; }).join('\n') + '\n'
+    + '【怎么用这些】只在当前问题与某一条**直接相关**时才参考它。'
+    + '除非用户自己问到，否则不要主动提起、不要复述、'
+    + '也不要为了显得了解他而硬塞一句 —— 绝大多数回答不需要用到这里的任何一条。\n';
 }
 function fmtMemTime(ts){
   if(!ts) return '';
@@ -10083,9 +10175,14 @@ function renderProvBody(id){
     + '<input class="f" style="text-align:left" value="' + esc(acc.url||'') + '" '
     + 'placeholder="' + esc(PROVIDER_URL[id] || 'https://…/v1') + '" '
     + 'onchange="saveProviderField(\'' + q(id) + '\',\'url\',this.value)"></div>'
-    + '<div class="field"><label>API Key（仅存本机）</label>'
-    + '<input class="f" type="password" style="text-align:left" value="' + esc(acc.key||'') + '" '
-    + 'placeholder="sk-…" onchange="saveProviderField(\'' + q(id) + '\',\'key\',this.value)"></div>'
+    + '<div class="field"><label>API Key（仅存本机）</label><div class="keyrow">'
+    + '<input class="f" id="accKey" type="password" style="text-align:left" value="' + esc(acc.key||'') + '" '
+    + 'placeholder="sk-…" onchange="saveProviderField(\'' + q(id) + '\',\'key\',this.value)">'
+    + '<div class="icon-btn" onclick="toggleKeyVisible(\'accKey\', this)" title="显示 / 隐藏">'
+    + icSvg('eye', 17) + '</div>'
+    + '<div class="icon-btn" onclick="copyKey(\'accKey\')" title="复制密钥">'
+    + icSvg('copy', 17) + '</div>'
+    + '</div></div>'
     + '<div class="row g6">'
     + (S.provider === id
         ? ''
@@ -10960,9 +11057,15 @@ function renderOnboard(n){
       + 'value="' + esc((providerAccs()[S.provider]||{}).url || PROVIDER_URL[S.provider] || '') + '" '
       + 'oninput="obSaveField(\'url\',this.value)" /></div>'
       + '<div class="field" style="margin-top:12px"><label>API Key（仅存本机）</label>'
+      + '<div class="keyrow">'
       + '<input class="f" id="obKey" type="password" style="text-align:left" placeholder="sk-…" '
       + 'value="' + esc((providerAccs()[S.provider]||{}).key || '') + '" '
-      + 'oninput="obSaveField(\'key\',this.value)" /></div>'
+      + 'oninput="obSaveField(\'key\',this.value)" />'
+      + '<div class="icon-btn" onclick="toggleKeyVisible(\'obKey\', this)" title="显示 / 隐藏">'
+      + icSvg('eye', 17) + '</div>'
+      + '<div class="icon-btn" onclick="copyKey(\'obKey\')" title="复制密钥">'
+      + icSvg('copy', 17) + '</div>'
+      + '</div></div>'
       + '<div class="note2" id="obKeyState">' + obKeyNote() + '</div>'
       + '<div class="note2">想再加渠道、拉取模型、按模型定价，都在「我的 → AI 配置 → 提供商」里。</div>';
     primary = aiReady() ? '下一步' : '先跳过，稍后配置';

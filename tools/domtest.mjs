@@ -1176,6 +1176,85 @@ const ASSERTS = String.raw`
         + ' 锚失效能判出=' + gone };
   });
 
+  T('我的页：分成四组，且组标题的层级高于小节标题', function(){
+    /* 这一条锁的是「设置页别又长成一锅粥」。
+       第一版把组标题写成 12.5px，而全局 .h2 是 15px —— 组标题反而更小，
+       两级长得一模一样，等于白加一层（截图才看出来）。所以这里直接比字号。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('me');
+    var me = document.getElementById('page-me');
+    if(!me) return { ok:false, info:'我的页缺失' };
+    var groups = [].map.call(me.querySelectorAll('.mgroup b'), function(e){ return e.textContent.trim(); });
+    var want = ['小径', '我', '专注与学习', '数据'];
+    var namesOk = groups.length === want.length
+      && groups.every(function(g, i){ return g === want[i]; });
+    var gb = me.querySelector('.mgroup b'), hb = me.querySelector('.h2');
+    var gs = gb ? parseFloat(getComputedStyle(gb).fontSize) : 0;
+    var hs = hb ? parseFloat(getComputedStyle(hb).fontSize) : 0;
+    var hierarchy = gs > hs;
+    /* 重排是「搬位置」，但手写 HTML 有漏项的风险 —— 关键入口逐个点一遍 */
+    var ids = ['myAvatar', 'myName', 'mySub', 'nickInput', 'aiNameInput', 'callInput',
+               'callEcho', 'avatarHint', 'swMemOn', 'swMemAuto', 'memBadge', 'memCount',
+               'aiEntry', 'skillBadge', 'skillCountHint', 'themeSeg', 'accentList',
+               'vWorkMin', 'vShortMin', 'vLongMin', 'swAutoNext', 'swClassRemind',
+               'vRemindBefore', 'swEndRemind', 'swClassMute', 'swFocusNotify', 'exactBadge',
+               'swIslandOn', 'vTermStart', 'termStartInput', 'swHoliday', 'holidayCountHint',
+               'h2TabletNav', 'tabletNavList', 'restoreFile'];
+    var lost = ids.filter(function(x){ return !document.getElementById(x); });
+    /* 不能有游离的小节：每个 .h2 都得在某个组标题之后 */
+    var orphan = 0, seen = false;
+    [].forEach.call(me.querySelectorAll('.col > *'), function(k){
+      if(!k.classList) return;
+      if(k.classList.contains('mgroup')) seen = true;
+      else if(k.classList.contains('h2') && !seen) orphan++;
+    });
+    if(keepTab && keepTab !== 'page-me') go(keepTab.replace('page-', ''));
+    return { ok: namesOk && hierarchy && !lost.length && orphan === 0,
+      info: '分组=' + groups.join('/') + ' 顺序对=' + namesOk
+        + ' 组标题' + gs + 'px > 小节' + hs + 'px =' + hierarchy
+        + ' 丢的入口=' + (lost.join(',') || '无')
+        + ' 游离小节=' + orphan };
+  });
+
+  T('AI 配置：密钥能显示出来，且看一眼不改动它的值', function(){
+    /* 密码框解决了「别人偷看」，顺手把「自己也看不了」一起解决了 ——
+       填错一个字符只能整段重填，想复制到别处也不可能。 */
+    var host = document.createElement('div');
+    host.innerHTML = '<div class="keyrow">'
+      + '<input class="f" id="_kTest" type="password" value="sk-abc123456">'
+      + '<div class="icon-btn" onclick="toggleKeyVisible(\'_kTest\', this)"></div>'
+      + '<div class="icon-btn" onclick="copyKey(\'_kTest\')"></div></div>';
+    document.body.appendChild(host);
+    var inp = document.getElementById('_kTest');
+    var btns = host.querySelectorAll('.icon-btn');
+    var startHidden = inp.type === 'password';
+    var wired = typeof toggleKeyVisible === 'function' && typeof copyKey === 'function';
+    toggleKeyVisible('_kTest', btns[0]);
+    var shown = inp.type === 'text';
+    var onState = btns[0].classList.contains('on');
+    /* 只切 type，**绝不碰 value** —— 看一眼不该改动密钥本身 */
+    var kept = inp.value === 'sk-abc123456';
+    toggleKeyVisible('_kTest', btns[0]);
+    var backHidden = inp.type === 'password' && inp.value === 'sk-abc123456'
+      && !btns[0].classList.contains('on');
+    /* 复制走的是项目里那个唯一的剪贴板出口，所以要么成功、要么给兜底提示 */
+    copyKey('_kTest');
+    var said = /密钥已复制|没法自动复制/.test(document.body.textContent);
+    host.remove();
+    /* 真实位置也得接上（构造的那份只验了行为，没验真的挂了按钮） */
+    var real = document.documentElement.innerHTML;
+    var wiredReal = real.indexOf('id="accKey"') >= 0
+      && real.indexOf("toggleKeyVisible('accKey'") >= 0
+      && real.indexOf("copyKey('accKey')") >= 0
+      && real.indexOf('id="obKey"') >= 0
+      && real.indexOf("toggleKeyVisible('obKey'") >= 0;
+    return { ok: startHidden && wired && shown && onState && kept && backHidden && said && wiredReal,
+      info: '默认隐藏=' + startHidden + ' 函数在=' + wired
+        + ' 点了能显示=' + shown + ' 按钮高亮=' + onState
+        + ' 值没被改=' + kept + ' 能切回隐藏=' + backHidden
+        + ' 复制有反馈=' + said + ' 两处真实入口都接了=' + wiredReal };
+  });
+
   T('对话：开关在输入栏上方、附件在下方，胶囊上下留白相等', function(){
     /* 这三块的位置关系被用户要求过两次（先移到下面、再移回上面），
        属于「会反复调」的地方 —— 必须锁住，否则下次挪动没人发现。 */

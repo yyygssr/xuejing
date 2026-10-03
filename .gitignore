@@ -49,6 +49,7 @@ tools/_seg.txt
 tools/_release-*.md
 tools/t.html
 tools/_edgeprofile/
+tools/_ep*/
 tools/__pycache__/
 tools/sse-parse-check/
 tools/shots*/
