@@ -29,6 +29,7 @@ const ASSERTS = String.raw`
     var hit = document.elementFromPoint(r.x + r.width/2, r.y + 140);
     return { top: !!hit && el.contains(hit), opacity: st.opacity, hits: hit ? ('<' + hit.tagName + ' class="' + cls(hit) + '">') : 'null' };
   }
+  function alertShown(){ var b = document.getElementById('alertBox'); return !!b && b.classList.contains('show'); }
   function snapState(){
     return JSON.parse(JSON.stringify({
       sys: S.sysHolidays, hol: S.holidays, off: S.holidayOff,
@@ -2339,6 +2340,251 @@ const ASSERTS = String.raw`
 
   S.notes = _notesKeep; save();
 
+  // 提醒卡去重的**运行时**行为验证（不只是扫源码）。
+  //  复现原 bug 的调用序列：同一节课连续推 5 次；点「稍后提醒」后再推 3 次。
+  //  期望：只有第一次弹；snooze 之后的推送一律被挡住。
+  //  对照组：换一节不同的课，应当照常弹 —— 证明闸门没有把正常提醒一起封死。
+  T('上课提醒：同一节重复推送只弹一次，「稍后提醒」后不再弹', function(){
+    var snapCourses = JSON.parse(JSON.stringify(S.courses));
+    var snapHold = S.__alertHold;
+    var hadHold = Object.prototype.hasOwnProperty.call(S, '__alertHold');
+
+    var dA = todayI;
+    var cA = { t:'08:00-09:40', n:'自测·重复课A', loc:'', c:1, w:'all' };
+    var cB = { t:'10:00-11:40', n:'自测·对照课B', loc:'', c:1, w:'all' };
+    if(!S.courses[dA]) S.courses[dA] = [];
+    S.courses[dA].push(cA, cB);
+    if(!S.classes) S.classes = {};
+
+    var pops = 0;
+    var realShow = window.showAlert;
+    var realToast = window.toast;
+    window.showAlert = function(kind){ if(kind === 'start') pops++; return realShow.apply(window, arguments); };
+    window.toast = function(){};
+
+    try{
+      // ① 同一节推 5 次 —— 只有第 1 次该弹
+      for(var i=0;i<5;i++) window.onNativeClassAlert('start', '自测·重复课A');
+      var afterRepeat = pops;
+
+      // ② 点「稍后提醒」后再推 3 次 —— 一次都不该弹
+      S.__pending = { day:dA, c:cA };
+      window.snoozeAlert();
+      var base = pops;
+      for(var j=0;j<3;j++) window.onNativeClassAlert('start', '自测·重复课A');
+      var afterSnooze = pops - base;
+
+      // ③ 对照组：另一节课仍能正常弹
+      var beforeB = pops;
+      window.onNativeClassAlert('start', '自测·对照课B');
+      var poppedB = pops - beforeB;
+
+      // ④ 点了「开始上课并记录专注」之后，这节也不该再弹
+      S.__pending = { day:dA, c:cB };
+      try{ window.confirmStartClass(); }catch(e0){}
+      var beforeC = pops;
+      window.onNativeClassAlert('start', '自测·对照课B');
+      var afterStart = pops - beforeC;
+
+      return {
+        ok: afterRepeat === 1 && afterSnooze === 0 && poppedB === 1 && afterStart === 0,
+        info: '重复推5次弹=' + afterRepeat + '（期望1）· snooze后再推3次弹=' + afterSnooze
+          + '（期望0）· 对照组B弹=' + poppedB + '（期望1）· 开始专注后再推弹=' + afterStart + '（期望0）'
+      };
+    } catch(err){
+      return { ok: false, info: 'THREW: ' + (err && (err.message || err)) };
+    } finally {
+      window.showAlert = realShow;
+      window.toast = realToast;
+      window.closeAlert();
+      S.courses = snapCourses;
+      if(hadHold) S.__alertHold = snapHold; else delete S.__alertHold;
+      S.__pending = null;
+      delete S.classes[cid(dA, cB)];
+      delete S.classes[cid(dA, cA)];
+    }
+  });
+
+  // 字号调节：换档要真的改变「读的字」的计算字号，且图标/间距不能跟着变。
+  //  这里量真实计算值，不扫源码 —— 令牌没接上时变量会被解析成默认值，量出来就是没变。
+  T('字号：四档切换真的改变正文计算字号（图标/间距不动）', function(){
+    var snapFs = S.fontScale;
+    var root = document.documentElement;
+    var body = document.getElementById('page-me');
+    // 取一个用 --fs-body 的元素做样本：列表主标题
+    var probe = document.querySelector('#page-me .li .tx b');
+    if(!body || !probe) return { ok:false, info:'找不到 #page-me 或 .li .tx b 样本' };
+
+    function measure(at){
+      S.fontScale = at; applyLook();
+      return {
+        body: parseFloat(getComputedStyle(probe).fontSize) || 0,
+        htmlAttr: root.dataset.fs || '',
+        // 图标/间距的对照：拿一个不参与字号的尺寸（列表图标容器宽）
+        icon: parseFloat(getComputedStyle(document.querySelector('#page-me .li .ic')).width) || 0
+      };
+    }
+    try{
+      var sm = measure('sm'), md = measure('md'), lg = measure('lg'), xl = measure('xl');
+      // 单调递增
+      var mono = sm.body < md.body && md.body < lg.body && lg.body < xl.body;
+      // 档位属性确实挂上去了
+      var attrs = sm.htmlAttr==='sm' && md.htmlAttr==='md' && lg.htmlAttr==='lg' && xl.htmlAttr==='xl';
+      // 图标尺寸不随字号变
+      var iconFixed = sm.icon === xl.icon && sm.icon > 0;
+      return {
+        ok: mono && attrs && iconFixed,
+        info: '正文 ' + [sm.body, md.body, lg.body, xl.body].join(' → ')
+          + '（sm→xl）· 属性=' + [sm.htmlAttr,md.htmlAttr,lg.htmlAttr,xl.htmlAttr].join('/')
+          + ' · 单调=' + mono + ' · 图标固定=' + iconFixed + '(' + sm.icon + 'px)'
+      };
+    } finally {
+      S.fontScale = snapFs; applyLook();
+    }
+  });
+
+  // 降明度：只在深色生效 —— 浅色模式开了也不能动任何一个色变量。
+  //  这是用户明确要的边界，必须用对照实验钉住（只测深色会漏掉「浅色被误改」）。
+  T('降低主题色明度：仅深色生效，浅色模式完全不受影响', function(){
+    var snap = { fs:S.fontScale, dim:S.dimBrand, acc:S.accent, th:S.theme };
+    var root = document.documentElement;
+    function brandNow(){ return root.style.getPropertyValue('--brand').trim(); }
+
+    function lum(hex){
+      var h = String(hex).replace('#','');
+      if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      var r = parseInt(h.slice(0,2),16)/255, g = parseInt(h.slice(2,4),16)/255, b = parseInt(h.slice(4,6),16)/255;
+      return 0.2126*r + 0.7152*g + 0.0722*b;
+    }
+    try{
+      S.theme = 'dark'; S.accent = 'indigo';
+
+      S.dimBrand = false; applyLook();
+      var darkOff = brandNow();
+      S.dimBrand = true;  applyLook();
+      var darkOn = brandNow();
+
+      S.theme = 'light';
+      S.dimBrand = false; applyLook();
+      var lightOff = brandNow();
+      S.dimBrand = true;  applyLook();
+      var lightOn = brandNow();
+
+      var darkDims = lum(darkOn) < lum(darkOff);
+      var lightIntact = lightOff === lightOn && lightOff !== '';
+      /* 压暗要「柔和化」而不是「变刺眼」：高饱和 + 中明度的颜色在深色底上很扎眼。
+         用「向背景混合」时饱和度会跟着掉，所以这里盯住**饱和度也必须降**——
+         这正是第一版栽过的地方（只乘 HSL 明度，L 掉了但 S 还 82%，反而更电）。 */
+      function sat(hex){
+        var h = String(hex).replace('#',''); if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+        var r=parseInt(h.slice(0,2),16)/255,g=parseInt(h.slice(2,4),16)/255,b=parseInt(h.slice(4,6),16)/255;
+        var mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2,d=mx-mn;
+        if(!d) return 0;
+        return (l > .5 ? d/(2-mx-mn) : d/(mx+mn)) * 100;
+      }
+      var satDrops = sat(darkOn) < sat(darkOff);
+      var dimmed = darkDims && satDrops;
+
+      return {
+        ok: dimmed && lightIntact,
+        info: '深色 ' + darkOff + '→' + darkOn
+          + '（变暗=' + darkDims + ' · 降饱和=' + satDrops
+          + '  ' + sat(darkOff).toFixed(0) + '%→' + sat(darkOn).toFixed(0) + '%）'
+          + ' · 浅色 ' + lightOff + '→' + lightOn + '（不动=' + lightIntact + '）'
+      };
+    } finally {
+      S.fontScale = snap.fs; S.dimBrand = snap.dim; S.accent = snap.acc; S.theme = snap.th;
+      applyLook(); renderFontScale(); renderDimBrand();
+    }
+  });
+
+  // 降明度开着但当前是浅色时，提示语必须说清楚「切到深色后生效」——
+  //  否则用户会以为开关坏了（这属于「开关只在需要它的场合生效」的沟通成本）。
+  T('降明度开关的提示语会区分「生效中 / 待生效」', function(){
+    var snap = { dim:S.dimBrand, th:S.theme };
+    var hint = document.getElementById('dimBrandHint');
+    if(!hint) return { ok:false, info:'找不到 #dimBrandHint' };
+    try{
+      S.dimBrand = true; S.theme = 'light';
+      renderDimBrand();
+      var lightTxt = hint.textContent;
+      S.theme = 'dark'; renderDimBrand();
+      var darkTxt = hint.textContent;
+      S.dimBrand = false; renderDimBrand();
+      var offTxt = hint.textContent;
+      return {
+        ok: /切到深色|深色模式后生效/.test(lightTxt) && /已生效/.test(darkTxt) && lightTxt !== darkTxt,
+        info: '浅色时="' + lightTxt + '" · 深色时="' + darkTxt + '" · 关闭时="' + offTxt + '"'
+      };
+    } finally {
+      S.dimBrand = snap.dim; S.theme = snap.th; applyLook(); renderDimBrand();
+    }
+  });
+
+  // 字号四档的滑块是 4 等分 —— .segThumb 写死 1/3 会盖住 1.33 格、与文字错位。
+  T('四档字号滑块按 1/4 宽（不是写死 1/3）', function(){
+    var seg = document.getElementById('fsSeg');
+    if(!seg) return { ok:false, info:'找不到 #fsSeg' };
+    var thumb = document.getElementById('fsThumb');
+    var segW = seg.getBoundingClientRect().width;
+    var thW = thumb.getBoundingClientRect().width;
+    var actual = segW ? (thW / (segW - 6)) : 0;
+    return {
+      ok: seg.dataset.n === '4' && Math.abs(actual - 0.25) < 0.02,
+      info: 'data-n=' + seg.dataset.n + ' · 滑块占宽 ' + (actual*100).toFixed(1) + '%（期望 25%）'
+    };
+  });
+
+  // 设置项确实在「我的 → 外观」里，且点了能改状态（不只是画了个壳）
+  T('外观页有字号与降明度入口，点击真的改状态', function(){
+    var fsSeg = document.getElementById('fsSeg');
+    var dimSw = document.getElementById('dimBrandSw');
+    if(!fsSeg || !dimSw) return { ok:false, info:'缺 fsSeg=' + !!fsSeg + ' dimBrandSw=' + !!dimSw };
+    var snapFs = S.fontScale, snapDim = S.dimBrand;
+    try{
+      setFontScale('lg');
+      var fsOk = S.fontScale === 'lg' && document.documentElement.dataset.fs === 'lg';
+      setDimBrand(true);
+      var dimOk = S.dimBrand === true && dimSw.classList.contains('on');
+      setDimBrand(false);
+      var dimOff = S.dimBrand === false && !dimSw.classList.contains('on');
+      return {
+        ok: fsOk && dimOk && dimOff,
+        info: '改字号=' + fsOk + ' · 开降明度=' + dimOk + ' · 关降明度=' + dimOff
+      };
+    } finally {
+      S.fontScale = snapFs; S.dimBrand = snapDim; applyLook(); renderFontScale(); renderDimBrand();
+    }
+  });
+
+  // 降明度的开关必须用项目的 .switch 类 —— 别用 .sw（.sw 是色盘：26×26 方块+白对勾，
+  // 关态完全不可见，2026-10-08 踩过：用户反馈"对勾没开时完全不显示、样式和应用不同"）。
+  T('降明度开关与其它开关同一套样式（不是色盘 .sw）', function(){
+    var sw = document.getElementById('dimBrandSw');
+    if(!sw) return { ok:false, info:'找不到 #dimBrandSw' };
+    var peers = [].slice.call(document.querySelectorAll('.switch')).filter(function(e){ return e !== sw; });
+    if(!peers.length) return { ok:false, info:'页面上没有其它 .switch 可对照' };
+    var own = getComputedStyle(sw);
+    var ref = getComputedStyle(peers[0]);
+    var sameBox = own.width === ref.width && own.height === ref.height
+               && own.borderRadius === ref.borderRadius;
+    var hadOn = sw.classList.contains('on');
+    sw.classList.remove('on');
+    var offBg = getComputedStyle(sw).backgroundColor;
+    var offVisible = !!offBg && offBg !== 'transparent' && offBg !== 'rgba(0, 0, 0, 0)';
+    if(hadOn) sw.classList.add('on');
+    var knob = getComputedStyle(sw, '::after');
+    var hasKnob = !!knob && knob.content && !/none/.test(knob.content);
+    var wrongClass = sw.classList.contains('sw');
+    return {
+      ok: sameBox && offVisible && hasKnob && !wrongClass,
+      info: '类名=' + sw.className + ' · 与其他开关同尺寸=' + sameBox
+        + ' (' + own.width + '×' + own.height + ' r' + own.borderRadius + ')'
+        + ' · 关态可见=' + offVisible + ' (bg ' + offBg + ')'
+        + ' · 有圆钮=' + hasKnob + ' · 误用 .sw=' + wrongClass
+    };
+  });
+
   return JSON.stringify(R);
 })()
 `;
@@ -2582,6 +2828,71 @@ try {
     });
   } catch (e) {
     results.push({ name: '架构守卫：TTS 包可见性与判据', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // G) 上课提醒「循环弹窗」—— 真机踩过：到了点卡片每 2 秒弹一次，点「稍后提醒」也没用。
+  //    根因是原生 reschedule 把已过窗口的课前提醒重新武装成 now+2s，
+  //    而接收器每次触发后无条件重排 → 自己触发了自己。
+  //    这里盯住三件事：① 补发夹取代码不许回来 ② 课前提醒触发后不重排 ③ 页面有去重闸门。
+  try {
+    const rel = path.join(root, 'android', 'app', 'src', 'main', 'java', 'com', 'xuejing', 'app');
+    const schedRaw = fs.readFileSync(path.join(rel, 'ReminderScheduler.java'), 'utf8');
+    const recvRaw = fs.readFileSync(path.join(rel, 'ClassAlarmReceiver.java'), 'utf8');
+    const page = fs.readFileSync(SRC, 'utf8');
+    /* 先剥注释：注释里会写「历史写法是 remindAt = now + 2000L」，
+       不剥的话守卫会把「描述旧 bug 的注释」当成旧 bug 本身，误报。 */
+    const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const sched = strip(schedRaw), recv = strip(recvRaw);
+
+    /* ① 不许再出现「把 remindAt 夹到 now+2s」这种补发写法 */
+    const reArm = /remindAt\s*<=\s*now\s*\)\s*remindAt\s*=\s*now\s*\+/.test(sched);
+    /* 要真的有「窗口已过就跳过」的判定 */
+    const hasWindowGuard = /if\s*\(\s*remindAt\s*>\s*now\s*\)\s*\{[\s\S]{0,200}?set\(c,\s*am,\s*codeStart/.test(sched);
+    /* ② 重排必须带条件 —— 无条件 rescheduleFromStore 就是循环的推手 */
+    const uncondResched = /if\s*\(thisWeek\s*&&\s*!skipHoliday\)\s*\{[\s\S]*?\}\s*\n\s*(?:\/\/[^\n]*\n\s*)*ReminderScheduler\.rescheduleFromStore/.test(recv);
+    const condResched = /if\s*\(!isStart\s*\|\|\s*before\s*<=\s*0\)\s*\{[\s\S]{0,200}?rescheduleFromStore/.test(recv);
+    /* 还要有 60 秒去重 */
+    const hasDedup = /DEDUP_MS/.test(recv) && /firedRecently\s*\(/.test(recv);
+
+    /* ③ 页面侧：去重闸门 + snooze 真的记沉默窗口 */
+    const hasGate = /function classAlertAllowed\s*\(/.test(page);
+    const gateUsed = /if\s*\(!classAlertAllowed\(nx\.day,\s*nx\.c\)\)\s*return;/.test(page);
+    const snoozeHolds = /function snoozeAlert\(\)\{[\s\S]{0,400}?holdAlert\(/.test(page);
+
+    results.push({
+      name: '架构守卫：上课提醒不循环（真机踩过：每 2 秒弹一次）',
+      ok: !reArm && hasWindowGuard && !uncondResched && condResched && hasDedup
+          && hasGate && gateUsed && snoozeHolds,
+      info: `残留补发夹取=${reArm} · 窗口已过跳过=${hasWindowGuard}`
+        + ` · 无条件重排=${uncondResched} · 课前提醒不重排=${condResched}`
+        + ` · 原生 60s 去重=${hasDedup}`
+        + ` · 页面去重闸门=${hasGate && gateUsed} · snooze 记窗口=${snoozeHolds}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：上课提醒不循环', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // I) 降明度不能用「只乘 HSL 明度」实现 —— 第一版就是这么写的：
+  //    #7f7ff2 → #2121e8，L 从 72% 掉到 52% 达标了，但饱和度还挂在 82%，
+  //    在深色底上又刺又电，比不压还扎眼。改用向背景混合后 S 会跟着降。
+  //    这里盯源码里不许再出现 hsl 明度缩放，且必须有 dimMix。
+  try {
+    const page2 = fs.readFileSync(SRC, 'utf8');
+    const strip2 = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const js = strip2(page2);
+    const hslScale = /\[\s*2\s*\]\s*\*?=\s*0?\.\d/.test(js) || /hsl\s*\[\s*2\s*\]\s*=/.test(js);
+    const hasMix = /function dimMix\s*\(/.test(js);
+    const mixUsed = /dimMix\(c0\)/.test(js);
+    /* 浅色模式不能进压暗分支 —— 边界写错会把浅色也一起压暗 */
+    const onlyDark = /var dim = dark && !!S\.dimBrand/.test(js);
+    results.push({
+      name: '架构守卫：降明度用「向背景混合」而非只乘 HSL 明度',
+      ok: !hslScale && hasMix && mixUsed && onlyDark,
+      info: `残留 HSL 明度缩放=${hslScale} · 有 dimMix=${hasMix}`
+        + ` · 已接入 applyLook=${mixUsed} · 仅深色分支=${onlyDark}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：降明度实现方式', ok: false, info: 'THREW: ' + (e && e.message) });
   }
 
   let fail = 0;

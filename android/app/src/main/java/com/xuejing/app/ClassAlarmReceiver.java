@@ -9,8 +9,14 @@ import android.content.Intent;
  * 1. 发一条系统通知（锁屏、后台也能看到）
  * 2. 如果 App 正在前台，把事件转给页面，直接弹出应用内的提醒卡
  * 3. 重排下一周的同一节课
+ *
+ * ⚠️ 第 3 步「重排」不是无条件做的 —— 见 onReceive 末尾的说明。
+ *    无条件重排会把「课前提醒」这条闹钟自己重新武装到 2 秒后，页面卡片被反复弹出。
  */
 public class ClassAlarmReceiver extends BroadcastReceiver {
+
+    /** 同一节同一类提醒的最小间隔，挡住系统重投 / 重排竞态导致的短时间重复触发 */
+    private static final long DEDUP_MS = 60_000L;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -53,13 +59,53 @@ public class ClassAlarmReceiver extends BroadcastReceiver {
                         detail == null ? "" : detail, 0);
             }
 
-            // App 活着就让页面直接弹应用内的提醒卡
-            MainActivity.forwardNativeAlert(isStart ? "start" : "end", name, detail);
+            // App 活着就让页面直接弹应用内的提醒卡（同一次事件只弹一次）
+            if (!firedRecently(context, isStart, name, detail)) {
+                markFired(context, isStart, name, detail);
+                MainActivity.forwardNativeAlert(isStart ? "start" : "end", name, detail);
+            }
         }
 
-        // 这一节已经触发过了（或本周不匹配），把闹钟重排到下一周
+        /* 把闹钟重排到下一次。
+           ⚠️ 只在「正点上课」和「下课」这两条触发后重排，**课前提醒(codeStart)触发后不重排**。
+           原因：课前提醒的触发时刻是 start - before。此刻 startAt 仍 > now，
+           nextOccurrence() 就会照样返回「今天这个时刻」；重排时若又走一遍
+           「窗口已过就补发」的老逻辑，就会把它自己排到 2 秒后 —— 于是每 2 秒响一次，
+           一直响到正点。现在窗口已过一律不补发（见 ReminderScheduler），
+           这里再补一道：课前提醒触发后干脆不重排，交给随后的正点闹钟去推进下一周。
+           正点/下课触发时 startAt <= now，nextOccurrence 自然顺延 7 天，不会自噬。 */
+        if (!isStart || before <= 0) {
+            try {
+                ReminderScheduler.rescheduleFromStore(context);
+            } catch (Throwable ignored) { }
+        }
+    }
+
+    /* ---------- 已触发去重 ----------
+       系统在「精确闹钟 + 允许待机唤醒」下可能重投；重排竞态也可能让同一节在
+       同一分钟内被触发两次。这里按「节 + 类别」记一个时间戳，60 秒内只放行一次。 */
+    private static final String SP = "xuejing_reminders";
+    private static final String K_FIRED = "fired";
+
+    private static String firedKey(boolean isStart, String name, String detail) {
+        return (isStart ? "S|" : "E|") + (name == null ? "" : name) + "|" + (detail == null ? "" : detail);
+    }
+
+    private static boolean firedRecently(Context c, boolean isStart, String name, String detail) {
         try {
-            ReminderScheduler.rescheduleFromStore(context);
+            android.content.SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
+            long last = sp.getLong(K_FIRED + "|" + firedKey(isStart, name, detail), 0L);
+            return last > 0 && (System.currentTimeMillis() - last) < DEDUP_MS;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void markFired(Context c, boolean isStart, String name, String detail) {
+        try {
+            android.content.SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
+            sp.edit().putLong(K_FIRED + "|" + firedKey(isStart, name, detail),
+                    System.currentTimeMillis()).apply();
         } catch (Throwable ignored) { }
     }
 }

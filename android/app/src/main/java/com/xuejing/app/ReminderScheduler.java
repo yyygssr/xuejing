@@ -99,16 +99,30 @@ public class ReminderScheduler {
                     long now = System.currentTimeMillis();
 
                     int codeStart = REQ_BASE + day * 100 + i * 2;
-                    /* 课前提醒：start - before。若已进入提醒窗口但尚未上课，
-                       立刻补发一条（以前要求 remindAt > now，导致「还剩 3 分钟」永远不提醒）。 */
+                    /* 课前提醒：start - before。
+                       若已进入提醒窗口但尚未上课，说明这次提醒**已经发生过**（要么刚在
+                       onReceive 里弹过，要么 App 是课前不久才启动）——这时**不要**再补发。
+                       历史写法是 `if (remindAt <= now) remindAt = now + 2000L`：
+                       本意是「只剩 3 分钟也要提醒」，但在**接收器触发后立刻重排**的路径上
+                       会自噬 —— 08:00 的课，07:55 提醒触发 → 重排时 nextOccurrence 仍返回
+                       今天 08:00（因为 08:00 > now）→ remindAt 又被夹成 now+2s → 2 秒后再触发
+                       → 再重排…… 于是每 2 秒弹一次卡，一直弹到正点。
+                       正确做法：窗口已过就跳过这一条，让循环停在这里（见 ClassAlarmReceiver）。 */
                     if (before > 0 && startAt > now) {
                         long remindAt = startAt - before * 60_000L;
-                        if (remindAt <= now) remindAt = now + 2000L;
-                        set(c, am, codeStart, remindAt, true, name, detail, before, w);
-                        codes.add(String.valueOf(codeStart));
+                        if (remindAt > now) {
+                            set(c, am, codeStart, remindAt, true, name, detail, before, w);
+                            codes.add(String.valueOf(codeStart));
+                        }
+                        /* remindAt <= now：本次提醒窗口已过，不排 —— 静默跳过 */
                     }
-                    /* 正点再排一条「上课」：预约专注在原生侧自动开始也要靠它 */
-                    int codeBegin = REQ_BASE + day * 100 + 80 + i;
+                    /* 正点再排一条「上课」：预约专注在原生侧自动开始也要靠它。
+                       code 段必须与 codeStart/codeEnd 完全隔离 —— 旧写法用 `80 + i`，
+                       而 codeStart 是 `i * 2`，于是 `2i == 80 + j` 时两条闹钟拿到同一个 code
+                       （i∈[40,140] 共 101 对），PendingIntent 被 FLAG_UPDATE_CURRENT 覆盖：
+                       extras 里的 before 被对方顶掉，课前提醒就变成了正点上课，或反过来。
+                       同一天的 i 现在极少超过 15，所以线上没炸；但这是定时炸弹，直接换段隔开。 */
+                    int codeBegin = REQ_BASE + day * 100 + 200 + i;
                     if (startAt > now) {
                         set(c, am, codeBegin, startAt, true, name, detail, 0, w);
                         codes.add(String.valueOf(codeBegin));
