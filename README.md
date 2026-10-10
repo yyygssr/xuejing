@@ -71,7 +71,8 @@ android/              安卓壳：WebView、通知、闹钟、前台服务、原
     MainActivity.java     壳的主体：WebView、返回手势、文件选择、网络代理
     NativeBridge.java     页面 → 原生的唯一通道
     FocusService.java     专注计时前台服务
-    ClassAlarmReceiver    课前提醒
+    FocusStore.java       专注会话落盘：杀后台后仍能补记
+    ClassAlarmReceiver.java 课前提醒
   app/src/main/assets/    构建时由 syncPrototype 写入 index.html
 tools/                自测脚本（见下）
 图标设计/              图标生成脚本与导出的各尺寸图标
@@ -88,8 +89,12 @@ CHANGELOG.md          更新日志
 node tools/domtest.mjs
 ```
 
-约 58 条断言，覆盖页面层级、三级页可见性、提供商增删模型、峰谷计费、节假日区间、
-引导流程、弹层渲染完备性、清空数据确认等。改完界面建议先跑一遍再打包。
+断言覆盖返回层级、提供商增删模型、峰谷计费、节假日区间与补课/停课、专注重启补记与
+预约边界、笔记的单双列与选区样式、手写底栏不遮画布、弹层渲染完备性、清空数据确认等
+（条数一直在涨，这里不写死，跑一次看输出就行）。改完界面建议先跑一遍再打包。
+
+`tools/audit.mjs` 是配套的架构守卫：对账「页面推给原生的字段」与「原生实际读取的字段」，
+防止两边悄悄分叉。domtest 会一并跑它。
 
 ## 隐私
 
