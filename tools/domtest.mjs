@@ -2585,6 +2585,394 @@ const ASSERTS = String.raw`
     };
   });
 
+  /* ---------- 专注系统重构（v0.2.4）----------
+     真机踩过的坑：通知栏启动的专注正常走完归零，学径却因为杀后台记录不到，
+     时间全白费。重构后计时权威移到原生，跑完的结果进「待记账队列」，
+     页面不管什么时候打开都能补记回来。下面两条钉住这条链路真的通。 */
+
+  // 原生跑完一轮番茄（25 分钟）→ 页面打开后要能补记，并且回执给原生
+  T('杀后台后原生跑完的专注，打开能补记回来', function(){
+    if(typeof syncFocusFromNative !== 'function') return { ok:false, info:'缺 syncFocusFromNative' };
+    var oldN = NATIVE, oldApp = isApp, oldDays = JSON.stringify(S.days), oldCls = JSON.stringify(S.classes);
+    var acked = null;
+    try{
+      isApp = true;
+      /* 假桥：待记账队列里躺着一条「跑了 25 分钟的番茄」。
+         ack 之后队列要真的清空 —— 模拟原生 FocusStore.ack 的行为，
+         这样才测得出「来回切前后台会不会把同一轮记两次」。 */
+      var pending = [{id:'1700000000000', label:'自由专注', courseId:'', mode:'work',
+                      dir:'down', totalSecs:1500, secs:1500,
+                      startAt:1700000000000, endedAt:1700000900000, reason:'natural'}];
+      NATIVE = {
+        focusState: function(){
+          return JSON.stringify({hasSession:false, running:false, pending:pending});
+        },
+        focusAck: function(ids){
+          acked = ids;
+          try{
+            var drop = JSON.parse(ids || '[]').map(String);
+            pending = pending.filter(function(x){ return drop.indexOf(String(x.id)) < 0; });
+          }catch(e){}
+        }
+      };
+      var before = todayMin();
+      syncFocusFromNative();
+      var grew = todayMin() - before;
+      var ackOk = !!acked && String(acked).indexOf('1700000000000') >= 0;
+      /* 第二次：队列已空，不能再多记一分 */
+      var mid = todayMin();
+      syncFocusFromNative();
+      var grew2 = todayMin() - mid;
+      var idempotent = Math.abs(grew2) < 0.001;
+      return {
+        ok: Math.abs(grew - 25) < 0.01 && ackOk && idempotent,
+        info: '补记 ' + grew.toFixed(2) + ' 分钟（期望 25）· 已回执=' + ackOk
+          + ' · 二次同步再记=' + grew2.toFixed(2) + '（期望 0，幂等）'
+      };
+    } finally {
+      NATIVE = oldN; isApp = oldApp;
+      try{ S.days = JSON.parse(oldDays); S.classes = JSON.parse(oldCls); save(); }catch(e){}
+    }
+  });
+
+  // 课程专注要记到那门课头上（S.classes[id].min 累加），且状态变 done
+  T('课程专注补记会累加到对应课程', function(){
+    if(typeof syncFocusFromNative !== 'function') return { ok:false, info:'缺 syncFocusFromNative' };
+    var oldN = NATIVE, oldApp = isApp, oldDays = JSON.stringify(S.days), oldCls = JSON.stringify(S.classes);
+    var cid0 = '__test_course__';
+    try{
+      isApp = true;
+      NATIVE = {
+        focusState: function(){
+          return JSON.stringify({
+            hasSession:false, running:false,
+            pending:[{id:'1700000000001', label:'高等数学', courseId:cid0, mode:'work',
+                      dir:'down', totalSecs:3000, secs:1800,
+                      startAt:1700000000000, endedAt:1700001800000, reason:'natural'}]
+          });
+        },
+        focusAck: function(){}
+      };
+      S.classes[cid0] = {status:'ongoing', min: 10};
+      syncFocusFromNative();
+      var rec = S.classes[cid0] || {};
+      /* 10 分钟已有 + 30 分钟本次 = 40 */
+      var minOk = rec.min === 40;
+      var stOk = rec.status === 'done';
+      return {
+        ok: minOk && stOk,
+        info: 'min=' + rec.min + '（期望 40）· status=' + rec.status + '（期望 done）'
+      };
+    } finally {
+      NATIVE = oldN; isApp = oldApp;
+      try{ S.days = JSON.parse(oldDays); S.classes = JSON.parse(oldCls); save(); }catch(e){}
+    }
+  });
+
+  // 倒计时必须按 endsAt 推算：改 endsAt 就立刻改变剩余，而不是靠帧数慢慢减
+  T('倒计时按绝对时间戳推算（不是逐帧自减）', function(){
+    var f = S.focus;
+    var snap = {on:f.on, dir:f.dir, secs:f.secs, endsAt:f.endsAt, total:f.total, courseId:f.courseId};
+    try{
+      f.on = true; f.paused = false; f.dir = 'down';
+      f.total = 1500; f.secs = 1500;
+      focusAnchor();
+      var anchored = f.endsAt > Date.now();
+      /* 把结束时刻往前拨 20 分钟，剩余就该立刻少 20 分钟 —— 自减做不到这点 */
+      f.endsAt -= 20 * 60 * 1000;
+      var now = Date.now();
+      var remain = Math.max(0, (f.endsAt - now) / 1000);
+      var near20 = Math.abs(remain - (1500 - 1200)) < 2;
+      return {
+        ok: anchored && near20,
+        info: '钉了endsAt=' + anchored + ' · 拨后剩余≈' + remain.toFixed(0) + 's（期望≈300s）'
+      };
+    } finally {
+      f.on = snap.on; f.dir = snap.dir; f.secs = snap.secs;
+      f.endsAt = snap.endsAt; f.total = snap.total; f.courseId = snap.courseId;
+    }
+  });
+
+  // 已经在课中的课不能再预约（哪怕只剩一分钟下课）
+  T('课中的课不能再预约（剩 1 分钟也不行）', function(){
+    if(typeof canBookCourse !== 'function') return { ok:false, info:'缺 canBookCourse' };
+    var nowM = toMin(nowHM());
+    var inClass = {t: fmtHM(nowM - 10) + '-' + fmtHM(nowM + 1), n:'马上要下课'};
+    var upcoming = {t: fmtHM(nowM + 30) + '-' + fmtHM(nowM + 90), n:'还没开始'};
+    var a = canBookCourse(todayI, inClass);
+    var b = canBookCourse(todayI, upcoming);
+    return {
+      ok: a === false && b === true,
+      info: '剩1分钟下课可预约=' + a + '（期望 false）· 30分钟后才上课可预约=' + b + '（期望 true）'
+    };
+  });
+
+  // ============ 课表 · 补课 / 停课（overrides）============
+  function ovSnap(){
+    return JSON.stringify({
+      ov: S.overrides || [], cur: S.courses,
+      ts: S.termStart
+    });
+  }
+  function ovRestore(s){
+    var o = JSON.parse(s);
+    S.overrides = o.ov; S.courses = o.cur; S.termStart = o.ts;
+    save();
+  }
+  /* 「周六补双周周一的课」全链路：AI 工具落 overrides，dayInfo 当天真的多出课 */
+  T('补课：addMakeup 落 overrides，目标日期当天多出课且带「补」语义', function(){
+    if(typeof runOneTool !== 'function') return { ok:false, info:'缺 runOneTool' };
+    var snap = ovSnap();
+    try{
+      /* 固定学期起点 = 本周一 → 今天在第 1 周（奇）；「双周」的课在第 2 周的周六 */
+      var mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+      function dk(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+      S.termStart = dk(mon);
+      S.courses[0] = [{ t:'08:00-09:40', n:'高等数学', loc:'教三305', w:'even', c:1 }];
+      var sat = new Date(mon); sat.setDate(sat.getDate() + 12); /* 第 2 周周六 */
+      var satKey = dk(sat);
+      var out = String(runOneTool('addMakeup', { date: satKey, from: 0, w: 'even' }) || '');
+      var satIdx = (sat.getDay() + 6) % 7;
+      var wno2 = 2;
+      var info = dayInfo(satIdx, wno2);
+      var got = info.courses.filter(function(c){ return c.n === '高等数学' && c.__ov; });
+      var week1 = dayInfo(satIdx, 1);   /* 第 1 周的周六不该有 */
+      var ok = S.overrides.length === 1 && got.length === 1
+        && got[0].t === '08:00-09:40' && week1.courses.length === 0
+        && out.indexOf('补课') >= 0;
+      return { ok: ok,
+        info: 'overrides=' + S.overrides.length + ' · 第2周周六多出=' + got.length
+          + ' · 第1周周六=' + week1.courses.length + '（期望0）· 回执含「补课」=' + (out.indexOf('补课') >= 0) };
+    } finally { ovRestore(snap); }
+  });
+  /* 停课：cancel 后该课当天消失，且契约把 overrides 推给原生 */
+  T('停课：cancelCourseOnce 后当天该课消失，原生契约带上 overrides', function(){
+    if(typeof runOneTool !== 'function') return { ok:false, info:'缺 runOneTool' };
+    var snap = ovSnap();
+    var captured = null, oldN = NATIVE;
+    try{
+      var mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+      function dk2(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+      S.termStart = dk2(mon);
+      var wed = new Date(mon); wed.setDate(wed.getDate() + 2);
+      var wedKey = dk2(wed);
+      S.courses[2] = [{ t:'10:00-11:40', n:'大学英语', loc:'', w:'all', c:0 }];
+      runOneTool('cancelCourseOnce', { date: wedKey, name: '大学英语' });
+      var got = dayInfo(2, 1).courses.filter(function(c){ return c.n === '大学英语'; });
+      NATIVE = { setSchedule: function(j){ captured = j; }, setPrefs: function(){} };
+      pushScheduleToNative();
+      var p = null; try{ p = JSON.parse(captured); }catch(e){}
+      return {
+        ok: got.length === 0 && S.overrides.length === 1 && !!p && Array.isArray(p.overrides) && p.overrides.length === 1,
+        info: '周三该课剩=' + got.length + '（期望0）· overrides 落库=' + S.overrides.length
+          + ' · 契约推送=' + (p && p.overrides ? p.overrides.length + ' 条' : '无')
+      };
+    } finally { ovRestore(snap); NATIVE = oldN; }
+  });
+
+  // ============ 笔记重构 ============
+  T('笔记列表默认双列卡片，含搜索框与文件夹 chips', function(){
+    if(typeof openNotes !== 'function') return { ok:false, info:'缺 openNotes' };
+    var snap = ovSnap(); var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [
+        { id:'na', title:'第一篇', body:'正文内容，用来验证预览', at:Date.now(), folder:'' },
+        { id:'nb', title:'第二篇', body:'手写预览', at:Date.now(), folder:'' }
+      ];
+      save();
+      noteMode = 'list'; noteCurId = null;
+      openNotes();
+      var g = document.querySelector('#notesBody .note-grid');
+      var cards = document.querySelectorAll('#notesBody .n-card');
+      var cols = g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0;
+      var hasSearch = !!document.getElementById('noteSearchIn');
+      var hasChips = !!document.querySelector('#notesBody .nb-chip');
+      return { ok: cols === 2 && cards.length === 2 && hasSearch && hasChips,
+        info: '网格列数=' + cols + '（期望2）· 卡片数=' + cards.length
+          + ' · 搜索框=' + hasSearch + ' · chips=' + hasChips };
+    } finally {
+      S.notes = JSON.parse(snapN); ovRestore(snap); noteMode='list'; noteCurId=null;
+    }
+  });
+  T('文件夹：创建 → 移动 → chip 过滤只看该文件夹', function(){
+    if(typeof noteFolderAdd !== 'function') return { ok:false, info:'缺 noteFolderAdd' };
+    var snap = ovSnap(); var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [{ id:'nf1', title:'要移动的', body:'', at:Date.now(), folder:'' }];
+      S.noteFolders = [];
+      save();
+      /* 建文件夹：模拟输入后调用 */
+      document.body.insertAdjacentHTML('beforeend', '<input id="nfName" style="display:none">');
+      document.getElementById('nfName').value = '期末复习';
+      noteFolderAdd();
+      var created = noteFoldersAll().indexOf('期末复习') >= 0;
+      var createdCleanup = document.getElementById('nfName'); if(createdCleanup) createdCleanup.remove();
+      /* 移动 */
+      noteCurId = 'nf1';
+      noteMoveTo('期末复习');
+      var moved = notesAll()[0].folder === '期末复习';
+      /* 过滤 */
+      noteFolder = '期末复习';
+      var got = noteFiltered().length;
+      noteFolder = '__none__';
+      var none = noteFiltered().length;
+      return { ok: created && moved && got === 1 && none === 0,
+        info: '建夹=' + created + ' · 移动=' + moved + ' · 该夹可见=' + got + ' · 未分类可见=' + none + '（期望0）' };
+    } finally {
+      S.notes = JSON.parse(snapN); ovRestore(snap);
+      noteFolder = ''; noteQ = ''; noteCurId = null;
+    }
+  });
+  T('搜索：命中标题或正文，大小写不敏感', function(){
+    var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [
+        { id:'sq1', title:'线性代数笔记', body:'行列式', at:Date.now(), folder:'' },
+        { id:'sq2', title:'英语单词', body:' Helmholtz ', at:Date.now(), folder:'' }
+      ];
+      noteQ = 'helm';
+      var a = noteFiltered().length;
+      noteQ = '线性代数';
+      var b = noteFiltered().length;
+      return { ok: a === 1 && b === 1,
+        info: 'helm 命中=' + a + ' · 线性代数命中=' + b };
+    } finally { S.notes = JSON.parse(snapN); noteQ = ''; }
+  });
+  T('新建弹层有「文字 / 手写」两个入口', function(){
+    openSheet('notenew');
+    var h = document.getElementById('sheet') ? document.getElementById('sheet').innerHTML : '';
+    var ok = h.indexOf('文字笔记') >= 0 && h.indexOf('手写笔记') >= 0;
+    closeSheet();
+    return { ok: ok, info: '文字入口=' + (h.indexOf('文字笔记') >= 0) + ' · 手写入口=' + (h.indexOf('手写笔记') >= 0) };
+  });
+  T('手写底栏不遮挡画布（stage 底边 ≤ 工具栏顶边）', function(){
+    var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [{ id:'ik1', title:'手写', body:'', at:Date.now(), folder:'', mode:'ink' }];
+      save(); noteCurId = 'ik1'; noteMode = 'edit'; renderNotes();
+      inkEnterFull();   /* 里面同步跑了一次 inkFit，布局即刻有效 */
+      var st = document.getElementById('inkStage'), bar = document.getElementById('inkBar');
+      var full = document.getElementById('inkFull');
+      var shown = full && full.classList.contains('show');
+      var sr = st.getBoundingClientRect(), br = bar.getBoundingClientRect();
+      var noCover = br.top >= sr.bottom - 1;
+      var hasMore = !!document.getElementById('inkMoreBtn');
+      inkExitFull();
+      return { ok: shown && noCover && hasMore,
+        info: '打开=' + shown + ' · stage底=' + Math.round(sr.bottom) + ' · bar顶=' + Math.round(br.top)
+          + ' · 不遮挡=' + noCover + ' · 更多按钮=' + hasMore };
+    } finally { S.notes = JSON.parse(snapN); noteMode = 'list'; noteCurId = null; }
+  });
+  T('每支笔的墨色独立（改铅笔不影响马克笔）', function(){
+    var old = JSON.stringify(noteInk.brush);
+    try{
+      inkDark = false;
+      inkSetColorSlot('#e11d48');          /* 当前是 pencil */
+      var pen = noteInk.brush.pencil.colorLight;
+      var marker = noteInk.brush.marker.colorLight;
+      var ok = pen === '#e11d48' && marker !== '#e11d48';
+      return { ok: ok, info: '铅笔=' + pen + ' · 马克笔=' + marker + '（两者必须不同）' };
+    } finally { noteInk.brush = JSON.parse(old); saveInkPrefs(); }
+  });
+  T('文字笔记有 AI 加工入口与「日期·字数」行', function(){
+    var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [{ id:'ait1', title:'AI', body:'<div>一段测试正文</div>', at:Date.now(), folder:'' }];
+      save(); noteCurId = 'ait1'; noteMode = 'edit'; renderNotes();
+      noteFullEnter();
+      var meta = document.getElementById('noteMeta');
+      var metaOk = meta && /年.{1,3}月.{1,3}日/.test(meta.textContent) && /字/.test(meta.textContent);
+      var aiBtn = document.querySelector('#noteBarFull .ntb.ai');
+      var cnt = noteBodyText().length;
+      noteFullClose();
+      return { ok: !!aiBtn && metaOk && cnt >= 6,
+        info: 'AI按钮=' + !!aiBtn + ' · 日期字数行=' + !!metaOk + '（「' + (meta ? meta.textContent : '') + '」）· 正文字数=' + cnt };
+    } finally { S.notes = JSON.parse(snapN); noteMode = 'list'; noteCurId = null; }
+  });
+
+  // ============ 笔记：单双列 + 选区样式（v0.2.6）============
+  T('笔记列表可切单/双列，且真的改变网格列数', function(){
+    var snapN = JSON.stringify(S.notes), snapCols = S.noteCols;
+    try{
+      S.notes = [
+        { id:'c1', title:'甲', body:'一', at:Date.now(), folder:'' },
+        { id:'c2', title:'乙', body:'二', at:Date.now(), folder:'' }
+      ];
+      S.noteCols = 2; noteMode = 'list'; noteCurId = null; renderNotes();
+      function cols(){
+        var g = document.querySelector('.note-grid');
+        return g ? getComputedStyle(g).gridTemplateColumns.split(' ').filter(Boolean).length : -1;
+      }
+      var two = cols();
+      var attrTwo = document.querySelector('.note-grid').getAttribute('data-cols');
+      noteToggleCols();
+      var one = cols();
+      var attrOne = document.querySelector('.note-grid').getAttribute('data-cols');
+      var btnIcon = (document.getElementById('noteColsBtn') || {}).innerHTML || '';
+      noteToggleCols();
+      var back = cols();
+      var persisted = S.noteCols === 2;
+      return {
+        ok: two === 2 && one === 1 && back === 2 && attrTwo === '2' && attrOne === '1' && persisted,
+        info: '双列=' + two + '（期望2）· 切后=' + one + '（期望1）· 切回=' + back + ' · data-cols='
+          + attrTwo + '/' + attrOne + ' · 按钮有图标=' + (btnIcon.length > 10) + ' · 已落盘=' + persisted
+      };
+    } finally {
+      S.notes = JSON.parse(snapN); S.noteCols = snapCols;
+      noteMode = 'list'; noteCurId = null; renderNotes();
+    }
+  });
+  // 用户的原话：「文字笔记的字体大小和样式等仅对长按选中的文字生效」。
+  // 以前的 A−/A+ 改的是 bd.style.fontSize（整篇），这里量的是：动了选区之后，
+  // 只有选区被包了 span，正文基准字号**一点没变**。
+  T('字号只作用在选中的那段文字，正文基准不变', function(){
+    var snapN = JSON.stringify(S.notes);
+    try{
+      S.notes = [{ id:'fs1', title:'字号', body:'定积分的性质线性性', at:Date.now(), folder:'' }];
+      save(); noteCurId = 'fs1'; noteMode = 'edit'; renderNotes();
+      noteFullEnter();
+      var bd = document.getElementById('noteBody');
+      var base0 = getComputedStyle(bd).fontSize;
+      var tn = bd.firstChild;
+      var rng = document.createRange(); rng.setStart(tn, 0); rng.setEnd(tn, 3);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
+      noteSyncSel();
+      var chip0 = document.getElementById('ntbSize').textContent;
+      noteStepFs(1);
+      var spans = bd.querySelectorAll('span[style*="font-size"]');
+      var inner = spans.length ? spans[0].style.fontSize : 'none';
+      var base1 = getComputedStyle(bd).fontSize;
+      /* 未选中时再点一次：不许改任何东西，且要提示 */
+      sel.removeAllRanges();
+      noteStepFs(1);
+      var after = bd.querySelectorAll('span[style*="font-size"]').length;
+      var base2 = getComputedStyle(bd).fontSize;
+      var ok = spans.length === 1 && parseFloat(inner) > parseFloat(base0)
+            && base0 === base1 && base1 === base2 && after === 1;
+      noteFullClose();
+      return {
+        ok: ok,
+        info: '选中chip=' + chip0 + ' · 套span=' + spans.length + ' · 段内=' + inner
+          + ' · 基准 改前/改后/空选后=' + base0 + '/' + base1 + '/' + base2 + ' · 空选未新增span=' + (after === 1)
+      };
+    } finally { S.notes = JSON.parse(snapN); noteMode = 'list'; noteCurId = null; }
+  });
+  T('手写工具栏图标齐全且都能画出内容（不是空路径）', function(){
+    var keys = ['pencil','marker','brush','eraserStroke','eraserArea','fit','undo','redo','sliders'];
+    var empty = keys.filter(function(k){
+      var s = icSvg(k, 19);
+      return !s || s.indexOf('<path') < 0 && s.indexOf('<rect') < 0 && s.indexOf('<circle') < 0;
+    });
+    /* 三支笔必须长得不一样 —— 复制粘贴把 pencil 的路径抄给 marker 是真实会犯的错 */
+    var same = (icSvg('pencil',19) === icSvg('marker',19))
+            || (icSvg('marker',19) === icSvg('brush',19))
+            || (icSvg('pencil',19) === icSvg('brush',19));
+    return {
+      ok: empty.length === 0 && !same,
+      info: '缺图形的键=' + (empty.length ? empty.join(',') : '无') + ' · 三支笔图形重复=' + same
+    };
+  });
+
   return JSON.stringify(R);
 })()
 `;
@@ -2893,6 +3281,80 @@ try {
     });
   } catch (e) {
     results.push({ name: '架构守卫：降明度实现方式', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // J) 专注系统重构（v0.2.4）：真机踩过「通知栏跑完的专注，统计里是 0m」。
+  //    三件事必须同时成立，缺一个就会退回到老问题上：
+  //      · 页面倒计时按 endsAt 推算（进程死了不至于蒸发）
+  //      · 原生跑完要落盘（以前只改一条通知，从不告诉页面）
+  //      · 页面有拉取通道 + 回执（否则补记了又会被重复记）
+  try {
+    const page3 = fs.readFileSync(SRC, 'utf8');
+    const strip3 = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const js = strip3(page3);
+    const J = f => fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main',
+      'java', 'com', 'xuejing', 'app', f), 'utf8');
+
+    /* ① 页面：不再逐帧自减，且重启不再无条件抹掉存档 */
+    const stillDecrement = /S\.focus\.secs\s*-=\s*dt/.test(js);
+    const tickByStamp = /S\.focus\.endsAt\s*\?\s*Math\.max\(0,\s*\(S\.focus\.endsAt\s*-\s*now\)/.test(js);
+    const hasAnchor = /function focusAnchor\(\)/.test(js);
+    const wipesFocus = /S\.focus\s*=\s*deepMerge\(DEFAULT\.focus,\s*\{\}\)/.test(js);
+
+    /* ② 原生：三条结束路径都要落盘；拉/回执桥接要在 */
+    const fsrv = J('FocusService.java');
+    const store = J('FocusStore.java');
+    const bridge = J('NativeBridge.java');
+    const finishes = /FocusStore\.finish\(app, FocusStore\.R_NATURAL\)/.test(fsrv)
+                  && /FocusStore\.finish\(c, FocusStore\.R_MANUAL\)/.test(fsrv);
+    const hasStore = /class FocusStore/.test(store);
+    const persistOk = /putString\(K_CUR/.test(store) && /putString\(K_PENDING/.test(store);
+    const pullsState = /public String focusState\(\)/.test(bridge);
+    const acks = /public void focusAck\(/.test(bridge);
+
+    /* ③ 预约：由原生闹钟真正触发（落盘），不是只发一条通知 */
+    const recv = J('ClassAlarmReceiver.java');
+    const bookTriggers = /FocusService\.start\(context, name,/.test(recv);
+    /* ④ 取消预约必须推给原生，否则它存的还是旧的 bookings，到点照样拉起专注 */
+    const cancelPushes = /delete S\.bookings\[id\][\s\S]{0,240}?pushScheduleToNative\(\)/.test(js);
+    /* ⑤ 预约要有边界判定，且按钮与 bookClass 共用同一个口 */
+    const hasCanBook = /function canBookCourse\(/.test(js);
+    const btnUsesIt = /canBookCourse\(selIdx, c\)/.test(js);
+
+    results.push({
+      name: '架构守卫：专注计时权威在原生（真机踩过：杀后台时间白费）',
+      ok: !stillDecrement && tickByStamp && hasAnchor && !wipesFocus
+          && hasStore && persistOk && finishes && pullsState && acks
+          && bookTriggers && cancelPushes && hasCanBook && btnUsesIt,
+      info: `页面仍自减=${stillDecrement} · tick按时间戳=${tickByStamp} · 有focusAnchor=${hasAnchor}`
+        + ` · 重启抹存档=${wipesFocus} · FocusStore=${hasStore} · 落盘=${persistOk}`
+        + ` · 结束落盘=${finishes} · focusState=${pullsState} · focusAck=${acks}`
+        + ` · 预约闹钟触发=${bookTriggers} · 取消推原生=${cancelPushes}`
+        + ` · 预约边界口=${hasCanBook} · 按钮复用=${btnUsesIt}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：专注计时权威', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // K) 笔刷说明只写「这支笔做出来是什么效果」，不解释「它为什么叫这个名字」。
+  //    原来的铅笔说明结尾挂着「…像铅笔。」——名字就在标题上，再说一遍是废话。
+  //    这条盯住它别再回来。
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const js2 = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const m = /var INK_BRUSH\s*=\s*\{([\s\S]*?)\n\};/.exec(js2);
+    const block = m ? m[1] : '';
+    const selfRef = /像铅笔|像马克笔|像毛笔|真马克笔也是|就是铅笔/.test(block);
+    const hasHints = ['pencil', 'marker', 'brush'].every(function (k) {
+      return new RegExp(k + '\\s*:\\s*\\{[\\s\\S]*?hint:').test(block);
+    });
+    results.push({
+      name: '架构守卫：笔刷说明不写同义反复（「像铅笔」这类）',
+      ok: !!block && !selfRef && hasHints,
+      info: `找到 INK_BRUSH=${!!block} · 同义反复=${selfRef} · 三支笔都有 hint=${hasHints}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：笔刷说明', ok: false, info: 'THREW: ' + (e && e.message) });
   }
 
   let fail = 0;

@@ -2,6 +2,8 @@ package com.xuejing.app;
 
 import android.webkit.JavascriptInterface;
 
+import org.json.JSONObject;
+
 /**
  * 页面 → 原生的唯一通道。
  *
@@ -39,10 +41,28 @@ public class NativeBridge {
         ReminderScheduler.reschedule(act, json, act.prefsJson);
     }
 
-    /** 开始专注：通知栏用系统 chronometer 自己走，所以只要给一次时长 */
+    /**
+     * 开始专注（v0.2.4：计时权威在原生，参数变三个）。
+     *
+     * @param opts JSON：{courseId, mode:work|short|long, dir:down|up}，可空。
+     *             mode 决定这一轮记不记番茄数，courseId 决定要不要累加到课程上 ——
+     *             两个值必须随会话一起落盘，否则页面下次打开补记时不知道该记到哪。
+     *
+     * 加参数要两边一起改：页面侧 nat('startFocus', label, secs, opts) 必须传满四个。
+     */
     @JavascriptInterface
-    public void startFocus(String label, String secs) {
-        FocusService.start(act, label, NativeBridge.parseInt(secs, 1500));
+    public void startFocus(String label, String secs, String opts) {
+        String courseId = "", mode = "work", dir = "down";
+        try {
+            if (opts != null && !opts.trim().isEmpty()) {
+                JSONObject o = new JSONObject(opts);
+                courseId = o.optString("courseId", "");
+                String m = o.optString("mode", "work");
+                if ("work".equals(m) || "short".equals(m) || "long".equals(m)) mode = m;
+                if ("up".equals(o.optString("dir", "down"))) dir = "up";
+            }
+        } catch (Throwable ignored) { }
+        FocusService.start(act, label, NativeBridge.parseInt(secs, 1500), courseId, mode, dir);
     }
 
     @JavascriptInterface
@@ -50,9 +70,50 @@ public class NativeBridge {
         FocusService.pause(act);
     }
 
+    /** 从暂停恢复 */
+    @JavascriptInterface
+    public void resumeFocus() {
+        FocusService.resume(act);
+    }
+
+    /** 延长当前这一轮（秒）：结束时刻一起往后推，否则通知上的倒计时不会变 */
+    @JavascriptInterface
+    public void extendFocus(String secs) {
+        FocusStore.extend(act, NativeBridge.parseInt(secs, 0));
+    }
+
     @JavascriptInterface
     public void stopFocus() {
         FocusService.stop(act);
+    }
+
+    /** 结束但不记账（提醒卡上的「结束不记录」） */
+    @JavascriptInterface
+    public void discardFocus() {
+        FocusService.discard(act);
+    }
+
+    /**
+     * 拉专注状态快照 —— 原生 → 页面**唯一**的批量通道（v0.2.4 新增）。
+     *
+     * 页面启动时、回到前台时各调一次：
+     *   · hasSession / running / paused / endAt —— 恢复 UI 并接着倒计时；
+     *   · pending[] —— 已经跑完但还没记账的轮次，页面补记后调 focusAck 回执。
+     *
+     * 秒级倒计时不走这里（太费电）：页面拿到 endAt 后自己按时间戳推算。
+     */
+    @JavascriptInterface
+    public String focusState() {
+        return FocusStore.stateJson(act);
+    }
+
+    /**
+     * 待记账记录的消费回执：传 id 数组 JSON，按 id 幂等。
+     * 页面必须先真的写进统计再 ack —— 反过来会永久丢一轮专注。
+     */
+    @JavascriptInterface
+    public void focusAck(String idsJson) {
+        FocusStore.ack(act, idsJson);
     }
 
     @JavascriptInterface

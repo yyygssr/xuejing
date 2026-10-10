@@ -141,7 +141,11 @@ const NATIVE_CONSUMERS = {
   },
   bookings: {
     reads: ['ReminderScheduler.java'],
-    indirect: ['isBooked()：已预约的课不提醒'],
+    /* v0.2.4 语义变更，旧注释写的是「已预约的课不提醒」，已经不对了：
+       现在是「已预约的课由原生闹钟自动开始专注」（见 ClassAlarmReceiver）。
+       而且 bookedCourseId() 会从 key 上取课程 id —— key 就是页面的 cid()，
+       补记时靠它判断记到哪门课头上。 */
+    indirect: ['bookedCourseId()：预约的课由闹钟自动开始专注，并从 key 取课程 id'],
   },
   holidays: {
     reads: ['ReminderScheduler.java'],
@@ -150,6 +154,13 @@ const NATIVE_CONSUMERS = {
   holidayMode: {
     reads: ['ReminderScheduler.java'],
     indirect: ['isHolidayNow() 的总开关；关闭时 holidays 不生效'],
+  },
+  overrides: {
+    reads: ['ReminderScheduler.java'],
+    /* op=add → 按具体日期排一次性闹钟（REQ_BASE+70000 段，过点不补发）；
+       op=cancel → cancelledByOverrideNow() 触发时判定，停课日静默跳过。
+       与页面 overridesApply() 必须同规则（n/t 都空=全天停课，否则精确相等）。 */
+    indirect: ['补课排一次性闹钟 / cancelledByOverrideNow() 停课日静默跳过'],
   },
 };
 

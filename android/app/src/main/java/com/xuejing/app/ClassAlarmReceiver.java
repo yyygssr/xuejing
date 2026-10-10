@@ -36,14 +36,33 @@ public class ClassAlarmReceiver extends BroadcastReceiver {
            与页面 dayInfo() 的规则必须一致 —— 历史上页面改了、这里没改，
            结果放假照常弹通知。改任何一边都要看另一边，tools/audit.mjs 会做字段对账。 */
         boolean skipHoliday = ReminderScheduler.isHolidayNow(context);
-        if (thisWeek && !skipHoliday) {
+        /* 补课/停课的 cancel 也一样：**触发时**按「今天日期」判定。
+           排程时过滤会重蹈节假日那个坑 —— 停课日之后再也不提醒。 */
+        String timeOnlyAll = detail == null ? "" : detail.replace("补课 · ", "").split("·")[0].trim();
+        boolean skipCancel = ReminderScheduler.cancelledByOverrideNow(context, name, timeOnlyAll);
+        if (thisWeek && !skipHoliday && !skipCancel) {
             /* before==0 表示正点「上课」闹钟；>0 是课前提醒 */
             if (isStart && before <= 0) {
                 String timeOnly = detail == null ? "" : detail.split("·")[0].trim();
-                if (ReminderScheduler.isBooked(context, name, timeOnly)) {
+                String bookedId = ReminderScheduler.bookedCourseId(context, name, timeOnly);
+                if (bookedId != null) {
                     try {
+                        /*
+                         * 预约专注的**真正触发点**在这里，不靠页面轮询。
+                         * v0.2.4 起 FocusService.start() 会把会话落盘，
+                         * 所以哪怕页面进程已经死了、Activity 也从没起来过，
+                         * 这一轮专注也不会丢 —— 页面下次打开会从 FocusStore 拉回来补记。
+                         *
+                         * courseId 必须带上：它是 bookings 的 key，补记时靠它
+                         * 判断「记到哪门课头上」，没带就会被当成自由番茄记。
+                         *
+                         * 后面那句 forwardFocusEvent 只是加速：Activity 活着时
+                         * 让页面立刻把 UI 切到「专注中」，不必等下次启动。
+                         */
                         FocusService.start(context, name,
-                                ReminderScheduler.durationSecs(timeOnly));
+                                ReminderScheduler.durationSecs(timeOnly),
+                                bookedId, "work", "down");
+                        MainActivity.forwardFocusEvent("start");
                     } catch (Throwable ignored) { }
                 }
             }

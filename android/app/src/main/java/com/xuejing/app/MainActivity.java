@@ -1450,6 +1450,24 @@ public class MainActivity extends AppCompatActivity {
         a.runOnUiThread(() -> a.evalJs(js));
     }
 
+    /**
+     * 原生专注状态变化 → 页面（v0.2.4 新增）。
+     *
+     * kind: start / pause / resume / end / discard
+     *
+     * 这条只是**加速通道**：Activity 还活着时让页面立刻刷新统计。
+     * 页面没活也完全没问题 —— 结果已经进了 FocusStore 的待记账队列，
+     * 下次打开时页面自己会拉（focusState）并补记。两条路通向同一个结果，
+     * 所以这里拿不到 Activity 就直接返回，不做任何补偿。
+     */
+    static void forwardFocusEvent(final String kind) {
+        final MainActivity a = sRef.get();
+        if (a == null) return;
+        final String js = "window.onNativeFocusEvent && window.onNativeFocusEvent("
+                + jsString(kind == null ? "end" : kind) + ")";
+        a.runOnUiThread(() -> a.evalJs(js));
+    }
+
     @Override
     protected void onNewIntent(@NonNull Intent intent) {
         super.onNewIntent(intent);
@@ -1507,8 +1525,15 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (isFinishing()) {
-            // 页面没了，计时也就无从推进，别留一条倒计时错乱的通知
-            try { FocusService.stop(this); } catch (Throwable ignored) { }
+            /*
+             * v0.2.4：计时权威已经移到原生，Activity 没了前台服务照样在跑，
+             * 所以这里**不能**再无条件 FocusService.stop() ——
+             * stop() 现在会把这一轮结算掉，用户只是退到桌面就被记了一笔。
+             * 只在确实没有活跃会话时收通知，避免残留一条倒计时错乱的卡片。
+             */
+            try {
+                if (FocusStore.current(this) == null) FocusService.stop(this);
+            } catch (Throwable ignored) { }
         }
         if (web != null) {
             web.destroy();

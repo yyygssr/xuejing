@@ -136,6 +136,52 @@ public class ReminderScheduler {
             }
         } catch (Throwable ignored) { }
 
+        /* —— 补课（overrides，op=add）：按具体日期排**一次性**闹钟 ——
+           与每周循环课不同：日期过了就永远不补发（跟「提醒窗口已过不补发」同理）。
+           requestCode 开新段 70000+idx*3：课表循环段是 REQ_BASE+day*100+…，
+           最多用到 1000+6*100+200+几十；70000 段与之彻底隔离，
+           避免 FLAG_UPDATE_CURRENT 按 code 覆盖 extras 的老坑（v0.2.3 踩过）。 */
+        try {
+            JSONObject rootOv = new JSONObject(scheduleJson == null ? "{}" : scheduleJson);
+            JSONArray ovs = rootOv.optJSONArray("overrides");
+            if (ovs != null) {
+                long nowOv = System.currentTimeMillis();
+                for (int idx = 0; idx < ovs.length(); idx++) {
+                    JSONObject o = ovs.optJSONObject(idx);
+                    if (o == null) continue;
+                    if (!"add".equals(optText(o, "op"))) continue;
+                    String date = optText(o, "date");
+                    String t = optText(o, "t");
+                    String name = optText(o, "n");
+                    if (name.isEmpty()) name = "补课";
+                    String loc = optText(o, "loc");
+                    String[] se = t.split("-");
+                    if (se.length != 2) continue;
+                    int sh = hourOf(se[0]), sm = minOf(se[0]);
+                    int eh = hourOf(se[1]), em = minOf(se[1]);
+                    if (sh < 0 || eh < 0) continue;
+                    long startAt = dateTimeMillis(date, sh, sm);
+                    long endAt = dateTimeMillis(date, eh, em);
+                    if (startAt <= nowOv) continue;   /* 一次性：日期过了就不再排 */
+                    String detail = "补课 · " + t + (loc.isEmpty() ? "" : (" · " + loc));
+                    int codeBase = REQ_BASE + 70000 + idx * 3;
+                    if (before > 0) {
+                        long remindAt = startAt - before * 60_000L;
+                        if (remindAt > nowOv) {
+                            set(c, am, codeBase, remindAt, true, name, detail, before, "all");
+                            codes.add(String.valueOf(codeBase));
+                        }
+                    }
+                    set(c, am, codeBase + 1, startAt, true, name, detail, 0, "all");
+                    codes.add(String.valueOf(codeBase + 1));
+                    if (endRemind && endAt > nowOv) {
+                        set(c, am, codeBase + 2, endAt, false, name, detail, before, "all");
+                        codes.add(String.valueOf(codeBase + 2));
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+
         sp.edit().putStringSet(K_CODES, codes).apply();
     }
 
@@ -283,25 +329,39 @@ public class ReminderScheduler {
     }
 
     /** 课表 JSON 里是否预约了这门课（cid 含课名与时间段） */
-    static boolean isBooked(Context c, String name, String time) {
-        if (c == null || name == null || name.isEmpty()) return false;
+    /**
+     * 已预约的那节课返回它的**课程 id**，没预约返回 null。
+     *
+     * 课程 id 就是 bookings 的 key —— 页面 cid() 生成的 `d{day}-{时间}-{课名}`。
+     * 原生这边没有「星期几」可用（闹钟 intent 里没带），拼不出来，
+     * 所以直接从 key 上取，而不是照 cid() 再实现一遍（那会变成第二个真相来源）。
+     *
+     * 拿到 id 才能把预约触发的专注标成「课程专注」而不是「一个番茄」：
+     * 补记时靠 courseId 决定记到哪门课头上、算不算番茄数。
+     */
+    static String bookedCourseId(Context c, String name, String time) {
+        if (c == null || name == null || name.isEmpty()) return null;
         try {
             SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
             String json = sp.getString(K_SCHEDULE, "");
-            if (json == null || json.isEmpty()) return false;
+            if (json == null || json.isEmpty()) return null;
             JSONObject root = new JSONObject(json);
             JSONObject bookings = root.optJSONObject("bookings");
-            if (bookings == null) return false;
+            if (bookings == null) return null;
             java.util.Iterator<String> it = bookings.keys();
             while (it.hasNext()) {
                 String k = it.next();
                 if (k == null) continue;
                 if (k.contains(name) && (time == null || time.isEmpty() || k.contains(time))) {
-                    return true;
+                    return k;
                 }
             }
         } catch (Throwable ignored) { }
-        return false;
+        return null;
+    }
+
+    static boolean isBooked(Context c, String name, String time) {
+        return bookedCourseId(c, name, time) != null;
     }
 
     /**
@@ -334,6 +394,52 @@ public class ReminderScheduler {
     }
 
     private static String pad2(int n) { return (n < 10 ? "0" : "") + n; }
+
+    /** "YYYY-MM-DD" + 时分 → 绝对毫秒；解析失败返回 0（调用方当「已过期」处理） */
+    private static long dateTimeMillis(String date, int h, int m) {
+        try {
+            String[] p = date.trim().split("-");
+            if (p.length != 3) return 0L;
+            Calendar cal = Calendar.getInstance();
+            cal.set(Integer.parseInt(p[0]), Integer.parseInt(p[1]) - 1, Integer.parseInt(p[2]), h, m, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            return cal.getTimeInMillis();
+        } catch (Throwable t) {
+            return 0L;
+        }
+    }
+
+    /**
+     * 今天这节课是否被补课/停课安排（overrides op=cancel）停掉了。
+     *
+     * 与 isHolidayNow 同理在**触发时**判定：排程时过滤会让停课日之后
+     * 一个闹钟都不排，下次重排要等用户重开 App ——「停课那一周过后再也不提醒」。
+     * 匹配规则与页面 overridesApply() 一致：n/t 都空 = 全天停课；
+     * 指定了就精确相等才算命中。
+     */
+    static boolean cancelledByOverrideNow(Context c, String name, String time) {
+        try {
+            SharedPreferences sp = c.getSharedPreferences(SP, Context.MODE_PRIVATE);
+            JSONObject root = new JSONObject(sp.getString(K_SCHEDULE, "{}"));
+            JSONArray ovs = root.optJSONArray("overrides");
+            if (ovs == null) return false;
+            Calendar cal = Calendar.getInstance();
+            String today = cal.get(Calendar.YEAR) + "-" + pad2(cal.get(Calendar.MONTH) + 1)
+                    + "-" + pad2(cal.get(Calendar.DAY_OF_MONTH));
+            for (int i = 0; i < ovs.length(); i++) {
+                JSONObject o = ovs.optJSONObject(i);
+                if (o == null) continue;
+                if (!"cancel".equals(optText(o, "op"))) continue;
+                if (!today.equals(optText(o, "date"))) continue;
+                String n = optText(o, "n"), t = optText(o, "t");
+                if (!n.isEmpty() && name != null && !name.isEmpty() && !name.equals(n)) continue;
+                if (!t.isEmpty() && time != null && !time.isEmpty() && !time.equals(t)) continue;
+                return true;
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
 
     /** 从 "08:00-09:40" 算出秒数 */
     static int durationSecs(String timeRange) {

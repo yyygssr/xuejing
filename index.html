@@ -1068,8 +1068,11 @@
   .ink-wrap canvas{display:block;width:100%;height:100%;cursor:crosshair}
   .ink-wrap.dark-canvas{background:#1a1c24}
   .note-body{min-height:220px;border:1px solid var(--line);border-radius:14px;background:var(--card);
-    padding:12px;font-size:14px;line-height:1.7;outline:none;white-space:pre-wrap;word-break:break-word;
+    padding:12px;font-size:var(--fs-lg);line-height:1.7;outline:none;white-space:pre-wrap;word-break:break-word;
     resize:vertical;overflow:auto;max-height:55vh}
+  /* 字号只作用在选中的那一段上，所以段落里会出现被 span 包起来的「大字/小字」——
+     行高跟着字号走，否则大小字混排会挤在一起 */
+  .note-body span[style*="font-size"]{line-height:1.45}
   .note-body:empty::before{content:attr(data-ph);color:var(--sub)}
   .note-body ul{padding-left:1.3em;margin:6px 0}
   .note-body table{border-collapse:collapse;margin:8px 0;width:100%}
@@ -1090,6 +1093,56 @@
   #noteBarFull{flex:none;background:var(--card);border-top:1px solid var(--line);
     padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px));
     display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  /* ============================================================
+     笔记重构（v0.2.5）：参照各家手机厂笔记的双列卡片 + 悬浮工具栏
+     ============================================================ */
+  /* 搜索框：胶囊形，全宽 */
+  .nb-search{display:flex;align-items:center;gap:8px;height:38px;padding:0 14px;margin:2px 0 10px;
+    border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--sub)}
+  .nb-search input{flex:1;min-width:0;border:none;background:transparent;color:var(--text);
+    font-size:var(--fs-body);outline:none}
+  /* 文件夹 / 分类 chips：横向滚动 */
+  .nb-chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scrollbar-width:none;flex:none}
+  .nb-chips::-webkit-scrollbar{display:none}
+  .nb-chip{flex:none;height:32px;padding:0 14px;border-radius:999px;background:var(--card);
+    border:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--text);
+    display:flex;align-items:center;gap:6px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .nb-chip .cnt{font-size:10.5px;opacity:.65}
+  .nb-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  /* 双列卡片流（列数由右上角按钮切，data-cols 挂在网格上） */
+  .note-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+  /* 单列：卡片变横条（标题一行、预览三行、图缩到右侧），不要照搬双列的高卡片 */
+  .note-grid[data-cols="1"]{grid-template-columns:1fr}
+  .note-grid[data-cols="1"] .n-card{min-height:0;padding:11px 13px}
+  .note-grid[data-cols="1"] .n-card .np{-webkit-line-clamp:3}
+  .note-grid[data-cols="1"] .n-card .nimg{height:64px}
+  .n-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:12px 12px 10px;
+    display:flex;flex-direction:column;gap:6px;cursor:pointer;box-shadow:var(--shadow);
+    min-height:110px;-webkit-tap-highlight-color:transparent;transition:transform .1s}
+  .n-card:active{transform:scale(.97)}
+  .n-card .nh{font-size:var(--fs-body);font-weight:700;line-height:1.4;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .n-card .np{font-size:var(--fs-sm);color:var(--sub);line-height:1.55;
+    display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap;word-break:break-word}
+  .n-card .nimg{width:100%;height:76px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+  .n-card .nf{margin-top:auto;padding-top:4px;font-size:var(--fs-cap);color:var(--sub);
+    display:flex;align-items:center;gap:5px}
+  .n-card .nf .fold{color:var(--brand);background:var(--brand-soft);border-radius:999px;
+    padding:1px 7px;font-size:10px;font-weight:650;max-width:64px;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  /* 全屏文字编辑：标题行 + 日期字数 + 无边框正文（对齐小米笔记的编辑页） */
+  #noteFull .viewhead .f{border:none;background:transparent;height:auto;padding:0;
+    font-size:19px;font-weight:750;outline:none}
+  .note-meta{font-size:var(--fs-cap);color:var(--sub);margin:2px 0 14px;flex:none}
+  /* 全屏文字编辑的底部工具栏：悬浮胶囊条（不遮挡 —— 它在文档流里占位，正文区让开） */
+  #noteBarFull{margin:0 12px;border-radius:22px;border:1px solid var(--line);
+    box-shadow:var(--shadow);flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom,0px))}
+  #noteBarFull::-webkit-scrollbar{display:none}
+  #noteBarFull .ntb{flex:none}
+  #noteBarFull .ntb.ai{background:linear-gradient(140deg,#8b5cf6,#6366f1);border-color:transparent;color:#fff}
+  /* 手写底栏：悬浮胶囊，仍在文档流里（flex:none），绝不盖住画布 */
+  #inkBar{border-radius:22px 22px 0 0;border-top:1px solid var(--line);gap:8px}
   /* 编辑页里的内容预览：只读，点一下直接进全屏 */
   .note-prev{min-height:150px;max-height:46vh;overflow-y:auto;border:1px solid var(--line);
     border-radius:14px;background:var(--card);padding:12px;font-size:14px;line-height:1.7;
@@ -1702,7 +1755,7 @@
       <div class="h2">关于</div>
       <div class="list">
         <div class="li tap" onclick="openView('about')" style="border-bottom:0">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.3 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.6 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
       <div style="height:6px"></div>
@@ -1774,7 +1827,11 @@
       <div class="viewhead">
         <div class="icon-btn" onclick="closeView('notes')">‹</div>
         <b id="notesTitle">笔记</b>
-        <div class="icon-btn" onclick="noteNew()" title="新建">＋</div>
+        <div class="row g6">
+          <div class="icon-btn" id="noteColsBtn" onclick="noteToggleCols()" title="切换单/双列"></div>
+          <div class="icon-btn" onclick="noteFolderSheet()" title="文件夹"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
+          <div class="icon-btn" onclick="openSheet('notenew')" title="新建">＋</div>
+        </div>
       </div>
       <div class="viewbody" id="notesBody"></div>
     </div>
@@ -1881,7 +1938,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.2.3 · 开源版</div>
+        <div class="about-ver">v0.2.6 · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -2166,7 +2223,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.2.3';
+var APP_VER = 'v0.2.6';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -2208,10 +2265,13 @@ var DEFAULT = {
   tasks: {},
   classes: {},
   courses: {0:[],1:[],2:[],3:[],4:[],5:[],6:[]},
+  overrides: [],           // 补课/停课：{id,date,op:'add'|'cancel',day,n,t,loc,c}
   termStart: '',           // 学期起始日（YYYY-MM-DD），空则启动时按默认算并落盘
   summaries: {},           // AI 写过的周总结，按「周次+数据指纹」缓存
   summaryTried: {},        // 已经请求过（含失败）的指纹，避免同一份数据反复重试
-  notes: [],               // 笔记：{id,title,body,ink,at,tag}
+  notes: [],               // 笔记：{id,title,body,ink,at,tag,folder,mode,fs,inkItems,inkDark,inkPng}
+  noteFolders: [],         // 笔记文件夹（字符串名字数组；笔记.folder 存文件夹名）
+  noteCols: 2,             // 笔记列表布局：2=双列卡片（默认）、1=单列
   todos: [],               // 待办：{id,t,done,at,due}
   skills: [],              // AI 技能：{id,name,body,src,on}
   /* AI 长期记忆：on = 总开关（关掉就完全不注入、不提取）
@@ -2225,7 +2285,12 @@ var DEFAULT = {
   prefs: {workMin:25, shortMin:5, longMin:15, autoNext:true, classRemind:true, remindBefore:5, endRemind:true, focusNotify:true, islandOn:true, replyStyle:'gentle', replyLength:'medium',
     planDensity:'normal', chunkMode:'block', busyRanges:'', freeRanges:'', classMute:false},
   goal: 8,
-  focus: {on:false, paused:false, mode:'work', dir:'down', secs:1500, total:1500, elapsed:0, label:'', courseId:null}
+  /* startAt / endsAt：会话的绝对时间戳（ms）。倒计时只信 endsAt，
+     不再靠 setInterval 逐帧自减 —— 进程被冻结、CPU 睡一觉醒来，
+     按时间戳算出来的剩余时间依然是对的，自减会越走越慢、被杀即蒸发。
+     sessionId 是原生 FocusStore 里那轮会话的 id，用于对账。 */
+  focus: {on:false, paused:false, mode:'work', dir:'down', secs:1500, total:1500, elapsed:0, label:'', courseId:null,
+          startAt:0, endsAt:0, sessionId:''}
 };
 
 /* ---------- 主题色 ---------- */
@@ -2968,7 +3033,13 @@ var _saved = null;
 try{ _saved = JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){}
 if(!_saved) _saved = migrateFromV2();
 var S = deepMerge(DEFAULT, _saved || {});
-S.focus = deepMerge(DEFAULT.focus, {});
+/* 专注状态**不能**无条件重置成默认值 —— 那会让「没走完的一轮」在每次重启时凭空消失。
+   但也不能直接信存档里的 on=true：进程被杀后没有任何东西在推进计时，
+   存档里的 secs 是死的。真正的权威是原生 FocusStore，
+   页面起来后由 syncFocusFromNative() 校准，在那之前先按「没在跑」处理。 */
+S.focus = deepMerge(DEFAULT.focus, (_saved && _saved.focus) || {});
+S.focus.on = false;
+S.focus.paused = false;
 if(!S.days) S.days = {};
 /* 老存档若是 OpenAI（国内不可用）自动迁到硅基流动 */
 if(S.provider === 'openai'){
@@ -2984,6 +3055,9 @@ if(!S.tasks) S.tasks = {};
 if(!S.classes) S.classes = {};
 if(!S.courses) S.courses = {0:[],1:[],2:[],3:[],4:[],5:[],6:[]};
 for(var _d=0;_d<7;_d++) if(!S.courses[_d]) S.courses[_d] = [];
+if(!Array.isArray(S.overrides)) S.overrides = [];
+if(!Array.isArray(S.noteFolders)) S.noteFolders = [];
+if(S.noteCols !== 1 && S.noteCols !== 2) S.noteCols = 2;
 
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('本地存储写入失败'); } }
 
@@ -3137,40 +3211,55 @@ var ICON = {
   device:  '<rect x="6.4" y="2.6" width="11.2" height="18.8" rx="2.6"/><path d="M10.6 18.6h2.8"/>',
   log:     '<rect x="4.2" y="3.2" width="15.6" height="17.6" rx="2.8"/><path d="M8.2 8.4h7.6M8.2 12h7.6M8.2 15.6h4.6"/>',
   sliders: '<path d="M4 7.4h8M16.6 7.4h3.4M4 16.6h3.4M11.2 16.6h8.8"/><circle cx="14.2" cy="7.4" r="2.4"/><circle cx="8.8" cy="16.6" r="2.4"/>',
-  /* —— 手写工具栏：铅笔 / 马克 / 毛笔 / 橡皮 / 适应 / 撤销 / 重做（24 网格、1.8 描边） —— */
+  /* —— 手写工具栏（v0.2.6 重绘） ——
+     这一组并排挤在 19px 的按钮里，难点是「四支笔长得一样」。
+     统一按 45° 斜置（毛笔/铅笔本来就斜着拿），**只靠笔头形状区分**：
+       铅笔 = 削尖的锥 + 两道箍线
+       马克笔 = 粗杆 + 平口（不削尖，这是最直观的差别）
+       毛笔 = 细杆 + 弧线收锋
+       橡皮 = 方块 + 基准线
+     扫一眼就能分辨，不必看文字。 */
   pencil:
-    '<path d="M5.2 19.6 6.1 15.2 15.3 6a2.1 2.1 0 0 1 3 3L9.1 18.1z"/>' +
-    '<path d="M13.9 7.7l3.1 3.1"/>' +
-    '<path d="M6.1 15.2l3.1 3.1"/>',
+    '<path d="M4.4 19.6 9.8 17 18.8 8 16 5.2 7 14.2z"/>' +
+    '<path d="M7 14.2l2.8 2.8"/>' +
+    '<path d="M13.9 7.3l2.8 2.8"/>',
+  /* 马克笔：**竖放**的胖杆 + 收窄的平笔头。三支笔里唯一不斜的，
+     「胖杆」和「宽平口」在 19px 下就能和铅笔（细杆尖头）分开。 */
   marker:
-    '<path d="M8.2 3.8h7.6a1 1 0 0 1 1 1v4.4l-1.6 2.2H8.8L7.2 9.2V4.8a1 1 0 0 1 1-1z"/>' +
-    '<path d="M9.4 11.4v2.2l2.6 6.2 2.6-6.2v-2.2"/>' +
-    '<path d="M11.2 19.8h1.6"/>',
+    '<rect x="6.6" y="3.4" width="10.8" height="7.2" rx="1.8"/>' +
+    '<path d="M8.6 10.6h6.8l-1.4 7.4H10z"/>',
+  /* 毛笔：细杆 + 鼓出的笔肚 + 收成尖的锋。笔肚必须明显比杆宽，
+     否则和铅笔（细杆 + 锥头）分不出来。 */
   brush:
-    '<path d="M15.8 3.8l4.4 4.4-5.2 5.2-4.4-4.4z"/>' +
-    '<path d="M10.6 9l-1.2 1.2a2.4 2.4 0 0 0 0 3.4l.4.4"/>' +
-    '<path d="M9.6 14.2c-1.2 1.8-1.4 3.4-.6 4.8.8-1 1.8-1.4 3-1.2 1.8.2 2.8 1.2 3.2 2.8"/>' +
-    '<path d="M5.2 16.8c-.6 1.2-.4 2.2.6 3"/>',
+    '<path d="M19 3 21 5 14 12 12 10z"/>' +
+    '<path d="M12 10c-2.8 1.6-4.9 4.2-6.4 7.9 3.8-.5 6.6-2.5 8.4-5.9z"/>',
   eraserStroke:
-    '<path d="M8.4 20.4h11"/>' +
-    '<path d="M4.6 16.2 11.2 9.6a1.9 1.9 0 0 1 2.7 0l2.9 2.9a1.9 1.9 0 0 1 0 2.7l-3.2 3.2H7.4z"/>' +
-    '<path d="M9.8 11l4.8 4.8"/>' +
-    '<path d="M15.4 6.2l3.2 3.2"/>',
+    '<path d="M8.8 20.4h11.2"/>' +
+    '<path d="M5 16.4 11.7 9.7a2 2 0 0 1 2.8 0l3.1 3.1a2 2 0 0 1 0 2.8l-3.7 3.7H8.8z"/>' +
+    '<path d="M10 11l5.4 5.4"/>',
   eraserArea:
-    '<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="5" stroke-dasharray="3.4 3.6"/>' +
-    '<path d="M8.8 14.8 12.6 11a1.6 1.6 0 0 1 2.3 0l1.1 1.1a1.6 1.6 0 0 1 0 2.3l-2.6 2.6H10z"/>' +
-    '<path d="M11.6 10.2l3.4 3.4"/>',
+    '<rect x="3.8" y="3.8" width="16.4" height="16.4" rx="5" stroke-dasharray="3.2 3.4"/>' +
+    '<path d="M9 15.6 12.4 12.2a1.7 1.7 0 0 1 2.4 0l1 1a1.7 1.7 0 0 1 0 2.4l-2.6 2.6h-3z"/>' +
+    '<path d="M11.4 11.6l3.3 3.3"/>',
+  /* 适应纸张：四角括号（原来的「虚线框 + 网格」缩小后糊成一团，
+     分不出是「网格」还是「适应」。四角箭头是无歧义的放缩语义） */
   fit:
-    '<rect x="4" y="4" width="16" height="16" rx="3.2" stroke-dasharray="2.6 2.8"/>' +
-    '<path d="M9.2 4v16M14.8 4v16M4 9.2h16M4 14.8h16" opacity=".35"/>',
+    '<path d="M4.6 9.4V4.6h4.8M14.6 4.6h4.8v4.8M19.4 14.6v4.8h-4.8M9.4 19.4H4.6v-4.8"/>',
+  /* 撤销/重做：去掉原来那个小圆点（缩到 19px 就是一块脏点），
+     弧形箭头本身已经够清楚 */
   undo:
-    '<path d="M8.8 5.6 4.6 9.8l4.2 4.2"/>' +
-    '<path d="M4.6 9.8h9.2a5.4 5.4 0 1 1 0 10.8H9.2"/>' +
-    '<circle cx="17.2" cy="12.2" r="1.1" fill="currentColor" stroke="none" opacity=".55"/>',
+    '<path d="M9.6 5.4 4.8 10.2l4.8 4.8"/>' +
+    '<path d="M4.8 10.2h8.6a5.6 5.6 0 0 1 0 11.2h-3.6"/>',
   redo:
-    '<path d="M15.2 5.6l4.2 4.2-4.2 4.2"/>' +
-    '<path d="M19.4 9.8H10.2a5.4 5.4 0 1 0 0 10.8H14.8"/>' +
-    '<circle cx="6.8" cy="12.2" r="1.1" fill="currentColor" stroke="none" opacity=".55"/>',
+    '<path d="M14.4 5.4l4.8 4.8-4.8 4.8"/>' +
+    '<path d="M19.2 10.2h-8.6a5.6 5.6 0 0 0 0 11.2h3.6"/>',
+  /* 笔记列表布局：两列 / 单列。按钮显示的是**当前**布局 */
+  cols2:
+    '<rect x="3.4" y="4.4" width="7.6" height="15.2" rx="2.4"/>' +
+    '<rect x="13" y="4.4" width="7.6" height="15.2" rx="2.4"/>',
+  cols1:
+    '<rect x="3.4" y="4.4" width="17.2" height="6.6" rx="2.4"/>' +
+    '<rect x="3.4" y="13" width="17.2" height="6.6" rx="2.4"/>',
   gauge:   '<path d="M4.4 17.6a8.6 8.6 0 1 1 15.2 0"/><path d="M12 14.6l3.4-3.4"/><circle cx="12" cy="15.2" r="1.5" fill="currentColor" stroke="none"/>',
   bolt:    '<path d="M13.6 2.6 5.4 13.4h5.4l-1 8 8.2-10.8h-5.4z"/>',
   /* —— AI 角色 —— */
@@ -3614,12 +3703,74 @@ function renderHolidaySheet(){
 
    ⚠️ 跨语言：原生 ReminderScheduler 独立复现同一套判定（单双周 + 节假日）。
    判定所需的全部事实由 pushScheduleToNative() 一次性推过去，契约字段见该函数。 */
+/* ============================================================
+   补课 / 停课（overrides）—— 课表唯一的「日期维度加法」
+   ------------------------------------------------------------
+   课表本身只按星期几循环，没有日期概念；「10月17日（周六）补
+   双周周一的课」「下周三下午停一次」这类需求只能落在具体日期上。
+   S.overrides = [{id, date:'YYYY-MM-DD', op:'add'|'cancel',
+                   day:0~6(该日期的星期下标), n, t, loc, c}]
+     op=add     把 n/t/loc 这节课**额外**放到 date 这天（补课）
+     op=cancel  date 这天抹掉匹配的课：n/t 都空 = 全天停课
+   叠加在 dayInfo 里做 —— 全站（课表/提醒/小组件/AI）自动生效。
+   跨语言：pushScheduleToNative() 会把它整个推给原生，
+   ReminderScheduler 按日期排一次性闹钟（add）+ 触发时判定（cancel）。
+   ============================================================ */
+function overridesOn(dateKey){
+  return (S.overrides || []).filter(function(o){ return o && o.date === dateKey; });
+}
+/* 把某天的 overrides 叠进课程列表：cancel 先减、add 后加（补的课带 __ov 标记） */
+function overridesApply(list, dateKey){
+  var ovs = overridesOn(dateKey);
+  if(!ovs.length) return list;
+  var out = list.slice();
+  ovs.forEach(function(o){
+    if(o.op === 'cancel'){
+      out = out.filter(function(c){
+        if(o.n && String(c.n) !== o.n) return true;
+        if(o.t && String(c.t) !== o.t) return true;
+        return false; /* 命中：这节课这天不上 */
+      });
+    } else if(o.t && o.n){
+      var dup = out.some(function(c){ return c.t === o.t && c.n === o.n; });
+      if(!dup) out.push({ t:o.t, n:o.n, loc:o.loc || '', c:(o.c == null ? 1 : o.c), w:'all', __ov:1 });
+    }
+  });
+  out.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
+  return out;
+}
+/* 日期键 → 星期下标（0=周一）。补课单、AI 回执都用它 */
+function dayIdxOfDate(dk){
+  var d = isoToDate(dk);
+  return d ? (d.getDay() + 6) % 7 : -1;
+}
+function addOverrideRaw(rec){
+  if(!S.overrides) S.overrides = [];
+  var o = {
+    id: rec.id || ('ov' + Date.now().toString(36) + Math.random().toString(36).slice(2,5)),
+    date: rec.date, op: (rec.op === 'cancel' ? 'cancel' : 'add'),
+    day: dayIdxOfDate(rec.date)
+  };
+  if(rec.op !== 'cancel' || rec.n) o.n = rec.n || '';
+  if(rec.op !== 'cancel' || rec.t) o.t = rec.t || '';
+  if(rec.op === 'add'){ o.loc = rec.loc || ''; o.c = (rec.c == null ? 1 : rec.c); }
+  S.overrides.push(o);
+  return o;
+}
+function overrideDelete(id){
+  var before = (S.overrides || []).length;
+  S.overrides = (S.overrides || []).filter(function(o){ return o.id !== id; });
+  return S.overrides.length < before;
+}
+
 function dayInfo(day, wno){
   var w = (wno == null) ? weekNo(new Date()) : wno;
   var dateKey = dateKeyForDayIdx(day, w);
   /* 节假日模式下，放假当天的课整条隐藏 —— 课表按星期几排，假日按日期放 */
   var hol = holidayModeOn() ? (holidayOn(dateKey) || '') : '';
   var list = hol ? [] : courses(day).filter(function(c){ return courseShouldShow(c, w); });
+  /* 补课/停课按日期叠加（放假当天补课也生效 —— 补课本来就常落在假日） */
+  list = overridesApply(list, dateKey);
   return {
     day: day, wno: w, dateKey: dateKey,
     holiday: !!hol, holidayName: hol,
@@ -3676,6 +3827,7 @@ function pushScheduleToNative(){
        bookings    → 已预约的课不提醒
        holidays    → {日期键: 名称} 扁平表，判定「这天放假」
        holidayMode → 节假日模式总开关；关掉时 holidays 不生效
+       overrides   → 补课/停课：add 按日期排一次性闹钟，cancel 触发时判定
 
      ⚠️ 改这个结构必须同步改原生读取字段。tools/audit.mjs 会对两边做字段对账，
      漏改会直接报错（历史上就是漏改导致「放假照常提醒上课」）。 */
@@ -3685,7 +3837,8 @@ function pushScheduleToNative(){
       courses: S.courses,
       bookings: S.bookings || {},
       holidays: holidayFlat(),
-      holidayMode: holidayModeOn()
+      holidayMode: holidayModeOn(),
+      overrides: S.overrides || []
     }));
   }catch(e){}
 }
@@ -4784,6 +4937,117 @@ function renderSheet(kind, data){
     sheet.innerHTML = renderNoteShareSheet();
     return;
   }
+  if(kind === 'notenew'){
+    var nfs = noteFoldersAll();
+    sheet.innerHTML = '<div class="sh"></div><h3>新建笔记</h3>'
+      + (nfs.length
+        ? '<div class="muted" style="font-size:11.5px;margin:4px 0 0">存入文件夹（可再改）</div>'
+          + '<div class="nb-chips" style="padding:8px 0 0">'
+          + '<div class="nb-chip' + (noteNewFolder ? '' : ' on') + '" data-f="">不放入</div>'
+          + nfs.map(function(f){
+              return '<div class="nb-chip' + (noteNewFolder === f ? ' on' : '') + '" data-f="' + esc(f) + '">' + esc(f) + '</div>';
+            }).join('')
+          + '</div>'
+        : '')
+      + '<div class="row g6" style="margin-top:14px">'
+      + '<div class="btn ghost" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;padding:16px 8px" onclick="noteNew(\'text\')">'
+      + '<span class="oi" style="margin:0">' + icSvg('text', 20) + '</span><b>文字笔记</b></div>'
+      + '<div class="btn ghost" style="flex:1;display:flex;flex-direction:column;gap:6px;align-items:center;padding:16px 8px" onclick="noteNew(\'ink\')">'
+      + '<span class="oi" style="margin:0">' + icSvg('pencil', 20) + '</span><b>手写笔记</b></div>'
+      + '</div>';
+    var nnChips = sheet.querySelector('.nb-chips');
+    if(nnChips) nnChips.onclick = function(e){
+      var el = e.target.closest ? e.target.closest('.nb-chip') : null;
+      if(el){ noteNewFolder = el.dataset.f || ''; openSheet('notenew'); }
+    };
+    return;
+  }
+  if(kind === 'notefolders'){
+    var ffs = noteFoldersAll();
+    sheet.innerHTML = '<div class="sh"></div><h3>文件夹</h3>'
+      + (noteFolderRenaming
+        ? '<div class="row g6" style="margin-top:12px">'
+          + '<input class="f" id="nfRename" maxlength="12" value="' + esc(noteFolderRenaming) + '" />'
+          + '<div class="btn primary" style="flex:none" onclick="noteFolderRenameTake()">确定</div>'
+          + '<div class="btn ghost" style="flex:none" onclick="noteFolderRenameCancel()">取消</div></div>'
+        : '')
+      + '<div class="list" style="margin-top:12px">'
+      + (ffs.length ? '' : '<div class="li"><div class="tx"><b style="color:var(--sub)">还没有文件夹</b></div></div>')
+      + '</div>'
+      + '<div class="row g6" style="margin-top:12px">'
+      + '<input class="f" id="nfName" maxlength="12" placeholder="新文件夹名（12 字内）" />'
+      + '<div class="btn primary" style="flex:none" onclick="noteFolderAdd()">创建</div></div>'
+      + '<div class="muted" style="font-size:11px;margin-top:8px">删除文件夹不会删笔记，里面的笔记会回到「未分类」。</div>'
+      + '<div class="btn ghost" style="margin-top:12px" onclick="closeSheet()">关闭</div>';
+    /* 文件夹名是用户输入，按钮一律走事件委托，不往内联 onclick 里拼名字 */
+    var fList = sheet.querySelector('.list');
+    if(fList && ffs.length){
+      fList.innerHTML = ffs.map(function(f, fi){
+        return '<div class="li"><div class="ic" data-i="book"></div>'
+          + '<div class="tx"><b>' + esc(f) + '</b><small>' + noteFolderCount(f) + ' 条笔记</small></div>'
+          + '<div class="val"><div class="row g6">'
+          + '<div class="icon-btn" data-fi="' + fi + '" data-op="ren" title="改名">✎</div>'
+          + '<div class="icon-btn" data-fi="' + fi + '" data-op="del" title="删除">✕</div>'
+          + '</div></div></div>';
+      }).join('');
+      fList.onclick = function(e){
+        var el = e.target.closest ? e.target.closest('[data-fi]') : null;
+        if(!el) return;
+        var f = ffs[+el.dataset.fi];
+        if(!f) return;
+        if(el.dataset.op === 'ren') noteFolderRename(f); else noteFolderDel(f);
+      };
+    }
+    return;
+  }
+  if(kind === 'notefolderpick'){
+    var n = noteById(noteCurId);
+    var pfs = noteFoldersAll();
+    sheet.innerHTML = '<div class="sh"></div><h3>移动到文件夹</h3>'
+      + '<div class="list" style="margin-top:12px">'
+      + '<div class="li tap" data-f=""><div class="ic" data-i="book"></div>'
+      + '<div class="tx"><b>不放入文件夹</b></div>'
+      + '<div class="val">' + ((n && !n.folder) ? '<span class="arrow">✓</span>' : '') + '</div></div>'
+      + pfs.map(function(f){
+          return '<div class="li tap" data-f="' + esc(f) + '"><div class="ic" data-i="book"></div>'
+            + '<div class="tx"><b>' + esc(f) + '</b></div>'
+            + '<div class="val">' + ((n && n.folder === f) ? '<span class="arrow">✓</span>' : '') + '</div></div>';
+        }).join('')
+      + '</div>'
+      + '<div class="btn ghost" style="margin-top:12px" onclick="closeSheet()">取消</div>';
+    var pList = sheet.querySelector('.list');
+    if(pList) pList.onclick = function(e){
+      var el = e.target.closest ? e.target.closest('[data-f]') : null;
+      if(el) noteMoveTo(el.dataset.f || '');
+    };
+    return;
+  }
+  if(kind === 'noteai'){
+    sheet.innerHTML = '<div class="sh"></div><h3>AI 加工这篇笔记</h3>'
+      + '<div class="list" style="margin-top:12px">'
+      + '<div class="li tap" onclick="noteAiRun(\'polish\')"><div class="ic" data-i="sparkle"></div>'
+      + '<div class="tx"><b>润色</b><small>改掉错别字与不通顺的句子，保持原意</small></div></div>'
+      + '<div class="li tap" onclick="noteAiRun(\'expand\')"><div class="ic" data-i="wand"></div>'
+      + '<div class="tx"><b>扩写</b><small>补充细节与解释，篇幅约为原来两倍</small></div></div>'
+      + '<div class="li tap" onclick="noteAiRun(\'summary\')"><div class="ic" data-i="align"></div>'
+      + '<div class="tx"><b>总结</b><small>提炼成分点要点</small></div></div>'
+      + '</div>'
+      + '<div class="btn ghost" style="margin-top:12px" onclick="closeSheet()">取消</div>';
+    return;
+  }
+  if(kind === 'noteairesult'){
+    var aiT = noteAiResult || '';
+    sheet.innerHTML = '<div class="sh"></div><h3>AI 结果</h3>'
+      + '<div class="card" style="margin:12px 0 4px;max-height:38vh;overflow-y:auto;'
+      + 'white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.75">' + esc(aiT) + '</div>'
+      + '<div class="row g6" style="margin-top:14px">'
+      + '<div class="btn ghost" onclick="noteAiCopy()">复制</div>'
+      + '<div class="btn ghost" onclick="noteAiAppend()">追加到末尾</div>'
+      + '<div class="btn primary" onclick="noteAiReplace()">替换正文</div></div>'
+      + '<div class="muted" style="font-size:11px;margin-top:8px">替换/追加后还要点「完成」保存。想重新生成就关掉再来一次。</div>'
+      + '<div class="btn ghost" style="margin-top:10px" onclick="closeSheet()">关闭</div>';
+    return;
+  }
   if(kind === 'chatdel'){
     var cdIdx = parseInt(data && data.idx, 10);
     var cdH = (S.chatHistory || [])[cdIdx];
@@ -5170,7 +5434,13 @@ function confirmEndClass(){
 }
 function extendClass(){
   closeAlert();
-  S.focus.total += 600;
+  var f = S.focus;
+  f.total += 600;
+  /* 倒计时的剩余时间是按 endsAt 推算的，只改 total 显示不会变长 ——
+     必须把结束时刻一起往后推，并同步给原生（否则通知上的倒计时也不变） */
+  if(f.dir === 'down' && f.endsAt) f.endsAt += 600000;
+  else f.secs += 600;
+  nat('extendFocus', '600');
   toast('已延长 10 分钟');
   renderFocus();
 }
@@ -5182,7 +5452,8 @@ function discardEnd(){
 }
 function nextRound(){
   closeAlert();
-  S.focus.on = true; S.focus.paused = false; lastTick = Date.now();
+  S.focus.on = true; S.focus.paused = false; S.focus.pausedAt = 0;
+  focusAnchor();
   renderFocus(); setSegs(); natFocusStart();
   toast('开始！');
 }
@@ -5293,7 +5564,9 @@ function courseCard(c, i, opts){
     if(isBooked(selIdx, c)){
       chip = '<span class="badge green" style="cursor:pointer" '
         + 'onclick="event.stopPropagation();cancelBookClass(' + selIdx + ',' + i + ')">已预约 · 点取消</span>';
-    } else {
+    } else if(canBookCourse(selIdx, c)){
+      /* 走 canBookCourse 而不是自己再判一次时间：
+         课中（哪怕只剩一分钟）不给预约按钮 —— 约了也不会准点触发 */
       chip = '<span class="takenbtn" '
         + 'onclick="event.stopPropagation();bookClass(' + selIdx + ',' + i + ')">预约专注</span>';
     }
@@ -5321,7 +5594,7 @@ function courseCard(c, i, opts){
     + ((live || isNext) ? '<div class="cn-flag' + (live?' live':'') + '">' + flag + (until ? ' · ' + until : '') + '</div>' : '')
     + '<div class="time">' + esc(c.t) + '</div>'
     + '<div style="flex:1;min-width:0;padding-right:' + (showSide ? '8px' : '0') + '">'
-    + '<div class="name">' + esc(c.n) + coursePriBadge(c) + '</div>'
+    + '<div class="name">' + esc(c.n) + (c.__ov ? '<span class="badge plain" style="margin-left:6px;opacity:.8">补</span>' : '') + coursePriBadge(c) + '</div>'
     + '<div class="meta">' + (esc(c.loc) || '未填写地点') + '</div></div>'
     + (showSide ? '<div class="course-side">' + chip + '</div>' : '')
     + weekTag + '</div>';
@@ -5858,14 +6131,44 @@ function dayKeyOfWeek(day){
 /* ============================================================
    番茄钟 / 专注
    ============================================================ */
-var lastTick = Date.now();
+/* 给一轮专注钉上**绝对时间戳**。
+   所有「开始 / 继续 / 改时长」的地方都必须走这里，不许自己再算一遍 endsAt ——
+   时间戳只有一个来源，多一处计算就多一个真相。 */
+function focusAnchor(){
+  var f = S.focus, now = Date.now();
+  f.startAt = now;
+  /* 正计时没有终点，endsAt 记 0（原生侧同理） */
+  f.endsAt = (f.dir === 'up') ? 0 : (now + Math.max(0, f.secs) * 1000);
+}
+/* 暂停时把「暂停了多久」补进时间戳：否则暂停会白白吃掉倒计时，
+   正计时也会把暂停那段时间算成专注。 */
+function focusShiftTime(gapMs){
+  var f = S.focus;
+  if(!gapMs) return;
+  if(f.startAt) f.startAt += gapMs;
+  if(f.endsAt) f.endsAt += gapMs;
+}
+/**
+ * 计时权威是不是在原生端。
+ * 通知开关关掉时页面从不调 nat('startFocus')，原生也就没在计时 ——
+ * 这时必须退回页面自己算，否则专注一分钟都记不上。
+ */
+function nativeTimerOn(){
+  return !!isApp && !!(S.prefs && S.prefs.focusNotify);
+}
 setInterval(function(){
-  var now = Date.now(), dt = (now - lastTick)/1000; lastTick = now;
+  var now = Date.now();
   if(!S.focus.on || S.focus.paused) return;
   if(S.focus.dir === 'down'){
-    S.focus.secs -= dt;
-    if(S.focus.secs <= 0){ S.focus.secs = 0; completeRound(); return; }
-  } else S.focus.elapsed += dt;
+    /* 剩余时间按**结束时刻**推算，不是逐帧自减：
+       进程被冻结、CPU 睡一觉再醒来，这么算依然是对的；
+       自减会越走越慢，而且进程一死就全没了。 */
+    var remain = S.focus.endsAt ? Math.max(0, (S.focus.endsAt - now) / 1000) : S.focus.secs;
+    S.focus.secs = remain;
+    if(remain <= 0){ S.focus.secs = 0; completeRound(); return; }
+  } else {
+    S.focus.elapsed = Math.min(S.focus.total, Math.max(0, (now - S.focus.startAt) / 1000));
+  }
   renderFocus();
   /* 主页番茄四宫格要跟手；课程卡只改计时文案，避免整卡重绘闪烁 */
   try{
@@ -5889,16 +6192,144 @@ setInterval(function(){
 
 function natFocusStart(){
   if(S.prefs.focusNotify){
+    /* 第四个参数把 courseId / mode / dir 一起交给原生：
+       这几项必须随会话落盘 —— 页面下次打开补记时，
+       要靠它们判断「记到哪门课」「算不算一个番茄」。
+       正计时传 total 而不是 elapsed：刚开始 elapsed 是 0，
+       传过去会被原生当成「1 秒后结束」。 */
     nat('startFocus', S.focus.label || '自由专注',
-        Math.round(S.focus.dir==='up' ? S.focus.elapsed : S.focus.secs));
+        Math.round(S.focus.dir==='up' ? (S.focus.total || 1500) : S.focus.secs),
+        JSON.stringify({courseId: S.focus.courseId || '', mode: S.focus.mode || 'work', dir: S.focus.dir || 'down'}));
   }
 }
 function resetFocus(){
   var f = S.focus;
   f.on=false; f.paused=false; f.courseId=null; f.dir='down'; f.elapsed=0;
   f.mode='work'; f.total = S.prefs.workMin*60; f.secs = f.total; f.label='';
+  f.startAt=0; f.endsAt=0; f.pausedAt=0; f.sessionId='';
   nat('stopFocus');
 }
+
+/* ============================================================
+   专注记账：以原生 FocusStore 的「待记账队列」为准
+   ============================================================
+   以前页面走完一轮就自己 addFocusMin()。问题是页面进程一死，
+   setInterval 没了，那一轮永远走不到 completeRound —— 时间白费。
+
+   现在原生是计时的权威：它跑完一轮就把结果塞进待记账队列，
+   页面不管什么时候打开，都能把队列里的补记上。
+   页面自己**只在原生没参与计时时**（通知开关关掉）才记账。 */
+
+/**
+ * 把一条原生记账记录写进统计。返回实际记的分钟数。
+ * 口径与 completeRound / stopFocus 保持一致：
+ *   · 课程专注（有 courseId）记分钟、不记番茄，并累加到 S.classes
+ *   · 番茄（mode=work 且没绑课）记分钟、也记一个番茄
+ */
+function settleFocusRecord(r){
+  if(!r) return 0;
+  var secs = Number(r.secs) || 0;
+  if(secs <= 0) return 0;
+  var mins = secs / 60;
+  var isCourse = !!r.courseId;
+  var pomo = (r.mode === 'work' && !isCourse) ? 1 : 0;
+  addFocusMin(mins, pomo);
+  if(isCourse){
+    var id = r.courseId;
+    var prev = S.classes[id] || {};
+    S.classes[id] = {status:'done', min: ((prev.min) || 0) + Math.round(mins)};
+  }
+  return mins;
+}
+
+/**
+ * 拉原生专注状态：先消费待记账队列，再校准当前会话。
+ * 页面启动时、回到前台时、收到原生事件时各调一次。
+ *
+ * 「通知栏跑完的专注也能记上」就靠这里 —— 哪怕 App 当时已经被杀，
+ * 结果也在原生队列里躺着，打开就补。
+ */
+function syncFocusFromNative(){
+  if(!isApp) return 0;
+  var raw = nat('focusState');
+  if(!raw) return 0;
+  var st = null;
+  try{ st = JSON.parse(raw); }catch(e){ return 0; }
+  if(!st || typeof st !== 'object') return 0;
+
+  /* ① 先补记：这才是真正把时间找回来的地方 */
+  var arr = st.pending || [];
+  var ids = [], gained = 0, gainedPomo = 0;
+  for(var i=0; i<arr.length; i++){
+    var r = arr[i];
+    if(!r || !r.id) continue;
+    var m = settleFocusRecord(r);
+    gained += m;
+    if(r.mode === 'work' && !r.courseId) gainedPomo += 1;
+    ids.push(String(r.id));
+  }
+  /* 先写统计再回执 —— 反过来会永久丢掉这一轮 */
+  if(ids.length){
+    save();
+    nat('focusAck', JSON.stringify(ids));
+  }
+
+  /* ② 再校准当前会话 */
+  var f = S.focus;
+  var live = !!(st.hasSession && (st.running || st.paused));
+  window.__focusSync = {
+    gained: gained, hasSession: live, running: !!st.running,
+    courseId: (st.courseId || null), id: String(st.id || '')
+  };
+  if(live){
+    f.on = true;
+    f.paused = !!st.paused;
+    f.dir = (st.dir === 'up') ? 'up' : 'down';
+    f.mode = st.mode || 'work';
+    f.label = st.label || '';
+    f.courseId = st.courseId || null;
+    f.total = Number(st.totalSecs) || f.total;
+    f.startAt = Number(st.startAt) || 0;
+    f.endsAt = Number(st.endAt) || 0;
+    f.sessionId = st.id || '';
+    if(f.dir === 'down'){
+      f.secs = Math.max(0, Number(st.remainSecs) || 0);
+    } else {
+      f.elapsed = Math.max(0, Number(st.secs) || 0);
+      /* 正计时的 elapsed 由 startAt 推算，这里补上暂停过的时间 */
+      f.startAt = Date.now() - f.elapsed * 1000;
+    }
+    /* 课程专注要标成 ongoing，课程卡才会显示「专注中」 */
+    if(f.courseId){
+      var cs = S.classes[f.courseId] || {};
+      if(cs.status !== 'ongoing') S.classes[f.courseId] = {status:'ongoing', min: cs.min || 0};
+    }
+  } else if(!f.on){
+    /* 原生那边没有在跑的会话：把本地残留的「进行中」状态清掉 */
+    f.secs = f.total;
+  }
+  if(gained > 0 || ids.length){
+    save();
+    renderStats(); renderSummaryQuick(); renderCourses();
+    if(gained > 0){
+      toast('已补记 ' + fmtMin(gained) + ' 专注' + (gainedPomo ? '（' + gainedPomo + ' 个番茄）' : ''));
+      logIt('专注', '补记 ' + fmtMin(gained) + ' · ' + ids.length + ' 条');
+    }
+  }
+  return gained;
+}
+
+/** 原生推过来的专注事件（Activity 还活着时才有；没活着就靠启动时拉） */
+window.onNativeFocusEvent = function(kind){
+  syncFocusFromNative();
+  if(kind === 'end' || kind === 'discard'){
+    /* 原生已经结算过了，页面把 UI 收尾即可，别再记一次 */
+    if(S.focus.on && kind === 'end'){
+      resetFocus();
+      renderFocus(); renderCourses(); renderStats(); renderBindChip(); setSegs();
+    }
+  }
+};
 /* ---------- 专注条：收起成悬浮块 / 拖动 / 展开 / 进专注页 ----------
    状态只有两个形态：bar（完整条）和 pill（小悬浮块）。
    · 点完整条 → 收起成悬浮块
@@ -5982,7 +6413,8 @@ function openFocus(label, mins){
   if(mins){
     S.focus.mode='work'; S.focus.dir='down'; S.focus.total = mins*60; S.focus.secs = mins*60;
     if(!S.focus.on){
-      S.focus.on = true; S.focus.paused = false; lastTick = Date.now();
+      S.focus.on = true; S.focus.paused = false; S.focus.pausedAt = 0;
+      focusAnchor();
       toast('已开始 ' + mins + ' 分钟专注'); natFocusStart();
     }
     save();
@@ -6071,47 +6503,71 @@ function toggleFocus(){
       f.total = min*60; f.secs = min*60;
     }
     if(!f.label) f.label = '';
-    f.on = true; f.paused = false;
+    f.on = true; f.paused = false; f.pausedAt = 0;
+    focusAnchor();
     natFocusStart();
     toast(f.dir==='up' ? '开始记录上课专注' : '专注开始，加油');
   } else {
     f.paused = !f.paused;
-    if(f.paused) nat('pauseFocus'); else natFocusStart();
-    toast(f.paused ? '已暂停' : '继续专注');
+    if(f.paused){
+      f.pausedAt = Date.now();
+      nat('pauseFocus');
+      toast('已暂停');
+    } else {
+      /* 把暂停的这段时间补回时间戳里，否则暂停会白白吃掉倒计时。
+         恢复必须走 resumeFocus —— 再调 startFocus 会新开一轮会话，
+         把已经累计的专注时间清零。 */
+      focusShiftTime(Date.now() - (f.pausedAt || Date.now()));
+      f.pausedAt = 0;
+      nat('resumeFocus');
+      toast('继续专注');
+    }
   }
-  lastTick = Date.now(); renderFocus(); renderCourses(); setSegs();
+  renderFocus(); renderCourses(); setSegs();
 }
 function completeRound(){
   var f = S.focus;
-  if(f.courseId){
+  var wasCourse = !!f.courseId;
+  /*
+   * 原生在计时时，走完这一轮由**原生**结算（结果进待记账队列），
+   * 页面这里只收尾 UI —— 两边都记就会记双份。
+   * 原生没参与计时（通知开关关掉）时才由页面自己记。
+   */
+  if(nativeTimerOn()){
+    /* 立刻拉一次：原生推了事件的话这里就能补上；
+       万一它还没结算完，下次打开 App 也会补，不会丢。 */
+    syncFocusFromNative();
+    if(wasCourse) toast('下课！专注已记录');
+    else if(f.mode === 'work') toast('番茄完成！已记入今日专注');
+    else toast('休息结束，开始下一轮吧');
+  } else if(wasCourse){
     /* 上课倒计时走完：累计到「已专注」而不是覆盖 */
     var minsDone = Math.round(f.total / 60);
     addFocusMin(minsDone, 0);
     var prev0 = S.classes[f.courseId];
     var sum0 = ((prev0 && prev0.min) || 0) + minsDone;
     S.classes[f.courseId] = {status:'done', min: sum0};
-    if(S.prefs.classMute){ try{ nat('setClassMute', '0'); }catch(e){} }
     toast('下课！已专注累计 ' + sum0 + ' 分钟');
-    resetFocus();
-    save(); refreshAll();
-    return;
-  }
-  if(f.mode === 'work'){
+  } else if(f.mode === 'work'){
     /* 记录本轮**实际设定的时长**，而不是 prefs.workMin ——
        从行程点进来可能是 40 分钟，按偏好 25 记会少算或错记 */
     addFocusMin(f.total / 60, 1);
     toast('番茄完成！已记入今日专注');
   } else toast('休息结束，开始下一轮吧');
+
+  if(wasCourse && S.prefs.classMute){ try{ nat('setClassMute', '0'); }catch(e){} }
   save(); renderStats(); renderSummaryQuick();
+  if(wasCourse){ resetFocus(); refreshAll(); return; }
+
   if(S.prefs.autoNext){
     f.mode = f.mode==='work' ? ((todayPomo() % 4 === 0) ? 'long' : 'short') : 'work';
     var min = f.mode==='work' ? S.prefs.workMin : f.mode==='short' ? S.prefs.shortMin : S.prefs.longMin;
     f.dir='down'; f.total = min*60; f.secs = min*60; f.on = false; f.paused = false;
-    lastTick = Date.now(); setSegs(); renderFocus(); nat('stopFocus');
+    setSegs(); renderFocus(); nat('stopFocus');
     showAlert('round', null);
   } else {
     f.on = false; f.paused = false; f.secs = f.total;
-    lastTick = Date.now(); renderFocus(); nat('stopFocus');
+    renderFocus(); nat('stopFocus');
   }
 }
 function stopFocus(){
@@ -6119,7 +6575,14 @@ function stopFocus(){
   var f = S.focus;
   var spent = f.dir==='up' ? f.elapsed : (f.total - f.secs);
   var wasCourse = !!f.courseId;
-  if(spent > 60){
+  if(nativeTimerOn()){
+    /* 原生在计时：nat('stopFocus') 已经让它按**实际**专注秒数结算了，
+       这里把结果拉回来入账即可。不要自己再按 spent 记一遍 ——
+       spent 是页面算的，和原生的口径（扣掉暂停、扣掉服务被杀后的空转）不一样。 */
+    nat('stopFocus');
+    syncFocusFromNative();
+    toast(spent > 60 ? ('本次专注 ' + fmtMin(spent/60) + ' 已保存') : '已结束');
+  } else if(spent > 60){
     addFocusMin(spent/60, (f.mode==='work' && !f.courseId) ? 1 : 0);
     if(f.courseId){
       var prev1 = S.classes[f.courseId];
@@ -6169,7 +6632,8 @@ function startClass(day, i){
   var prev = S.classes[id];
   var prevMin = (prev && prev.min) || 0;
   S.classes[id] = {status:'ongoing', min: prevMin};
-  lastTick = Date.now(); save(); natFocusStart();
+  f.pausedAt = 0;
+  focusAnchor(); save(); natFocusStart();
   if(S.prefs.classMute){
     try{ nat('setClassMute', '1'); }catch(e){}
   }
@@ -6177,10 +6641,31 @@ function startClass(day, i){
   renderFocus(); renderCourses(); renderBindChip(); setSegs(); renderStats();
   pushWidgetsToNative();
 }
+/**
+ * 「这门课现在还能不能预约」的唯一判定口。
+ * bookClass 与课程卡的按钮都必须走这里 —— 两处各判一次就会出现
+ * 「按钮能点但点了没反应」或者「按钮没了但 AI 还能约」。
+ *
+ * 预约的意义是**到上课时间点自动开始专注**，所以只能约还没开始的课。
+ * 已经在课中（哪怕只剩一分钟）就该直接开始：预约了也不会准点触发，
+ * 因为触发点已经过去了，只会被 tickBookings 当过期丢掉。
+ */
+function canBookCourse(day, c){
+  if(!c) return false;
+  if(day !== todayI) return true;          /* 不是今天：谈「现在」没意义 */
+  var p = String(c.t || '').split('-');
+  var startM = toMin(p[0] || '00:00'), endM = toMin(p[1] || '00:00');
+  if(endM <= startM) return false;
+  return toMin(nowHM()) < startM;
+}
 /* 预约专注：到点自动开始，无需再点 */
 function bookClass(day, i){
   var c = coursesAt(day)[i]; if(!c) return;
   var id = cid(day, c);
+  if(!canBookCourse(day, c)){
+    toast('这节课已经开始了，直接开始专注就好');
+    return;
+  }
   if(!S.bookings) S.bookings = {};
   var p = String(c.t).split('-');
   var startM = toMin(p[0]), endM = toMin(p[1]);
@@ -6203,6 +6688,8 @@ function cancelBookClass(day, i){
   save();
   toast('已取消预约');
   renderCourses();
+  /* 必须推给原生：否则它存的还是旧的 bookings，到点照样把专注拉起来 */
+  pushScheduleToNative();
 }
 function isBooked(day, c){
   if(!S.bookings || !c) return false;
@@ -6218,6 +6705,22 @@ function findCourseById(id){
 function startBookedClass(id){
   var hit = findCourseById(id);
   if(!hit) return;
+  /*
+   * 原生闹钟可能已经把这一轮拉起来了（预约专注现在由原生触发）。
+   * 这时绝不能再 startFocus —— 那会新开一轮会话，把已经累计的专注时间清零。
+   * 只把 UI 同步过去就好。
+   */
+  if(nativeTimerOn()){
+    syncFocusFromNative();
+    var fs = window.__focusSync || {};
+    if(fs.hasSession && fs.courseId === id){
+      var pv = S.classes[id] || {};
+      S.classes[id] = {status:'ongoing', min: pv.min || 0};
+      renderFocus(); renderCourses(); renderBindChip(); setSegs(); renderStats();
+      pushWidgetsToNative();
+      return;
+    }
+  }
   /* 用过滤列表下标启动倒计时专注 */
   var list = coursesAt(hit.day);
   for(var i=0;i<list.length;i++){
@@ -6232,7 +6735,8 @@ function startBookedClass(id){
   f.label = c.n; f.courseId = id;
   var prevB = S.classes[id];
   S.classes[id] = {status:'ongoing', min: (prevB && prevB.min) || 0};
-  lastTick = Date.now(); save(); natFocusStart();
+  f.pausedAt = 0;
+  focusAnchor(); save(); natFocusStart();
   if(S.prefs.classMute){ try{ nat('setClassMute','1'); }catch(e){} }
   toast('预约到点，已自动开始上课专注');
   refreshAll();
@@ -7001,8 +7505,10 @@ var APP_KB =
   + '页面：今日(home) / 对话(chat) / 我的(me)；二级页：schedule课表 notes笔记 todos待办 '
   + 'focus专注 import导入 ai配置 memory记忆 skills技能 about关于 solve搜题。\n'
   + '数据模型：courses 按星期 0~6，字段 t时间 n名 loc地点 c颜色 w周次 p优先级；'
+  + 'overrides 补课/停课按具体日期（addMakeup 批量补课、cancelCourseOnce 停课、listOverride 查）；'
   + 'tasks 行程按日期键；todos 待办 p=urgent|normal|memo；notes 笔记；'
   + 'skills 技能；memory 记忆；prefs 偏好（风格/长度/规划密度等）。\n'
+  + '处理「周六补周几的课」「某天停课」这类要求：先从【日期对照】换算出具体日期再调工具，date 不要写相对说法。\n'
   + '优先级：课程 high|normal|low；待办 urgent|normal|memo（未说明用 normal）。\n'
   + '规划：密度 full|normal|loose，时长 block|flex；busyRanges/freeRanges 为自由文本。\n'
   + '可用 getState|what=overview|courses|todos|plan|notes|focus|prefs|memory|skills|all '
@@ -7277,6 +7783,12 @@ var AI_TOOLS = [
   {k:'delCourse', n:'删除课程', a:'name=高数 t=08:00-09:40 day=0'},
   {k:'setCoursePri', n:'设置课程优先级', a:'name=高数 pri=high|normal|low'},
   {k:'pickDay', n:'切换今日页所选星期', a:'day=0..6'},
+  /* —— 补课 / 停课（日期维度，overrides）—— */
+  {k:'addMakeup', n:'补课：把某天的课整体搬到指定日期（自动复制单双周匹配的课）', a:'date=2026-10-17 from=0 w=even|odd|all name=可选筛选'},
+  {k:'addCourseOnce', n:'指定日期单独加一节课（一次性）', a:'date=2026-10-17 name=高数 t=08:00-09:40 loc=教三305'},
+  {k:'cancelCourseOnce', n:'取消指定日期的课（name/t 省略=当天全部停课）', a:'date=2026-10-17 name=高数 t=可选'},
+  {k:'listOverride', n:'查看已安排的补课/停课', a:'（无参数）'},
+  {k:'delOverride', n:'撤销一条补课/停课安排', a:'id=xxx（先 listOverride 查）'},
   /* —— 待办 —— */
   {k:'addTodo', n:'添加待办', a:'title=交作业 body=… pri=urgent|normal|memo due=2026-09-20T18:00'},
   {k:'editTodo', n:'修改待办', a:'id=xxx 或 title=关键词 title=新标题 due=… pri=… body=…'},
@@ -7605,6 +8117,69 @@ function runOneTool(name, args){
       if(pd>=0 && pd<=6) pickDay(pd);
       return '已切换到周' + DAYN[pd];
     }
+    /* —— 补课 / 停课（overrides，日期维度）—— */
+    if(name === 'addMakeup'){
+      var mkDate = String(args.date||'').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(mkDate)) return '需要 date=YYYY-MM-DD（先换算出具体日期，别用「周六」这种相对说法）';
+      var mkFrom = parseInt(args.from, 10);
+      if(isNaN(mkFrom) || mkFrom<0 || mkFrom>6) return '需要 from=0..6（要补的是周几的课，0=周一）';
+      var mkW = args.w==='even' ? 'even' : args.w==='odd' ? 'odd' : 'all';
+      var mkName = String(args.name||'').trim();
+      /* 用对应奇偶的周次去筛源课：双周 → 拿「双周上」的课（含每周课） */
+      var mkWno = mkW === 'even' ? 2 : mkW === 'odd' ? 1 : weekNo(new Date());
+      var srcs = courses(mkFrom).filter(function(c){
+        return courseShouldShow(c, mkWno) && (!mkName || String(c.n).indexOf(mkName) >= 0);
+      });
+      if(!srcs.length) return '周' + DAYN[mkFrom] + '没有匹配' + (mkName ? '「' + mkName + '」' : '') + (mkW==='even'?'双周':mkW==='odd'?'单周':'') + '的课，没安排补课';
+      var mkAdded = [];
+      srcs.forEach(function(c){
+        addOverrideRaw({ date:mkDate, op:'add', n:c.n, t:c.t, loc:c.loc, c:c.c });
+        mkAdded.push(c.t + ' ' + c.n);
+      });
+      save(); pushScheduleToNative();
+      renderSchedule(); renderWeek(); renderCourses(); renderPlan();
+      var mkDn = DAYN[dayIdxOfDate(mkDate)];
+      return '已安排补课：' + mkDate + '（周' + mkDn + '）补周' + DAYN[mkFrom] + (mkW==='even'?'双周':mkW==='odd'?'单周':'')
+        + '的课，共 ' + mkAdded.length + ' 节：' + mkAdded.join('；')
+        + '。提醒已同步，当天课表会带「补」标记';
+    }
+    if(name === 'addCourseOnce'){
+      var aoDate = String(args.date||'').trim();
+      var aoName = String(args.name||'').trim();
+      var aoT = String(args.t||'').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(aoDate)) return '需要 date=YYYY-MM-DD';
+      if(!aoName || !aoT) return '需要 name 和 t=08:00-09:40';
+      addOverrideRaw({ date:aoDate, op:'add', n:aoName, t:aoT, loc:args.loc||'', c:nextPaint() });
+      save(); pushScheduleToNative();
+      renderSchedule(); renderWeek(); renderCourses(); renderPlan();
+      return '已在 ' + aoDate + '（周' + DAYN[dayIdxOfDate(aoDate)] + '）单独加课：' + aoT + ' ' + aoName + '（仅这一天）';
+    }
+    if(name === 'cancelCourseOnce'){
+      var ccDate = String(args.date||'').trim();
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(ccDate)) return '需要 date=YYYY-MM-DD';
+      var ccN = String(args.name||'').trim(), ccT = String(args.t||'').trim();
+      addOverrideRaw({ date:ccDate, op:'cancel', n:ccN, t:ccT });
+      save(); pushScheduleToNative();
+      renderSchedule(); renderWeek(); renderCourses(); renderPlan();
+      var ccWhat = (!ccN && !ccT) ? '全天停课' : ('停掉 ' + (ccT ? ccT + ' ' : '') + (ccN ? '「' + ccN + '」' : ''));
+      return '已安排：' + ccDate + '（周' + DAYN[dayIdxOfDate(ccDate)] + '）' + ccWhat + '，当天提醒不再响';
+    }
+    if(name === 'listOverride'){
+      if(!(S.overrides||[]).length) return '当前没有补课/停课安排';
+      return '补课/停课安排：' + S.overrides.map(function(o){
+        return '[' + o.id + '] ' + o.date + '(周' + (DAYN[o.day==null?dayIdxOfDate(o.date):o.day]||'?') + ') '
+          + (o.op === 'cancel' ? '停课' : '补课') + ' ' + (o.op === 'cancel' ? (o.n ? o.n + ' ' + (o.t||'') : '全天') : (o.t + ' ' + o.n));
+      }).join('；');
+    }
+    if(name === 'delOverride'){
+      var dOv = String(args.id||'').trim();
+      if(!dOv) return '需要 id=xxx（先 listOverride 查）';
+      var okDel = overrideDelete(dOv);
+      if(!okDel) return '没有找到 id=' + dOv + ' 的安排';
+      save(); pushScheduleToNative();
+      renderSchedule(); renderWeek(); renderCourses(); renderPlan();
+      return '已撤销安排 ' + dOv + '，课表恢复原样';
+    }
     if(name === 'editNote' || name === 'delNote' || name === 'listNote'){
       var keyN = String(args.id||args.title||'').trim().toLowerCase();
       var nHit = notesAll().filter(function(n){
@@ -7902,6 +8477,19 @@ function profileBlock(){
   p += '【用户的昵称】' + (S.nick || '未设置') + '\n';
   p += '【你对用户的称呼】' + callName() + '\n';
   p += '【当前时间】' + new Date().toLocaleString('zh-CN') + '（第 ' + weekNo(new Date()) + ' 教学周）\n';
+  /* 日期对照：AI 自己算不准「周六是几号」，必须喂给它 —— 补课/停课工具全靠这行 */
+  var dcParts = [];
+  for(var dci = 0; dci < 7; dci++){
+    var dcD = new Date(); dcD.setDate(dcD.getDate() + dci);
+    var dcKey = dcD.getFullYear() + '-' + String(dcD.getMonth()+1).padStart(2,'0') + '-' + String(dcD.getDate()).padStart(2,'0');
+    dcParts.push(dcKey + '=周' + DAYN[(dcD.getDay()+6)%7]);
+  }
+  p += '【日期对照】' + dcParts.join('，') + '\n';
+  if((S.overrides||[]).length){
+    p += '【补课/停课安排】' + S.overrides.map(function(o){
+      return o.date + ' ' + (o.op === 'cancel' ? '停课' : '补课') + ' ' + (o.op === 'cancel' ? (o.n || '全天') : (o.t + ' ' + o.n));
+    }).join('；') + '\n';
+  }
   if(!hasCourseData()){
     p += '【课表】用户尚未导入课表\n';
   } else {
@@ -9662,8 +10250,9 @@ function refreshMinute(){
 function minuteCommit(){
   var k = _minuteKey, c = NUM_OPTS[k], v = _minuteDraft;
   S.prefs[k] = v; save(); renderProfile();
-  /* 正在计时时改时长：把 lastTick 归零，免得下一帧用旧的差值跳一大格 */
-  lastTick = Date.now();
+  /* 改了时长要重新钉一次时间戳：倒计时现在按 endsAt 推算，
+     不重钉的话下一帧还会按旧的结束时刻算，显示会跳一大格 */
+  focusAnchor();
   nat('setPrefs', JSON.stringify(S.prefs));
   closeSheet();
   toast(c.l + '已设为 ' + v + ' ' + c.u);
@@ -11037,14 +11626,15 @@ function doClearAll(){
    ============================================================ */
 var BACKUP_KEYS = {
   /* termStart / memory / summaries / notes / todos / skills 都是换机要带走的学习状态 */
-  study: ['nick','avatar','aiName','aiCall','callLocked','courses','days','tasks','classes','goal','prefs','theme','accent','termStart','memory','summaries','notes','todos','skills','chatHistory','feedback','deepThink'],
+  study: ['nick','avatar','aiName','aiCall','callLocked','courses','overrides','days','tasks','classes','goal','prefs','theme','accent','termStart','memory','summaries','notes','noteFolders','noteCols','todos','skills','chatHistory','feedback','deepThink'],
   ai:    ['provider','baseUrl','apiKey','keyMemo','stream','maxTokens','models','modelList','modelListAt','ctx','systemPrompt','urlMemo','modelMemo']
 };
 var BACKUP_LABELS = {
   nick:'昵称', avatar:'头像', aiName:'AI 的名字', aiCall:'AI 对我的称呼', callLocked:'称呼是否锁定',
-  courses:'课表', days:'专注记录', tasks:'AI 行程', classes:'上课记录', goal:'每日番茄目标',
+  courses:'课表', overrides:'补课/停课安排', days:'专注记录', tasks:'AI 行程', classes:'上课记录', goal:'每日番茄目标',
+  notes:'笔记', noteFolders:'笔记文件夹',
   prefs:'提醒与计时偏好', theme:'深浅色', accent:'主题色', termStart:'学期起始日',
-  memory:'AI 长期记忆', summaries:'AI 周总结缓存', notes:'笔记', todos:'待办', skills:'AI 技能',
+  memory:'AI 长期记忆', summaries:'AI 周总结缓存', todos:'待办', skills:'AI 技能',
   chatHistory:'聊天记录', feedback:'回复反馈',
   provider:'AI 服务商', baseUrl:'接口地址', apiKey:'API Key', models:'各功能模型选择',
   modelList:'拉取到的模型列表', modelListAt:'模型拉取时间', ctx:'上下文开关',
@@ -13038,10 +13628,12 @@ function renderSchedule(){
     var list = coursesAt(d, wno);
     total += list.length;
     var all = courses(d);
-    var holName = holidayModeOn() ? holidayOn(dateKeyForDayIdx(d, wno)) : '';
+    var dKey = dateKeyForDayIdx(d, wno);
+    var holName = holidayModeOn() ? holidayOn(dKey) : '';
+    var ovStop = overridesOn(dKey).some(function(o){ return o.op === 'cancel'; });
     html += '<div class="sched-day' + (d===todayI?' today':'') + (holName?' holiday':'') + '">'
       + '<div class="dh"><b>周' + DAYN[d] + (d===todayI?'（今天）':'') + (holName?' · 放假':'') + '</b>'
-      + '<small>' + (holName ? esc(holName) : (list.length ? list.length + ' 节' : (all.length ? '本周没轮到' : '无课'))) + '</small></div>';
+      + '<small>' + (holName ? esc(holName) : (list.length ? list.length + ' 节' + (ovStop ? ' · 有停课' : '') : (all.length ? '本周没轮到' : '无课'))) + '</small></div>';
     if(!list.length){
       html += '<div class="muted" style="font-size:11.5px;padding:4px 0">—</div>';
     } else {
@@ -13057,7 +13649,7 @@ function renderSchedule(){
           + ' data-day="' + d + '" data-key="' + esc(courseKeyOf(c)) + '" onclick="schedEditEl(this)">'
           + '<div class="sk" style="background:' + paintOf(c.c) + '"></div>'
           + '<div class="st">' + esc(c.t) + (wTag && !grid ? ' ['+wTag+']' : '') + '</div>'
-          + '<div style="flex:1;min-width:0"><b>' + esc(c.n) + coursePriBadge(c) + '</b>'
+          + '<div style="flex:1;min-width:0"><b>' + esc(c.n) + (c.__ov ? ' <span class="badge plain" style="font-size:9px;padding:0 4px">补</span>' : '') + coursePriBadge(c) + '</b>'
           + (grid && wShort ? ' <span class="badge plain" style="font-size:9px;padding:0 4px">' + wShort + '</span>' : '')
           + (grid ? '' : '<div class="muted" style="font-size:10.5px">' + esc(c.loc||'') + '</div>')
           + '</div>'
@@ -13233,11 +13825,168 @@ function openNotes(){
   noteMode = 'list'; noteCurId = null;
   openView('notes'); renderNotes();
 }
-function noteNew(){
-  var n = {id: noteId(), title:'未命名笔记', body:'', ink:'', at: Date.now(), tag:''};
+/* ---------- 文件夹 ----------
+   S.noteFolders = ['课堂笔记', '错题', …]（字符串数组，就存名字）。
+   笔记上的 folder 字段存文件夹名；删文件夹时里面的笔记落回「未分类」。 */
+var noteQ = '';            /* 搜索词 */
+var noteFolder = '';       /* '' = 全部；'__none__' = 未分类；否则为文件夹名 */
+var noteNewFolder = '';    /* 新建笔记时选的目标文件夹 */
+var noteFolderRenaming = '';  /* 正在改名的文件夹（旧名） */
+
+function noteFoldersAll(){ return Array.isArray(S.noteFolders) ? S.noteFolders : (S.noteFolders = []); }
+function noteFolderCount(name){
+  var c = 0, a = notesAll();
+  for(var i=0;i<a.length;i++){
+    if(name === '__none__'){ if(!a[i].folder) c++; }
+    else if((a[i].folder||'') === name) c++;
+  }
+  return c;
+}
+function noteFiltered(){
+  var q = noteQ.trim().toLowerCase();
+  return notesAll().filter(function(n){
+    if(noteFolder === '__none__'){ if(n.folder) return false; }
+    else if(noteFolder && (n.folder||'') !== noteFolder) return false;
+    if(q){
+      var hay = String((n.title||'') + ' ' + (n.body||'')).toLowerCase();
+      if(hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+}
+/* 新建入口：先选「文字 / 手写」（有文件夹时顺带选目标文件夹） */
+function noteNew(kind){
+  var n = { id:noteId(), title:'未命名笔记', body:'', ink:'', at:Date.now(), tag:'',
+            folder:noteNewFolder || '', mode:(kind === 'ink' ? 'ink' : 'text') };
   notesAll().unshift(n); save();
+  closeSheet();
   noteCurId = n.id; noteMode = 'edit';
   renderNotes();
+  /* 新建即进入对应编辑器，跟小米笔记一致 */
+  if(kind === 'ink'){ inkEnterFull(); } else { noteFullEnter(); }
+}
+function noteMoveTo(folder){
+  var n = noteById(noteCurId); if(!n) return;
+  n.folder = folder || '';
+  n.at = Date.now(); save();
+  closeSheet();
+  toast(folder ? ('已移入「' + folder + '」') : '已移出文件夹');
+  renderNotes();
+}
+function noteFolderAdd(){
+  var inp = document.getElementById('nfName');
+  if(!inp) return;
+  var name = String(inp.value || '').trim().slice(0, 12);
+  if(!name){ toast('先起个文件夹名'); return; }
+  if(noteFoldersAll().indexOf(name) >= 0){ toast('已经有这个文件夹了'); return; }
+  noteFoldersAll().push(name); save();
+  inp.value = '';
+  noteFolderSheet();     /* 重渲染当前弹层 */
+}
+function noteFolderRename(oldName){
+  noteFolderRenaming = oldName;
+  noteFolderSheet();
+}
+function noteFolderRenameCancel(){
+  noteFolderRenaming = '';
+  noteFolderSheet();
+}
+function noteFolderRenameTake(){
+  var inp = document.getElementById('nfRename');
+  if(!inp) return;
+  var name = String(inp.value || '').trim().slice(0, 12);
+  var oldName = noteFolderRenaming;
+  noteFolderRenaming = '';
+  if(!name || !oldName){ noteFolderSheet(); return; }
+  if(name !== oldName && noteFoldersAll().indexOf(name) >= 0){ toast('已经有这个文件夹了'); noteFolderSheet(); return; }
+  var fs = noteFoldersAll(), i = fs.indexOf(oldName);
+  if(i >= 0) fs[i] = name;
+  notesAll().forEach(function(n){ if(n.folder === oldName) n.folder = name; });
+  if(noteFolder === oldName) noteFolder = name;
+  save(); noteFolderSheet();
+}
+function noteFolderDel(name){
+  S.noteFolders = noteFoldersAll().filter(function(f){ return f !== name; });
+  notesAll().forEach(function(n){ if(n.folder === name) n.folder = ''; });
+  if(noteFolder === name) noteFolder = '';
+  save(); noteFolderSheet(); renderNotes();
+}
+function notePickFolder(f){
+  noteFolder = f;
+  noteRenderGrid();   /* 只重渲染 chips + 卡片区，搜索框不打断焦点 */
+}
+function noteSearchRun(v){
+  noteQ = v || '';
+  noteRenderGrid();
+}
+function noteFolderSheet(){
+  noteFolderRenaming = '';
+  openSheet('notefolders');
+}
+/* ---------- AI 润色 / 扩写 / 总结 ----------
+   走 'summarize' 角色（文本加工类），整段返回。
+   结果先进弹层，用户选「替换正文 / 追加 / 复制」—— 不直接覆盖，
+   误生成也不至于把原文冲掉。 */
+var noteAiResult = '';
+function noteBodyText(){
+  var bd = document.getElementById('noteBody');
+  return bd ? String(bd.innerText || '').replace(/\s+/g, ' ').trim() : '';
+}
+function noteAiRun(kind){
+  var txt = noteBodyText();
+  if(!txt){ toast('先写点内容再让 AI 加工'); return; }
+  if(!aiReady()){ toast('先去「我的 → AI 配置」填好服务商和密钥'); return; }
+  closeSheet();
+  var conf = {
+    polish:  { sys:'你是文字润色助手。直接输出润色后的全文，不要任何解释或前后缀。',
+               u:'请润色下面这篇笔记：保持原意、结构与口语化的笔记风格，改掉错别字和不通顺的句子：\n\n' + txt },
+    expand:  { sys:'你是写作助手。直接输出扩写后的全文，不要任何解释或前后缀。',
+               u:'请扩写下面这篇笔记：补充细节、解释与例子，篇幅约为原来的两倍，保持笔记风格：\n\n' + txt },
+    summary: { sys:'你是总结助手。直接输出总结，不要任何解释或前后缀。',
+               u:'请把下面这篇笔记总结成要点，用「· 」开头的分点，每点一句话：\n\n' + txt }
+  }[kind] || null;
+  if(!conf) return;
+  toast('AI 正在' + (kind === 'polish' ? '润色' : kind === 'expand' ? '扩写' : '总结') + '…');
+  aiText('summarize', [{role:'user', content:conf.u}], function(ok, out){
+    if(!ok){ toast('生成失败：' + out); return; }
+    noteAiResult = String(out || '').trim();
+    if(!noteAiResult){ toast('模型没给出可用结果'); return; }
+    openSheet('noteairesult');
+  }, { temperature: 0.7, system: conf.sys });
+}
+function noteAiEscapedHtml(){
+  /* 结果是纯文本：按换行拆段包 <div>，粘进 contenteditable 不糊成一行 */
+  return noteAiResult.split(/\n+/).filter(function(s){ return s.trim(); })
+    .map(function(s){ return '<div>' + esc(s.trim()) + '</div>'; }).join('');
+}
+function noteAiReplace(){
+  var bd = document.getElementById('noteBody');
+  if(!bd || !noteAiResult) return;
+  bd.innerHTML = noteAiEscapedHtml();
+  var n = noteById(noteCurId); if(n) n.body = bd.innerHTML;
+  closeSheet(); noteMetaUpd(); toast('已替换，点「完成」保存');
+}
+function noteAiAppend(){
+  var bd = document.getElementById('noteBody');
+  if(!bd || !noteAiResult) return;
+  bd.insertAdjacentHTML('beforeend', '<div><br/></div>' + noteAiEscapedHtml());
+  var n = noteById(noteCurId); if(n) n.body = bd.innerHTML;
+  closeSheet(); noteMetaUpd(); toast('已追加，点「完成」保存');
+}
+function noteAiCopy(){
+  if(!noteAiResult) return;
+  try{ navigator.clipboard.writeText(noteAiResult); toast('已复制'); }
+  catch(e){ toast('复制失败，长按结果手动选择'); }
+}
+/* 标题下的「日期 · 字数」行 */
+function noteMetaUpd(){
+  var el = document.getElementById('noteMeta');
+  if(!el) return;
+  var n = noteById(noteCurId);
+  var d = new Date((n && n.at) || Date.now());
+  var txt = noteBodyText();
+  el.textContent = d.getFullYear() + '年' + (d.getMonth()+1) + '月' + d.getDate() + '日 '
+    + pad(d.getHours()) + ':' + pad(d.getMinutes()) + '｜' + txt.length + ' 字';
 }
 function noteOpen(id){
   noteCurId = id; noteMode = 'edit'; renderNotes();
@@ -13268,23 +14017,24 @@ function renderNotes(){
   if(noteMode === 'list'){
     if(title) title.textContent = '笔记';
     var arr = notesAll();
+    noteColsSync();
     renderHomeTiles();
     if(!arr.length){
       host.innerHTML = '<div class="empty"><div class="ei">记</div><div class="et">还没有笔记</div>'
-        + '<div class="ed">支持富文本与手写笔涂抹，课堂速记、作业草稿都可以放这里。</div>'
-        + '<div class="act"><div class="btn primary" onclick="noteNew()">新建笔记</div></div></div>';
+        + '<div class="ed">支持文字与手写，课堂速记、作业草稿都可以放这里。</div>'
+        + '<div class="act"><div class="btn primary" onclick="openSheet(\'notenew\')">新建笔记</div></div></div>';
       return;
     }
-    host.innerHTML = '<div class="list note-list">' + arr.map(function(n){
-      /* 图片在预览里要留个痕，否则一篇「只有图」的笔记看着像空的 */
-      var prev = (n.body||'').replace(/<img\b[^>]*>/gi,' [图片] ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,40);
-      if(n.ink && !prev) prev = '[手写]';
-      return '<div class="li tap" onclick="noteOpen(\'' + n.id + '\')">'
-        + '<div class="ic">' + icSvg('book',16) + '</div>'
-        + '<div class="tx"><b>' + esc(n.title || '未命名') + '</b><small>' + esc(prev||'空笔记') + ' · ' + fmtNoteTime(n.at) + '</small></div>'
-        + '<span class="arrow">›</span></div>';
-    }).join('') + '</div>'
-    + '<div class="btn primary" style="margin-top:14px" onclick="noteNew()">新建笔记</div>';
+    /* 双列卡片流：搜索框（静态，保焦点）+ chips + 卡片网格（随筛选重渲染） */
+    host.innerHTML = ''
+      + '<div class="nb-search">'
+      + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>'
+      + '<input id="noteSearchIn" value="' + esc(noteQ) + '" placeholder="搜索笔记" '
+      + 'oninput="noteSearchRun(this.value)" /></div>'
+      + '<div id="noteChips"></div>'
+      + '<div id="noteGrid"></div>';
+    noteColsSync();
+    noteRenderGrid();
     return;
   }
   /* 编辑态 */
@@ -13314,6 +14064,7 @@ function renderNotes(){
     + '</div>'
     + '<div class="row g6" style="margin-top:14px">'
     + '<div class="btn ghost" onclick="noteBack()">返回</div>'
+    + '<div class="btn ghost" onclick="openSheet(\'notefolderpick\')">移动</div>'
     + '<div class="btn ghost" onclick="noteOpenShare()">分享</div>'
     + '<div class="btn primary" onclick="noteSave()">保存</div>'
     + '<div class="btn danger" onclick="noteDel(\'' + n.id + '\')" style="flex:none">删除</div>'
@@ -13325,9 +14076,66 @@ function renderNotes(){
   renderNoteToolbar(n); renderNoteTextBar(n);
   inkUpdatePreview();
 }
-function noteFsIndex(fs){
-  var i = NOTE_SIZES.indexOf(fs || 14);
-  return i < 0 ? 1 : i;
+/* chips 行 + 卡片网格：搜索/切文件夹时只重画这两块，搜索词不丢 */
+function noteCols(){ return S.noteCols === 1 ? 1 : 2; }
+/* 右上角那个按钮显示的是**当前**布局（双列显示两栏、单列显示两横条） */
+function noteColsSync(){
+  var b = document.getElementById('noteColsBtn');
+  if(!b) return;
+  var two = noteCols() === 2;
+  b.innerHTML = icSvg(two ? 'cols2' : 'cols1', 17);
+  b.title = two ? '当前双列，点击切为单列' : '当前单列，点击切为双列';
+}
+function noteToggleCols(){
+  S.noteCols = noteCols() === 2 ? 1 : 2;
+  save();
+  noteColsSync();
+  noteRenderGrid();
+  toast(S.noteCols === 2 ? '已切为双列' : '已切为单列');
+}
+function noteRenderGrid(){
+  var chips = document.getElementById('noteChips');
+  var grid = document.getElementById('noteGrid');
+  if(!grid) return;
+  if(chips){
+    var fs0 = noteFoldersAll();
+    chips.innerHTML = '<div class="nb-chips">'
+      + '<div class="nb-chip' + (noteFolder ? '' : ' on') + '" data-f="">全部'
+      + '<span class="cnt">' + notesAll().length + '</span></div>'
+      + fs0.map(function(f){
+          return '<div class="nb-chip' + (noteFolder === f ? ' on' : '') + '" data-f="' + esc(f) + '">'
+            + esc(f) + '<span class="cnt">' + noteFolderCount(f) + '</span></div>';
+        }).join('')
+      + (fs0.length ? '<div class="nb-chip' + (noteFolder === '__none__' ? ' on' : '') + '" data-f="__none__">未分类'
+          + '<span class="cnt">' + noteFolderCount('__none__') + '</span></div>' : '')
+      + '</div>';
+    /* 事件委托：文件夹名是用户输入，内联 onclick 拼 JS 字符串会被引号打穿 */
+    chips.onclick = function(e){
+      var el = e.target.closest ? e.target.closest('.nb-chip') : null;
+      if(el) notePickFolder(el.dataset.f || '');
+    };
+  }
+  var list = noteFiltered();
+  if(!list.length){
+    grid.innerHTML = '<div class="empty"><div class="et" style="margin-bottom:2px">'
+      + (noteQ ? '没有匹配「' + esc(noteQ) + '」的笔记' : '这个文件夹还没有笔记')
+      + '</div></div>';
+    return;
+  }
+  grid.innerHTML = '<div class="note-grid" data-cols="' + noteCols() + '">' + list.map(function(n){
+    /* 图片在预览里要留个痕，否则一篇「只有图」的笔记看着像空的 */
+    var prev = (n.body||'').replace(/<img\b[^>]*>/gi,' [图片] ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,64);
+    var img = (n.mode === 'ink' && n.inkPng)
+      ? '<img class="nimg" src="' + n.inkPng + '" alt="" loading="lazy"/>' : '';
+    if(!img && n.mode === 'ink' && !prev) prev = '[手写]';
+    return '<div class="n-card" onclick="noteOpen(\'' + n.id + '\')">'
+      + img
+      + '<div class="nh">' + esc(n.title || '未命名') + '</div>'
+      + (prev ? '<div class="np">' + esc(prev) + '</div>' : '')
+      + '<div class="nf">' + (n.folder ? '<span class="fold">' + esc(n.folder) + '</span>' : '')
+      + '<span>' + fmtNoteTime(n.at) + '</span></div>'
+      + '</div>';
+  }).join('') + '</div>';
 }
 /* 编辑页顶部：只放「文字 / 手写」开关与一句说明。
    具体的排版工具在全屏编辑区底部（原来挂在这里，编辑区只有 220px 高，写不下东西）。 */
@@ -13341,23 +14149,27 @@ function renderNoteToolbar(n){
     + '<span class="muted" style="font-size:10.5px;align-self:center;margin-left:2px">'
     + (mode==='text' ? '全屏编辑，工具栏在底部' : '全屏手写，画完点「完成」回来') + '</span>';
 }
-/* 全屏文字编辑的底部工具栏 */
+/* 全屏文字编辑的底部工具栏：AI 打头（对齐各家笔记的 AI 入口），后接排版工具。
+   ⚠️ 排版那一排（B / I / 分点 / A−A+ / 颜色）**全都是选区级**：
+   长按选中哪段就只改哪段，没选中会提示而不是默默改全文。 */
 function renderNoteTextBar(n){
   var bar = document.getElementById('noteBarFull');
   if(!bar) return;
-  var fi = noteFsIndex(n.fs);
   bar.innerHTML = ''
-    + '<div class="ntb mini" id="ntbBold" onclick="noteToggleWrap(\'b\')" title="加粗"><b>B</b></div>'
-    + '<div class="ntb mini" id="ntbItal" onclick="noteToggleWrap(\'i\')" title="斜体"><i>I</i></div>'
+    + '<div class="ntb ai" onclick="openSheet(\'noteai\')" title="AI 加工">'
+    + icSvg('sparkle', 14) + '<b style="margin-left:2px">AI</b></div>'
+    + '<div class="ntb mini" id="ntbBold" onclick="noteToggleWrap(\'b\')" title="加粗（选中的文字）"><b>B</b></div>'
+    + '<div class="ntb mini" id="ntbItal" onclick="noteToggleWrap(\'i\')" title="斜体（选中的文字）"><i>I</i></div>'
     + '<div class="ntb mini" onclick="noteFmt(\'insertUnorderedList\')" title="分点">•</div>'
     + '<div class="ntb mini" onclick="notePickImg()" title="插入图片">图</div>'
     + '<div class="ntb mini" onclick="openSheet(\'tableform\')" title="表格">表</div>'
-    + '<div class="ntb mini" onclick="noteStepFs(-1)" title="缩小">A−</div>'
-    + '<div class="ntb mini on" title="字号档" style="min-width:36px">A' + (fi+1) + '</div>'
-    + '<div class="ntb mini" onclick="noteStepFs(1)" title="放大">A+</div>'
+    + '<div class="ntb mini" onclick="noteStepFs(-1)" title="缩小选中文字">A−</div>'
+    + '<div class="ntb mini" id="ntbSize" title="选中文字的字号" style="min-width:34px;color:var(--sub)">—</div>'
+    + '<div class="ntb mini" onclick="noteStepFs(1)" title="放大选中文字">A+</div>'
     + NOTE_COLORS.slice(0,5).map(function(c){
-        return '<div class="ntb mini" title="颜色" onclick="noteColor(\'' + c + '\')" style="background:' + c + ';color:#fff;min-width:22px;padding:0;height:22px;border-radius:7px"></div>';
+        return '<div class="ntb mini" title="给选中的文字上色" onclick="noteColor(\'' + c + '\')" style="background:' + c + ';color:#fff;min-width:22px;padding:0;height:22px;border-radius:7px"></div>';
       }).join('');
+  noteSyncSel();   /* 立刻按当前选区点亮 B/I 与字号档 */
 }
 /* 把笔记内容灌进全屏层的标题与正文 */
 function syncNoteFull(n){
@@ -13366,8 +14178,11 @@ function syncNoteFull(n){
   if(ti) ti.value = (n && n.title) || '';
   if(bd){
     bd.innerHTML = (n && n.body) || '';
-    bd.style.fontSize = ((n && n.fs) || 14) + 'px';
+    /* 基准字号：老笔记记着自己的 fs 就沿用，没记就用 CSS 的基准（跟着外观页的全局字号走）。
+       工具栏的 A−/A+ 改的是**选区**，不再动整篇，所以这里只在切笔记时灌基准。 */
+    bd.style.fontSize = (n && n.fs) ? (n.fs + 'px') : '';
   }
+  noteMetaUpd();
 }
 /* 把全屏层里改过的内容收回笔记对象 */
 function noteGrabFull(n){
@@ -13402,10 +14217,90 @@ function noteFullExit(){
   noteFullClose();
   renderNotes();
 }
+/* ---------- 选区样式（v0.2.6） ----------
+   工具栏那一排（字号 / 颜色 / 加粗 / 斜体）**只作用在长按选中的那段文字上**。
+   之前 A−/A+ 改的是整篇的字号，用户要的是「选中哪几句就只改哪几句」，所以：
+   - 没选中 → 明确提示「先长按选中」，不做任何改动（默默改全文才是最坏的行为）；
+   - 选中了 → 套一层带 font-size 的 span（execCommand('fontSize') 只有 1~7 档，
+     粒度太粗且会生成 <font> 老标签，所以自己包 span）。
+*/
+function noteSelection(){
+  var bd = document.getElementById('noteBody');
+  if(!bd) return null;
+  var sel = window.getSelection();
+  if(!sel || !sel.rangeCount) return null;
+  var range = sel.getRangeAt(0);
+  if(range.collapsed) return null;
+  if(!bd.contains(range.commonAncestorContainer)) return null;
+  return range;
+}
+/* 基准字号取**算出来的**值：基准可能来自 CSS 令牌（外观页的全局字号），
+   不能假定是某个写死的 px，否则「选中 15px 的字再点 A+」会跳错档 */
+function noteBaseFs(){
+  var bd = document.getElementById('noteBody');
+  if(!bd) return 14;
+  return Math.round(parseFloat(getComputedStyle(bd).fontSize) || 14);
+}
+function noteSelFontSize(){
+  var bd = document.getElementById('noteBody');
+  var base = noteBaseFs();
+  var range = noteSelection();
+  if(!range) return base;
+  var el = range.commonAncestorContainer;
+  if(el.nodeType === 3) el = el.parentNode;
+  while(el && el !== bd){
+    if(el.style && el.style.fontSize) return Math.round(parseFloat(el.style.fontSize) || base);
+    el = el.parentNode;
+  }
+  return base;
+}
+/* 字号档位：**按方向找最近的档**，而不是「先算出当前在第几档再 ±1」。
+   后者在基准字号不落在档位上时会翻车 —— 基准 15px 用 indexOf 找不到，
+   退回第 1 档的话，A− 会从 15 直接掉到 12（掉 3px），A+ 却只到 16（升 1px）。 */
 function noteStepFs(dir){
-  var n = noteById(noteCurId); if(!n) return;
-  var i = Math.max(0, Math.min(NOTE_SIZES.length-1, noteFsIndex(n.fs) + dir));
-  noteSetSize(NOTE_SIZES[i]);
+  var range = noteSelection();
+  if(!range){ toast('先长按选中要调整的文字'); return; }
+  var cur = noteSelFontSize(), next = cur, i;
+  if(dir > 0){
+    for(i = 0; i < NOTE_SIZES.length; i++) if(NOTE_SIZES[i] > cur){ next = NOTE_SIZES[i]; break; }
+  } else {
+    for(i = NOTE_SIZES.length - 1; i >= 0; i--) if(NOTE_SIZES[i] < cur){ next = NOTE_SIZES[i]; break; }
+  }
+  if(next === cur) return;                 /* 已经到顶/到底，不必写一遍 */
+  noteStyleSel('fontSize', next + 'px');
+}
+/* 把选区包进一个 span 并套上一条样式。字号和颜色都走这里，
+   免得两处各写一份「包 span / 复用已有容器」的逻辑（改一处漏一处）。
+   已经整段在一个同类容器里就改容器本身，不再套第二层。 */
+function noteStyleSel(key, value){
+  var bd = document.getElementById('noteBody');
+  if(!bd) return;
+  var range = noteSelection();
+  if(!range){ toast('先长按选中要设置的文字'); return; }
+  var node = range.commonAncestorContainer;
+  if(node.nodeType === 3) node = node.parentNode;
+  var host = null;
+  while(node && node !== bd){
+    if(node.style && node.style[key]){ host = node; break; }
+    node = node.parentNode;
+  }
+  if(host){
+    host.style[key] = value;
+  } else {
+    var span = document.createElement('span');
+    span.style[key] = value;
+    try{
+      span.appendChild(range.extractContents());
+      range.insertNode(span);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      var r2 = document.createRange();
+      r2.selectNodeContents(span);
+      sel.addRange(r2);
+    }catch(e){ toast('这段文字设不了样式，换块选区试试'); return; }
+  }
+  var n = noteById(noteCurId); if(n) n.body = bd.innerHTML;
+  save(); noteSyncSel();
 }
 function noteSyncSel(){
   var n = noteById(noteCurId); if(!n) return;
@@ -13415,6 +14310,13 @@ function noteSyncSel(){
     document.getElementById('ntbBold').classList.toggle('on', noteInTag('b'));
     document.getElementById('ntbItal').classList.toggle('on', noteInTag('i'));
   }catch(e){}
+  /* 字号档位跟着选区走：选中一段就显示那段的大小，没选显示「—」 */
+  var sz = document.getElementById('ntbSize');
+  if(sz){
+    var has = !!noteSelection();
+    sz.textContent = has ? noteSelFontSize() : '—';
+    sz.classList.toggle('on', has);
+  }
 }
 function noteInTag(tag){
   var sel = window.getSelection();
@@ -13437,12 +14339,15 @@ function noteSetMode(m){
   renderNoteToolbar(n);
   if(m==='ink'){ inkUpdatePreview(); }
 }
-function noteSetSize(s){
+/* 整篇的基准字号不再挂工具栏（v0.2.6 起 A−/A+ 只改选区）。
+   留这个函数是为了给「导入了带 fs 的老笔记」或将来做「整篇基准」入口兜底，
+   但**不要在工具栏上调它** —— 那会回到「一按就改全文」的老行为。 */
+function noteSetBaseSize(s){
   var n = noteById(noteCurId); if(!n) return;
   n.fs = s;
   var b = document.getElementById('noteBody');
   if(b) b.style.fontSize = s + 'px';
-  renderNoteToolbar(n); renderNoteTextBar(n);   /* 两个工具栏都要跟着刷新 */
+  save();
 }
 /* execCommand 在 WebView 里 bold/italic 经常静默失败，改成手动包/解标签 */
 function noteToggleWrap(tag){
@@ -13485,10 +14390,10 @@ function noteFmt(cmd){
   try{ document.execCommand(cmd, false, null); }catch(e){}
   noteSyncSel();
 }
+/* 文字颜色：同样只作用在选中的文字上（execCommand('foreColor') 在 WebView 里
+   经常静默失败，走统一的 span 方案） */
 function noteColor(c){
-  var bd = document.getElementById('noteBody');
-  if(bd) bd.focus();
-  try{ document.execCommand('foreColor', false, c); }catch(e){}
+  noteStyleSel('color', c);
 }
 function noteInsertTable(rows, cols){
   rows = Math.max(1, Math.min(12, rows|0 || 3));
@@ -13880,8 +14785,10 @@ var INK_PAPER_LIGHT = '#ffffff', INK_PAPER_DARK = '#1a1c24';
 
 /* 三支笔的性格全写在一张表里 —— 以后加笔刷只要加一行 */
 var INK_BRUSH = {
-  pencil: {n:'铅笔',  i:'pencil', size:5,  alpha:.85, pMin:.45, pMax:1,   taper:0, hint:'细而硬，压感影响小；反复描会自然加深，像铅笔。'},
-  marker: {n:'马克笔', i:'marker', size:16, alpha:.3,  pMin:1,   pMax:1,   taper:0, hint:'宽度固定、半透明；压感不改变宽度 —— 真马克笔也是压不细的。'},
+  /* hint 只写「这支笔的行为」，不写「它为什么叫这个名字」——
+     名字已经在标题上了，再解释一遍是废话 */
+  pencil: {n:'铅笔',  i:'pencil', size:5,  alpha:.85, pMin:.45, pMax:1,   taper:0, hint:'细而硬，压感影响小；反复描会自然加深。'},
+  marker: {n:'马克笔', i:'marker', size:16, alpha:.3,  pMin:1,   pMax:1,   taper:0, hint:'宽度固定、半透明；压感不改变宽度。'},
   brush:  {n:'毛笔',  i:'brush',  size:14, alpha:1,   pMin:.15, pMax:1.8, taper:1, hint:'压感影响最大，起笔收笔有收锋；写快提笔会自然变细。'}
 };
 var INK_TOOLS = ['pencil','marker','brush','eraser'];
@@ -13897,7 +14804,9 @@ var noteInk = {
 };
 (function initInkPrefs(){
   var def = {}, k;
-  for(k in INK_BRUSH) def[k] = {size:INK_BRUSH[k].size, alpha:INK_BRUSH[k].alpha};
+  /* 每支笔各自记：粗细 / 透明度 / 深浅两套纸各自的墨色（颜色也独立） */
+  for(k in INK_BRUSH) def[k] = {size:INK_BRUSH[k].size, alpha:INK_BRUSH[k].alpha,
+    colorLight:noteInk.colorLight, colorDark:noteInk.colorDark};
   noteInk.brush = def;
   /* 老版本只有单一 color：按明暗判断它属于哪套纸，另一套给个可见的默认色 */
   function adoptOldColor(c){
@@ -13931,7 +14840,14 @@ var noteInk = {
         if(!o.brush[k]) continue;
         if(o.brush[k].size) def[k].size = Math.max(2, Math.min(40, +o.brush[k].size));
         if(o.brush[k].alpha != null) def[k].alpha = Math.max(.05, Math.min(1, +o.brush[k].alpha));
+        if(o.brush[k].colorLight) def[k].colorLight = o.brush[k].colorLight;
+        if(o.brush[k].colorDark) def[k].colorDark = o.brush[k].colorDark;
       }
+    }
+    /* 老存档的笔刷没记颜色：统一落到现在这套全局墨色上，别出现 undefined 色 */
+    for(k in def){
+      if(!def[k].colorLight) def[k].colorLight = noteInk.colorLight;
+      if(!def[k].colorDark) def[k].colorDark = noteInk.colorDark;
     }
   }catch(e){}
 })();
@@ -13949,7 +14865,13 @@ function saveInkPrefs(){
 /* 当前这张纸是深是浅；纸色是**笔记自己的属性**，见 inkEnterFull 的注释 */
 var inkDark = false;
 function inkPalette(){ return inkDark ? INK_COLORS_DARK : INK_COLORS_LIGHT; }
-function inkColor(){ return inkDark ? noteInk.colorDark : noteInk.colorLight; }
+/* 当前墨色：**每支笔各自记一份**（粗细/透明度同理）。
+   没配色的笔（橡皮路径）退回全局那套。 */
+function inkColor(){
+  var b = noteInk.brush[noteInk.tool];
+  var v = b && (inkDark ? b.colorDark : b.colorLight);
+  return v || (inkDark ? noteInk.colorDark : noteInk.colorLight);
+}
 function inkPaperBg(){ return inkDark ? INK_PAPER_DARK : INK_PAPER_LIGHT; }
 function inkIsEraser(){ return noteInk.tool === 'eraser'; }
 function inkCfg(){ return noteInk.brush[noteInk.tool] || noteInk.brush.pencil; }
@@ -14630,6 +15552,7 @@ function inkPaintIcons(){
     var ic, lbl;
     if(t === 'eraser'){ ic = (noteInk.eraser.mode === 'area') ? 'eraserArea' : 'eraserStroke'; lbl = '橡皮'; }
     else if(t){ ic = INK_BRUSH[t].i; lbl = INK_BRUSH[t].n; }
+    else if(b.id === 'inkMoreBtn'){ ic = 'sliders'; lbl = '笔刷设置（粗细/颜色/透明度）'; }
     else if(b.id === 'inkFitBtn'){ ic = 'fit'; lbl = '适应纸张'; }
     else if(b.id === 'inkUndoBtn'){ ic = 'undo'; lbl = '撤销'; }
     else if(b.id === 'inkRedoBtn'){ ic = 'redo'; lbl = '重做'; }
@@ -14693,6 +15616,8 @@ function inkBindBar(){
       inkSyncBar();
     };
   });
+  var more = document.getElementById('inkMoreBtn');
+  if(more) more.onclick = inkSheetOpen;
   var colors = document.getElementById('inkColors');
   if(colors){
     colors.onclick = function(e){
@@ -14751,11 +15676,16 @@ function inkSheetHtml(){
   var b = INK_BRUSH[noteInk.tool] || INK_BRUSH.pencil;
   var cfg = inkCfg();
   var pal = inkPalette(), cur = String(inkColor()).toLowerCase();
+  /* 笔迹预览：一条带起伏的曲线，按当前粗细/颜色/透明度画 —— 调参先看样 */
+  var pvCol = esc(cur), pvW = Math.max(1.2, Math.min(24, cfg.size * .8)), pvO = cfg.alpha;
   h += '<h3>' + b.n + '</h3>'
-    + '<div style="font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.7">' + b.hint + '</div>'
+    + '<svg viewBox="0 0 320 56" style="width:100%;height:52px;display:block;margin:4px 0 2px">'
+    + '<path d="M8 40 C 70 6, 110 54, 160 30 S 270 10, 312 26" fill="none" stroke="'
+    + pvCol + '" stroke-width="' + pvW + '" stroke-linecap="round" opacity="' + pvO + '"/></svg>'
+    + '<div style="font-size:11.5px;color:var(--sub);margin-top:2px;line-height:1.7">' + b.hint + '</div>'
     + '<div class="list" style="margin-top:14px">'
-    + inkSetRow('粗细', 'inkSetSize', cfg.size, 2, 40, '')
-    + inkSetRow('透明度', 'inkSetAlpha', Math.round(cfg.alpha * 100), 5, 100, '%')
+    + inkSetRow('笔画粗细', 'inkSetSize', cfg.size, 2, 40, '')
+    + inkSetRow('不透明度', 'inkSetAlpha', Math.round(cfg.alpha * 100), 5, 100, '%')
     + '<div class="ikcolors">'
     + pal.map(function(c){
         return '<span class="iksw big' + (cur === c ? ' on' : '')
@@ -14835,9 +15765,11 @@ function inkSetErSize(v){
   if(o) o.textContent = noteInk.eraser.size + 'px';
   inkSyncBar();
 }
-/* 墨色按纸分两套：改的是当前这张纸那一套 */
+/* 墨色按纸分两套、且**记在当前笔刷名下**：换笔互不影响 */
 function inkSetColorSlot(c){
-  if(inkDark) noteInk.colorDark = c; else noteInk.colorLight = c;
+  var b = noteInk.brush[noteInk.tool];
+  if(!b){ if(inkDark) noteInk.colorDark = c; else noteInk.colorLight = c; return; }
+  if(inkDark) b.colorDark = c; else b.colorLight = c;
 }
 function inkSetColor(c){
   inkSetColorSlot(c);
@@ -15163,21 +16095,40 @@ try{
   setNavSide(_nav);
 }catch(e){}
 applyIslandPref();
+/*
+ * 启动时先把原生那边「跑完但还没记账」的专注补上。
+ * 这一步必须在 renderStats 之后、且要放在最后 —— 它会改 S.days / S.classes
+ * 并触发一次刷新，放太早会被后面的 render 覆盖成旧值。
+ *
+ * 这是「通知栏启动、App 被杀后台」那种场景唯一能把时间找回来的地方。
+ */
+try{ syncFocusFromNative(); }catch(e){ logIt('专注', '启动补记失败：' + e); }
+try{ renderFocus(); }catch(e){}
 try{ renderHomeTiles(); }catch(e){}
 try{ pushWidgetsToNative(); }catch(e){}
+/* 回到前台时也补一次：专注可能在后台已经跑完了 */
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState !== 'visible') return;
+  try{
+    if(syncFocusFromNative() > 0){ renderFocus(); renderCourses(); renderStats(); }
+  }catch(e){}
+});
 </script>
   <!-- 全屏文字笔记：结构对齐全屏手写，工具栏在底部 -->
   <div id="noteFull">
     <div class="viewhead">
       <div class="icon-btn" onclick="noteFullExit()">‹</div>
-      <input class="f" id="noteTitle" maxlength="40" placeholder="标题" />
+      <input class="f" id="noteTitle" maxlength="40" placeholder="未命名笔记" />
       <div class="ikgrp">
+        <button class="ibt" id="noteUndoBtn" type="button" title="撤销" onclick="noteFmt('undo')">↶</button>
+        <button class="ibt" id="noteRedoBtn" type="button" title="重做" onclick="noteFmt('redo')">↷</button>
         <button class="ibt on" id="noteDoneBtn" type="button">完成</button>
       </div>
     </div>
     <div id="noteFullBody">
-      <div class="note-body" id="noteBody" contenteditable="true" data-ph="写点什么…"
-        onmouseup="noteSyncSel()" ontouchend="noteSyncSel()"></div>
+      <div class="note-meta" id="noteMeta">—</div>
+      <div class="note-body" id="noteBody" contenteditable="true" data-ph="开始书写或"
+        onmouseup="noteSyncSel()" ontouchend="noteSyncSel()" oninput="noteMetaUpd()"></div>
     </div>
     <div id="noteBarFull"></div>
   </div>
@@ -15204,20 +16155,13 @@ try{ pushWidgetsToNative(); }catch(e){}
           <button class="ibt ikk" data-tool="marker" type="button"></button>
           <button class="ibt ikk" data-tool="brush" type="button"></button>
           <button class="ibt ikk" data-tool="eraser" type="button"></button>
+          <button class="ibt ikk" id="inkMoreBtn" type="button" title="更多设置"></button>
         </div>
         <div class="iksp"></div>
         <div class="ikgrp">
           <button class="ibt ikk" id="inkFitBtn" type="button"></button>
           <button class="ibt ikk" id="inkUndoBtn" type="button"></button>
           <button class="ibt ikk" id="inkRedoBtn" type="button"></button>
-        </div>
-      </div>
-      <div class="ikrow">
-        <div class="ikchip" id="inkChip" onclick="inkSheetOpen()"><span id="inkChipTx">铅笔</span><span class="caret">▾</span></div>
-        <div class="ikgrp" id="inkColors"></div>
-        <div class="iksize">
-          <span class="ikdot" id="inkDot" style="color:#1a1c24"><i style="width:5px;height:5px"></i></span>
-          <input type="range" id="inkSize" min="2" max="40" value="5" />
         </div>
       </div>
     </div>
