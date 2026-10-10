@@ -2973,6 +2973,61 @@ const ASSERTS = String.raw`
     };
   });
 
+  // 用户报的 bug：笔记编辑页里按返回（或侧滑）直接掉回主页，跳过了预览列表。
+  // 笔记是**三级**的：全屏编辑器 → 编辑页 → 列表 → 退出笔记。这里把三级都量一遍。
+  T('笔记返回是三级：编辑页返回回列表，不直接退出笔记', function(){
+    var snapN = JSON.stringify(S.notes), snapMode = noteMode, snapCur = noteCurId;
+    function viewShown(){ var v = document.getElementById('view-notes'); return !!(v && v.classList.contains('show')); }
+    function fullShown(id){ var e = document.getElementById(id); return !!(e && e.classList.contains('show')); }
+    try{
+      S.notes = [{ id:'bk1', title:'返回测试', body:'正文一段', at:Date.now(), folder:'' }];
+      save();
+      noteMode = 'list'; noteCurId = null; openNotes();
+      var opened = viewShown() && noteMode === 'list';
+
+      /* ① 编辑页按返回 → 回列表，笔记页**仍然开着**（这就是被跳过的那一层） */
+      noteOpen('bk1');
+      var inEdit = viewShown() && noteMode === 'edit';
+      var h1 = androidBack();
+      var backToList = h1 === true && viewShown() && noteMode === 'list';
+
+      /* ② 列表再返回 → 这一步才该关掉笔记页 */
+      var h2 = androidBack();
+      var closed = h2 === true && !viewShown();
+
+      /* ③ 全屏文字编辑器里返回 → 关编辑器，但留在编辑页（不是直接回主页） */
+      openNotes(); noteOpen('bk1'); noteFullEnter();
+      var editorOpen = fullShown('noteFull');
+      var h3 = androidBack();
+      var editorGone = !fullShown('noteFull');
+      var stillInEdit = viewShown() && noteMode === 'edit';
+
+      /* ④ 全屏手写里返回 → 关手写，仍在编辑页 */
+      noteSetMode('ink'); inkEnterFull();
+      var inkOpen = fullShown('inkFull');
+      var h4 = androidBack();
+      var inkGone = !fullShown('inkFull');
+      var stillInEdit2 = viewShown() && noteMode === 'edit';
+
+      return {
+        ok: opened && inEdit && backToList && closed
+          && editorOpen && editorGone && stillInEdit
+          && inkOpen && inkGone && stillInEdit2,
+        info: '① 打开=' + opened + ' 进编辑=' + inEdit + ' 返回回列表=' + backToList
+          + ' · ② 列表再返回关页=' + closed
+          + ' · ③ 全屏文字 开=' + editorOpen + ' 返回关掉=' + editorGone + ' 留在编辑页=' + stillInEdit
+          + ' · ④ 全屏手写 开=' + inkOpen + ' 返回关掉=' + inkGone + ' 留在编辑页=' + stillInEdit2
+      };
+    } finally {
+      S.notes = JSON.parse(snapN); save();
+      try{ noteMode = 'edit'; noteCurId = 'bk1'; }catch(e){}
+      try{ noteFullClose(); }catch(e){}
+      try{ closeView('notes'); }catch(e){}
+      noteMode = snapMode; noteCurId = snapCur;
+      try{ renderNotes(); }catch(e){}
+    }
+  });
+
   return JSON.stringify(R);
 })()
 `;
@@ -3355,6 +3410,25 @@ try {
     });
   } catch (e) {
     results.push({ name: '架构守卫：笔刷说明', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // L) 笔记的返回必须是三级（真机踩过：编辑页按返回直接掉回主页）。
+  //    两条一起盯：头部箭头不许直接 closeView，androidBack 必须把 notes 交给 noteBackAction。
+  try {
+    const rawHtml = fs.readFileSync(SRC, 'utf8');
+    const headBackOk = /onclick="noteBackAction\(\)"/.test(rawHtml);
+    const headBackWrong = /onclick="closeView\('notes'\)"/.test(rawHtml);
+    const js3 = rawHtml.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const backBranch = /if\s*\(\s*L === 'notes'\s*\)\s*\{\s*return noteBackAction\(\)/.test(js3);
+    const hasAction = /function noteBackAction\s*\(/.test(js3);
+    results.push({
+      name: '架构守卫：笔记返回三级（头部箭头与返回键都走同一个口）',
+      ok: headBackOk && !headBackWrong && backBranch && hasAction,
+      info: `头部走 noteBackAction=${headBackOk} · 头部仍用 closeView=${headBackWrong}`
+        + ` · androidBack 有 notes 分支=${backBranch} · 有 noteBackAction=${hasAction}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：笔记返回三级', ok: false, info: 'THREW: ' + (e && e.message) });
   }
 
   let fail = 0;

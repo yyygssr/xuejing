@@ -1755,7 +1755,7 @@
       <div class="h2">关于</div>
       <div class="list">
         <div class="li tap" onclick="openView('about')" style="border-bottom:0">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.6 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.6-fix · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
       <div style="height:6px"></div>
@@ -1825,7 +1825,7 @@
   <div class="view" id="view-notes">
     <div class="vpanel">
       <div class="viewhead">
-        <div class="icon-btn" onclick="closeView('notes')">‹</div>
+        <div class="icon-btn" onclick="noteBackAction()">‹</div>
         <b id="notesTitle">笔记</b>
         <div class="row g6">
           <div class="icon-btn" id="noteColsBtn" onclick="noteToggleCols()" title="切换单/双列"></div>
@@ -1938,7 +1938,7 @@
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.2.6 · 开源版</div>
+        <div class="about-ver">v0.2.6-fix · 开源版</div>
       </div>
 
       <div class="about-motto">
@@ -2223,7 +2223,7 @@
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.2.6';
+var APP_VER = 'v0.2.6-fix';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -4559,6 +4559,9 @@ function androidBack(){
   if(L === 'sheet'){ closeSheet(); return true; }
   if(L === 'alert'){ closeAlert(); return true; }
   if(L === 'onboard'){ obBack(); return true; }
+  /* 笔记有三层（编辑器 → 编辑页 → 列表），不能和其他二级页一样直接关掉，
+     否则在编辑页里返回会跳过列表直接回主页。统一交给 noteBackAction 决定退到哪层。 */
+  if(L === 'notes'){ return noteBackAction(); }
   /* 二级页统一处理：SUBVIEWS 里注册过的都走 closeView */
   if(SUBVIEWS.indexOf(L) >= 0){ closeView(L); return true; }
   if(L === 'tab'){ go('home'); return true; }
@@ -13994,6 +13997,22 @@ function noteOpen(id){
 function noteBack(){
   noteFullClose();
   noteMode = 'list'; noteCurId = null; renderNotes(); renderHomeTiles();
+}
+/* 笔记的返回是**三级**的：全屏编辑器 → 编辑页 → 列表 → 退出笔记。
+   以前头部箭头和返回手势都只调 closeView('notes')（等于"直接退出"），
+   所以在编辑页里一按返回就掉回主页，中间的列表被跳过了。
+   这里收成唯一入口：谁要返回都走它，按当前层级决定退到哪儿。
+   顺序不能反 —— 全屏层压在整个页面之上，必须先摘掉它。 */
+function noteBackAction(){
+  var im = document.getElementById('inkMask');
+  if(im && im.classList.contains('show')){ inkSheetClose(); return true; }   /* 笔刷设置面板 */
+  var iful = document.getElementById('inkFull');
+  if(iful && iful.classList.contains('show')){ inkExitFull(); return true; }
+  var nful = document.getElementById('noteFull');
+  if(nful && nful.classList.contains('show')){ noteFullExit(); return true; }
+  if(noteMode === 'edit'){ noteBack(); return true; }
+  closeView('notes');
+  return true;
 }
 function noteDel(id){
   S.notes = notesAll().filter(function(x){ return x.id !== id; });
