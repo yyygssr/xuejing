@@ -104,6 +104,26 @@ public class Tts {
         initCB = cb;
         final int seq = ++initSeq;
         try {
+            /* 引擎要在**主线程**创建：TextToSpeech 内部会取调用线程的 Looper 建 Handler，
+               用它分发 onInit 与 UtteranceProgressListener —— 而 ttsInit 是从 WebView 的
+               JavaBridge 线程直接调进来的。AOSP 在没有 Looper 时会回落到主线程，
+               但那是实现细节而不是契约：显式 post 回主线程，回调链路才稳定
+               （否则表现为「语音初始化卡住不回报」，页面一直等）。 */
+            final Runnable create = new Runnable() {
+                @Override public void run() { doCreate(seq); }
+            };
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) create.run();
+            else new android.os.Handler(android.os.Looper.getMainLooper()).post(create);
+        } catch (Throwable t) {
+            handleInit(seq, false, "无法创建语音引擎：" + t.getMessage());
+        }
+    }
+
+    /** 真正建引擎：只能在主线程跑（见 init() 里的说明）。 */
+    private synchronized void doCreate(final int seq) {
+        if (seq != initSeq) return;              /* 这次已经被更新的初始化取代 */
+        if (tts != null) { handleInit(seq, ready, lastError); return; }
+        try {
             /* 第三个参数是**引擎包名**（String），传 null = 用系统默认引擎。
                曾经这里传了 Context，编译直接失败 —— 三个参数的版本不是「多传个 context」。 */
             tts = new TextToSpeech(appCtx, new TextToSpeech.OnInitListener() {

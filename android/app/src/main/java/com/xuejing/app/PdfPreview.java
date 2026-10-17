@@ -188,7 +188,11 @@ final class PdfPreview {
             sb.append(MainActivity.jsString(r.pages[i]));
         }
         sb.append("],\"more\":").append(r.more ? "true" : "false");
-        sb.append(",\"err\":").append(r.more ? "null" : MainActivity.jsString(r.err));
+        /* err 为 null 是**成功路径**（页数没超上限时 more=false、err=null）。
+           以前写的是 more ? "null" : jsString(err)，等于把成功当成要转义的分支 ——
+           jsString 里直接 s.length()，在 pdf-preview 工作线程上抛 NPE，
+           线程没有兜底 handler，整个 App 当场挂掉：导入一个正常 PDF 就闪退。 */
+        sb.append(",\"err\":").append(r.err == null ? "null" : MainActivity.jsString(r.err));
         sb.append('}');
         return sb.toString();
     }

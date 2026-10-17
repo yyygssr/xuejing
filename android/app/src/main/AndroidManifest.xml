@@ -97,14 +97,17 @@
             </intent-filter>
         </receiver>
 
-        <!-- 开机与应用更新后重排提醒 -->
+        <!-- 开机与应用更新后重排提醒。
+             这里刻意**不**声明 LOCKED_BOOT_COMPLETED：那个广播只发给
+             android:directBootAware 的组件，而且只能用 device-protected storage ——
+             本应用的数据（课表、闹钟 codes）都在默认加密区里，解锁之前根本读不到。
+             以前挂着这一行只是看起来像支持了，系统永远不会因此调用它。 -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>

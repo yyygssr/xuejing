@@ -53,19 +53,22 @@ public class FocusService extends Service {
     private static final String A_START = "start";
     private static final String A_STOP = "stop";
 
-    /** 页面每次开始/暂停都会重新下发这两个值，所以静态缓存足够用 */
-    private static String sLabel = "自由专注";
-    private static int sSecs = 1500;
+    /** 页面每次开始/暂停都会重新下发这两个值，所以静态缓存足够用。
+     *  ⚠️ 全部 volatile：start/pause/resume 是桥线程（@JavascriptInterface）直接调的，
+     *  而 ticker、通知重建在主线程读这些值。没有 volatile 时主线程可能一直看到旧值 ——
+     *  表现为「明明延长了，通知还按老时间提前完成」或者倒计时冻住。 */
+    private static volatile String sLabel = "自由专注";
+    private static volatile int sSecs = 1500;
     /** 计时是否在走；开关「灵动岛上岛」后要靠它决定要不要重发通知 */
-    private static boolean sRunning = false;
+    private static volatile boolean sRunning = false;
     /** 走到什么时候结束（运行中有效） */
-    private static long sEndAt = 0L;
+    private static volatile long sEndAt = 0L;
     /** 本轮是不是正计时（dir=up）：正计时没有终点，不能做自然结束判定 */
-    private static boolean sUp = false;
+    private static volatile boolean sUp = false;
 
     private static final Handler H = new Handler(Looper.getMainLooper());
-    private static Runnable sTick = null;
-    private static int sLastShown = -1;
+    private static volatile Runnable sTick = null;
+    private static volatile int sLastShown = -1;
 
     /** 当前剩余秒数：运行中按结束时刻算，暂停时用最后一次算出来的冻结值 */
     static int remainSecs() {
@@ -78,7 +81,7 @@ public class FocusService extends Service {
     static void refresh(Context c) {
         if (!sRunning) return;
         sLastShown = -1;
-        post(c, Notify.buildFocus(c, sLabel, remainSecs(), true));
+        post(c, Notify.buildFocus(c, sLabel, remainSecs(), true, sTotal));
         startTick(c);
     }
 
@@ -92,6 +95,9 @@ public class FocusService extends Service {
         JSONObject s = FocusStore.open(c, label, courseId, mode, dir, secs);
         sLabel = s.optString("label", "自由专注");
         sSecs = Math.max(1, secs);
+        /* 本轮总量（进度条的分母）。存档里本来就有 totalSecs，直接用它 ——
+           同一份真相，页面/服务/进度条不会各说各话。 */
+        sTotal = Math.max(0, s.optInt("totalSecs", secs));
         sRunning = true;
         sUp = "up".equals(dir);
         sEndAt = s.optLong("endAt", 0L);
@@ -105,7 +111,11 @@ public class FocusService extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) c.startForegroundService(i);
             else c.startService(i);
         } catch (Throwable ignored) {
-            /* 后台启动前台服务受限时不强求，退化成普通通知 */
+            /* 后台启动前台服务被拒（Android 12+）时不强求：退化成普通通知 + 本地心跳。
+               会话已经先落过盘（FocusStore.open 在上面），所以这一轮不会凭空消失 ——
+               页面下次打开会把它拉回来继续走 / 补记。
+               预约上课那条闹钟之所以走 setAlarmClock（ReminderScheduler 的 urgent 档），
+               就是为了尽量别落到这里：官方明确精确闹钟不受前台服务启动限制影响。 */
             fallbackNotify(c, Notify.buildFocus(c, sLabel, sSecs, true));
             startTick(c);
         }
@@ -123,7 +133,7 @@ public class FocusService extends Service {
         sSecs = Math.max(0, remain);
         sEndAt = 0L;
         stopTick();
-        post(c, Notify.buildFocus(c, sLabel, sSecs, false));
+        post(c, Notify.buildFocus(c, sLabel, sSecs, false, sTotal));
         MainActivity.forwardFocusEvent("pause");
     }
 
@@ -136,9 +146,12 @@ public class FocusService extends Service {
         sUp = "up".equals(cur.optString("dir"));
         sEndAt = cur.optLong("endAt", 0L);
         if (sEndAt <= 0) sEndAt = System.currentTimeMillis() + Math.max(0, sSecs) * 1000L;
+        /* 暂停期间剩余会变，但「总量」不变 —— 分母要从存档拿。
+           拿 sSecs 会让暂停再继续后进度条从中间重新起算。 */
+        sTotal = Math.max(0, cur.optInt("totalSecs", sTotal));
         sSecs = Math.max(0, (int) ((sEndAt - System.currentTimeMillis()) / 1000L));
         sLastShown = -1;
-        post(c, Notify.buildFocus(c, sLabel, remainSecs(), true));
+        post(c, Notify.buildFocus(c, sLabel, remainSecs(), true, sTotal));
         startTick(c);
         MainActivity.forwardFocusEvent("resume");
     }
@@ -161,6 +174,7 @@ public class FocusService extends Service {
     private static void halt(Context c) {
         sRunning = false;
         sEndAt = 0L;
+        sTotal = 0;
         stopTick();
         try {
             c.stopService(new Intent(c, FocusService.class));
@@ -184,6 +198,9 @@ public class FocusService extends Service {
     }
 
     /* ---------- 每秒刷新标题里的倒计时 ---------- */
+
+    /** 本轮总秒数：只用来画倒计时进度条，0=不知道总量（不画条）。 */
+    private static volatile int sTotal = 0;
 
     private static void startTick(final Context c) {
         if (sTick != null) return;
@@ -214,9 +231,17 @@ public class FocusService extends Service {
                 }
                 /* 留「服务还活着」的证据：服务真被杀时，结算只算到这里，不虚增 */
                 FocusStore.alive(app);
-                if (remain != sLastShown) {
-                    sLastShown = remain;
-                    post(app, Notify.buildFocus(app, sLabel, remain, true));
+                /* 留「服务还活着」的证据，并保持倒计时刷新。
+                   v0.2.9：恢复每秒重发，但**这已不再有害** ——
+                   v0.2.7时代「每秒重发 + enableFloat=true」= 每秒把岛弹开一次，
+                   两个条件缺一不可；v0.2.8 起 enableFloat 固定 false，
+                   重发只是更新内容，岛保持摘要态。
+                   为什么还要每秒发：MIUI 摘要态（小岛）读的是通知里那份**静态** JSON，
+                   不重发它就不动；进度条也要跟着走。这层是 Chronometer 之外的兜底。 */
+                int bucket = remain;
+                if (bucket != sLastShown) {
+                    sLastShown = bucket;
+                    post(app, Notify.buildFocus(app, sLabel, remain, true, sTotal));
                 }
                 H.postDelayed(this, 1000);
             }
@@ -244,13 +269,14 @@ public class FocusService extends Service {
             }
             sLabel = cur.optString("label", "自由专注");
             sSecs = cur.optInt("totalSecs", 1500);
+            sTotal = Math.max(0, sSecs);
             sUp = "up".equals(cur.optString("dir"));
             sEndAt = cur.optLong("endAt", 0L);
             /* 倒计时必须有终点；正计时允许 endAt=0（它本来就没有终点） */
             if (sEndAt <= 0 && !sUp) { stopSelf(); return START_NOT_STICKY; }
             sRunning = true;
             sLastShown = -1;
-            if (!raiseForeground(Notify.buildFocus(this, sLabel, remainSecs(), true))) {
+            if (!raiseForeground(Notify.buildFocus(this, sLabel, remainSecs(), true, sTotal))) {
                 stopSelf();
                 return START_NOT_STICKY;
             }
@@ -284,7 +310,7 @@ public class FocusService extends Service {
         }
         sRunning = true;
 
-        if (!raiseForeground(Notify.buildFocus(this, sLabel, remainSecs(), true))) {
+        if (!raiseForeground(Notify.buildFocus(this, sLabel, remainSecs(), true, sTotal))) {
             stopSelf();
             return START_NOT_STICKY;
         }

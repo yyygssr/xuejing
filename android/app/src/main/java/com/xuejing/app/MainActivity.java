@@ -10,6 +10,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.view.ViewGroup;
@@ -120,24 +121,32 @@ public class MainActivity extends AppCompatActivity {
      * Android 13+ 声明了 USE_EXACT_ALARM 就默认具备，这里会兜底跳到应用设置页。
      */
     void openExactAlarmSettings() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
-                i.setData(Uri.parse("package:" + getPackageName()));
-                startActivity(i);
-                return;
-            }
-        } catch (Throwable ignored) { }
-        openAppSettings();
+        /* 这两个跳转都从桥线程进来（NativeBridge.requestExactAlarm / openAppSettings），
+           startActivity 属于 UI 行为：放主线程执行，别赌 ROM 的容忍度。 */
+        runOnUiThread(() -> {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    Intent i = new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                    return;
+                }
+            } catch (Throwable ignored) { }
+            openAppSettings();
+        });
     }
 
     /** 跳到本应用的系统设置页（厂商的自启动 / 后台省电策略就在这一页附近） */
     void openAppSettings() {
-        try {
-            Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-            i.setData(Uri.parse("package:" + getPackageName()));
-            startActivity(i);
-        } catch (Throwable ignored) { }
+        Runnable go = () -> {
+            try {
+                Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+            } catch (Throwable ignored) { }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) go.run();
+        else runOnUiThread(go);
     }
 
     /* 键盘相关：页面侧据此收掉底栏、调整落点，见 applyInsets 的说明 */
@@ -206,6 +215,11 @@ public class MainActivity extends AppCompatActivity {
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
                 // 单页应用，不允许跳到外部页面
                 return !String.valueOf(req.getUrl()).startsWith("file://");
+            }
+            @Override
+            public void onPageFinished(android.webkit.WebView view, String url) {
+                /* 补发一次安全区：insets 监听往往早于页面就绪，那次是丢的 */
+                pushInsets(kbOpen);
             }
         });
 
@@ -389,20 +403,41 @@ public class MainActivity extends AppCompatActivity {
      * 另外每次键盘开合都通知页面（window.onKb）：弹起时页面把底栏收掉，
      * 输入框直接坐在键盘上方，不用跨过整条底栏。
      */
+    /** 状态栏 / 导航栏安全区，单位 dp（CSS px）。缓存下来，页面加载完再补发一次。 */
+    private int sbInsetDp = 0, navInsetDp = 0;
+
+    /**
+     * 把安全区报给页面。
+     * ⚠️ insets 监听通常在 **页面还没加载完** 时就触发了，那时 window.__setInsets 还不存在，
+     * evalJs 直接落空 —— 页面只能退回 env(safe-area-inset-top)，而它在 WebView 里常年是 0，
+     * 结果顶部内容压在系统状态栏底下（真机踩过：按钮看不清也点不到）。
+     * 所以这里既要在 insets 变化时推，也要在 onPageFinished 时补推一次缓存值。
+     */
+    private void pushInsets(boolean kbShowing) {
+        /* 键盘开着时底部区域已被键盘占满，不需要再抬高，nav-inset 归零 */
+        evalJs("window.__setInsets && window.__setInsets(" + sbInsetDp + ","
+                + (kbShowing ? 0 : navInsetDp) + ")");
+    }
+
     private void applyInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
             imeBottomPx = ime.bottom;
             boolean open = ime.bottom > 0;
-            v.setPadding(0, bars.top, 0, keyboardPad());
+            /* 顶部不再用 padding 让位：一让位，WebView 就从状态栏下面开始画，
+               状态栏那一条露出 root 的纯色底 —— 真机上正好切在光晕背景中间，
+               用户的话是「状态栏部分不沉浸了，割裂感很强」。
+               改成把高度交给 CSS（--sb-inset），页面自己画到状态栏底下，
+               自绘那条 .statusbar 只占位不显示。 */
+            v.setPadding(0, 0, 0, keyboardPad());
             /* bars.bottom 是**物理像素**，而 WebView 里 1 CSS px = 1 dp；
                不换算就直接塞给 CSS，1080p 机型（density ≈ 2.75~3）会把「~16dp 的手势条」
                报成 48 CSS px，底栏就会长出 30 多 px 的额外高度。换成 dp 再交出去。 */
             float density = getResources().getDisplayMetrics().density;
-            int navDp = Math.round(bars.bottom / density);
-            /* 键盘开着时底部区域已被键盘占满，不需要再抬高，nav-inset 归零 */
-            evalJs("window.__setInsets && window.__setInsets(0," + (open ? 0 : navDp) + ")");
+            navInsetDp = Math.round(bars.bottom / density);
+            sbInsetDp = Math.round(bars.top / density);
+            pushInsets(open);
             if (open != kbOpen) {
                 kbOpen = open;
                 evalJs("window.onKb && window.onKb(" + (open ? 1 : 0) + ")");
@@ -505,6 +540,20 @@ public class MainActivity extends AppCompatActivity {
                     callbackTts(false, "");
                     return;
                 }
+                /* 每次合成都落一个 mp3，之前从不清理：cache 目录会一直涨，
+                   用到最后全是没人再听的音频。写之前先把一小时前的扫掉
+                   （正在播的那条最多也就几十秒，一小时足够安全）。 */
+                try {
+                    java.io.File[] old = dir.listFiles();
+                    long expire = System.currentTimeMillis() - 60 * 60 * 1000L;
+                    if (old != null) {
+                        for (java.io.File f : old) {
+                            if (f.lastModified() < expire) {
+                                try { f.delete(); } catch (Throwable ignored) { }
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) { }
                 java.io.File out = new java.io.File(dir, "tts_" + System.currentTimeMillis() + ".mp3");
                 java.io.FileOutputStream fos = new java.io.FileOutputStream(out);
                 byte[] buf = new byte[8192];
@@ -516,7 +565,20 @@ public class MainActivity extends AppCompatActivity {
                     callbackTts(false, "");
                     return;
                 }
-                callbackTts(true, "file://" + out.getAbsolutePath());
+                /* 交给页面的是 content://，不是 file://：
+                   targetSdk 30+ 的 WebView 默认 setAllowFileAccess(false)，
+                   新写出来的 file:///data/user/0/... 会被内核直接拦掉 ——
+                   表现是「语音合成成功、播放没有声音」，而且页面侧只看到一个 catch 里的模糊失败。
+                   FileProvider 走的是我们自己的 authority，不需要放开整站文件访问。 */
+                String play = "file://" + out.getAbsolutePath();
+                try {
+                    Uri u = FileProvider.getUriForFile(this,
+                            getPackageName() + ".fileprovider", out);
+                    grantUriPermission(getPackageName(), u,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    play = u.toString();
+                } catch (Throwable ignored) { }
+                callbackTts(true, play);
             } catch (Throwable t) {
                 callbackTts(false, "");
             } finally {
@@ -667,12 +729,16 @@ public class MainActivity extends AppCompatActivity {
      * ok=true 时 payload 是响应体原文；ok=false 时是一句给人看的错误说明。
      */
     void aiPost(final String url, final String apiKey, final String bodyJson) {
+        aiPost(url, apiKey, bodyJson, "");
+    }
+
+    void aiPost(final String url, final String apiKey, final String bodyJson, final String jobId) {
         if (url == null || url.trim().isEmpty()) {
-            callbackAi(false, "接口地址是空的");
+            callbackAi(false, "接口地址是空的", jobId);
             return;
         }
         if (bodyJson == null || bodyJson.trim().isEmpty()) {
-            callbackAi(false, "请求体是空的");
+            callbackAi(false, "请求体是空的", jobId);
             return;
         }
         new Thread(() -> {
@@ -699,12 +765,12 @@ public class MainActivity extends AppCompatActivity {
                 boolean ok = (code >= 200 && code < 300);
                 String respBody = readAll(ok ? conn.getInputStream() : conn.getErrorStream());
                 if (ok) {
-                    callbackAi(true, respBody);
+                    callbackAi(true, respBody, jobId);
                 } else {
-                    callbackAi(false, "HTTP " + code + briefServerMsg(respBody));
+                    callbackAi(false, "HTTP " + code + briefServerMsg(respBody), jobId);
                 }
             } catch (Throwable t) {
-                callbackAi(false, describeNetError(t));
+                callbackAi(false, describeNetError(t), jobId);
             } finally {
                 if (conn != null) conn.disconnect();
             }
@@ -723,8 +789,12 @@ public class MainActivity extends AppCompatActivity {
      * 增量走 window.onAiStreamDelta(kind, text)：kind = 'c' 正文 / 'r' 思考过程。
      */
     void aiPostStream(final String url, final String apiKey, final String bodyJson) {
-        if (url == null || url.trim().isEmpty()) { callbackAi(false, "接口地址是空的"); return; }
-        if (bodyJson == null || bodyJson.trim().isEmpty()) { callbackAi(false, "请求体是空的"); return; }
+        aiPostStream(url, apiKey, bodyJson, "");
+    }
+
+    void aiPostStream(final String url, final String apiKey, final String bodyJson, final String jobId) {
+        if (url == null || url.trim().isEmpty()) { callbackAi(false, "接口地址是空的", jobId); return; }
+        if (bodyJson == null || bodyJson.trim().isEmpty()) { callbackAi(false, "请求体是空的", jobId); return; }
         new Thread(() -> {
             HttpURLConnection conn = null;
             StringBuilder all = new StringBuilder();      /* 非 SSE 回包时的原文兜底 */
@@ -753,7 +823,7 @@ public class MainActivity extends AppCompatActivity {
 
                 int code = conn.getResponseCode();
                 if (code < 200 || code >= 300) {
-                    callbackAi(false, "HTTP " + code + briefServerMsg(readAll(conn.getErrorStream())));
+                    callbackAi(false, "HTTP " + code + briefServerMsg(readAll(conn.getErrorStream())), jobId);
                     return;
                 }
                 /* 不能用 readAll —— 那要等整条流结束，流式就没意义了 */
@@ -770,8 +840,8 @@ public class MainActivity extends AppCompatActivity {
                         String[] d = parseDelta(data);
                         if (d == null) continue;
                         if (!d[2].isEmpty()) finish = d[2];
-                        if (!d[1].isEmpty()) { reasoning.append(d[1]); emitDelta("r", d[1]); deltas++; }
-                        if (!d[0].isEmpty()) { content.append(d[0]); emitDelta("c", d[0]); deltas++; }
+                        if (!d[1].isEmpty()) { reasoning.append(d[1]); emitDelta("r", d[1], jobId); deltas++; }
+                        if (!d[0].isEmpty()) { content.append(d[0]); emitDelta("c", d[0], jobId); deltas++; }
                     } catch (Throwable ignored) { }
                 }
                 rd.close();
@@ -779,7 +849,7 @@ public class MainActivity extends AppCompatActivity {
                 if (deltas == 0) {
                     /* 网关没按 SSE 回（有的直接忽略 stream 参数，把整包 JSON 丢回来）：
                        原样交给页面按普通响应解析，功能不受影响。 */
-                    callbackAi(true, all.toString());
+                    callbackAi(true, all.toString(), jobId);
                     return;
                 }
                 JSONObject msg = new JSONObject();
@@ -792,9 +862,9 @@ public class MainActivity extends AppCompatActivity {
                 JSONArray choices = new JSONArray();
                 choices.put(choice);
                 out.put("choices", choices);
-                callbackAi(true, out.toString());
+                callbackAi(true, out.toString(), jobId);
             } catch (Throwable t) {
-                callbackAi(false, describeNetError(t));
+                callbackAi(false, describeNetError(t), jobId);
             } finally {
                 if (conn != null) conn.disconnect();
             }
@@ -845,11 +915,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** 把一段增量推给页面（必须在 UI 线程调 evaluateJavascript） */
-    private void emitDelta(final String kind, final String text) {
+    private void emitDelta(final String kind, final String text) { emitDelta(kind, text, ""); }
+
+    /** 带请求 id 的增量：id 与 callbackAi 同一个口径，页面按 id 分发 */
+    private void emitDelta(final String kind, final String text, final String jobId) {
         if (text == null || text.isEmpty()) return;
         final String js = "window.onAiStreamDelta && window.onAiStreamDelta("
+                + jsString(jobId == null ? "" : jobId) + ","
                 + jsString(kind) + "," + jsString(text) + ")";
-        web.post(() -> evalJs(js));
+        /* web 是字段，onDestroy 会把它置 null；SSE 线程还在往里读增量。
+           先取一份本地引用再判空，否则销毁瞬间在这里 NPE，
+           异常在线程里没人接，整条流式回答当场断掉。 */
+        final WebView w = web;
+        if (w == null) return;
+        w.post(() -> evalJs(js));
     }
 
     private void callbackModels(final boolean ok, final String payload) {
@@ -861,12 +940,21 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> evalJs(js));
     }
 
-    private void callbackAi(final boolean ok, final String payload) {
+    /** 旧签名：没有 jobId（例如非 AI 的调用方），页面按「当前任务」处理 */
+    private void callbackAi(final boolean ok, final String payload) { callbackAi(ok, payload, ""); }
+
+    /**
+     * 把结果回吐给页面。id 放在**第一个**参数：
+     * 页面超时后会另起一条请求，靠这个 id 才能认出「这是上一条迟到的响应」并丢掉，
+     * 否则就会出现「问 A 答 B」（迟到的包交给了此刻占坑的那条任务）。
+     */
+    private void callbackAi(final boolean ok, final String payload, final String jobId) {
         String body = payload == null ? "" : payload;
         /* 成功时可能是完整回答（几千字），留 64KB 余量；超长截断并标注，
            免得转义后撑爆 WebView 的 JS 字符串。 */
         if (body.length() > 64000) body = body.substring(0, 64000) + "…[截断]";
         final String js = "window.onAiResult && window.onAiResult("
+                + jsString(jobId == null ? "" : jobId) + ","
                 + (ok ? "true" : "false") + "," + jsString(body) + ")";
         runOnUiThread(() -> evalJs(js));
     }
@@ -968,8 +1056,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** 拼进 JS 字符串字面量前必须转义，否则响应里的引号换行会把脚本打崩。
-     *  包内可见：NativeBridge 的 deviceInfo() 也要用它拼 JSON。 */
+     *  包内可见：NativeBridge 的 deviceInfo() 也要用它拼 JSON。
+     *  null 一律当空串：调用点散落各处，少判一次就是一个在线程里抛出的 NPE
+     *  （PDF 转图那条就是这么在 pdf-preview 工作线程上炸掉整个 App 的）。 */
     static String jsString(String s) {
+        if (s == null) return "\"\"";
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
@@ -1157,18 +1248,22 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** 深色模式：同步系统栏图标颜色，避免白底白字 */
+    /** 深色模式：同步系统栏图标颜色，避免白底白字。
+     *  桥方法都在 JavaBridge 线程上执行，改 View / WindowInsetsController 必须回主线程，
+     *  否则要么 CalledFromWrongThreadException，要么被系统默默忽略（切深浅色没反应）。 */
     void applyDarkMode(boolean dark) {
         darkMode = dark;
-        int bg = dark ? 0xFF0E1017 : 0xFFF5F6FB;
-        if (root != null) root.setBackgroundColor(bg);
-        if (web != null) web.setBackgroundColor(bg);
-        try {
-            WindowInsetsControllerCompat c =
-                    WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-            c.setAppearanceLightStatusBars(!dark);
-            c.setAppearanceLightNavigationBars(!dark);
-        } catch (Throwable ignored) { }
+        runOnUiThread(() -> {
+            int bg = dark ? 0xFF0E1017 : 0xFFF5F6FB;
+            if (root != null) root.setBackgroundColor(bg);
+            if (web != null) web.setBackgroundColor(bg);
+            try {
+                WindowInsetsControllerCompat c =
+                        WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                c.setAppearanceLightStatusBars(!dark);
+                c.setAppearanceLightNavigationBars(!dark);
+            } catch (Throwable ignored) { }
+        });
     }
 
     /**
@@ -1220,14 +1315,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     void askNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
-                    != PackageManager.PERMISSION_GRANTED) {
-                notifLauncher.launch("android.permission.POST_NOTIFICATIONS");
-                return;
+        /* ActivityResultLauncher.launch 标了 @MainThread，而这里是桥线程（@JavascriptInterface）
+           直接调进来的 —— 在非主线程 launch 会抛 IllegalStateException，
+           表现就是「点了授权通知没反应」。回主线程再发。 */
+        runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                        != PackageManager.PERMISSION_GRANTED) {
+                    notifLauncher.launch("android.permission.POST_NOTIFICATIONS");
+                    return;
+                }
             }
-        }
-        askPromotedPermission();
+            askPromotedPermission();
+        });
     }
 
     /**

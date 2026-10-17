@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { fileFixtures } from './filefix.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SRC = path.join(root, 'index.html');
@@ -18,6 +19,14 @@ const ASSERTS = String.raw`
     R.push(rec);
   }
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+  /* 异步版断言：要等图片 onload / transition 这类真实回调的检查用这个，
+     调用处必须 await，否则 R 会在结果回来前就被序列化。 */
+  async function TA(name, fn){
+    var rec = { name: name };
+    try { var r = (await fn()) || {}; rec.ok = !!r.ok; rec.info = (r.info === undefined ? '' : String(r.info)); }
+    catch(e){ rec.ok = false; rec.info = 'THREW: ' + (e && (e.message || e)); }
+    R.push(rec);
+  }
   function cls(el){ return el ? (el.className || '') : 'NULL'; }
   function shownViews(){ return [].slice.call(document.querySelectorAll('.view.show')).map(function(e){ return e.id; }); }
   async function visible(id){
@@ -463,7 +472,18 @@ const ASSERTS = String.raw`
     S.apiKey = 'sk-t'; S.baseUrl = 'https://e.invalid';
     var names = [];
     function collect(menu){
-      [].forEach.call(menu.querySelectorAll('.actrow'), function(r){
+      /* 菜单行早就不带 onclick 了（改成 data-mi + 事件委托），
+         要验「入口指向真实存在的函数」，得去盒子上取绑好的 items.run。
+         两条路都留着：万一以后又换回内联属性，这条守卫照样能扫。 */
+      var its = menu.__menuItems || [];
+      its.forEach(function(it){
+        var src = (it && it.run) || '';
+        var re = /([A-Za-z_$][\w$]*)\s*\(/g, m2;
+        while((m2 = re.exec(src))){
+          if(m2[1] !== 'if' && m2[1] !== 'function') names.push(m2[1]);
+        }
+      });
+      if(!its.length) [].forEach.call(menu.querySelectorAll('.actrow'), function(r){
         var oc = r.getAttribute('onclick') || '';
         /* 一行里可能有多个调用（如 closePlusMenu();openChatHistory()），
            只取第一个会漏掉后面那个 —— 漏掉就等于这条守卫失效。 */
@@ -503,11 +523,11 @@ const ASSERTS = String.raw`
     S.provider = 'deepseek';
     S.providerModels = {deepseek: ['fast-a', 'smart-b']};
     S.apiKey = 'sk-test'; S.baseUrl = 'https://example.invalid';
-    var keepRoles = S.roles;
-    /* 当前模型要绑在 roles.chat.m 上：roleModelName() **优先**读它，
-       S.models.chat 只是回落项 —— 而同文件里别的断言会改 S.models.chat，
-       用它当基准会读到别人的值。 */
-    S.roles = {chat:{p:'deepseek', m:'fast-a'}};
+    var keepRoles = S.roles, keepModels = JSON.stringify(S.models);
+    /* 当前渠道 = deepseek，所以 chat 是「跟随」语义：生效模型看 S.models.chat
+       （固定到别家时才看 roles.chat.m）。见下面「渠道绑定」那条守卫。 */
+    S.roles = {chat:{p:'', m:'fast-a', fx:false}};
+    S.models.chat = 'fast-a';
     closePlusMenu();
     plusModelMenu();
     var box = document.getElementById('plusMenu');
@@ -523,15 +543,15 @@ const ASSERTS = String.raw`
     var iconsOk = [].every.call(box.querySelectorAll('.actrow .ic svg'), function(s){
       return s && s.innerHTML.length > 4;
     });
-    /* 真切一次：smart-b 应当写进 roles.chat.m */
+    /* 真切一次：跟随语义下要写进 S.models.chat */
     applyQuickModel('smart-b');
-    var switched = (rolesCfg().chat || {}).m === 'smart-b';
+    var switched = S.models.chat === 'smart-b';
     /* 再点当前模型不该改动（幂等 + 提示） */
     applyQuickModel('smart-b');
-    var stillOne = (rolesCfg().chat || {}).m === 'smart-b';
+    var stillOne = S.models.chat === 'smart-b';
     closePlusMenu();
     S.provider = keepP; S.providerModels = keepList; S.apiKey = keepKey;
-    S.roles = keepRoles;
+    S.roles = keepRoles; S.models = JSON.parse(keepModels);
     return { ok: hasHead && listsBoth && curMarked && hasMore && iconsOk
         && switched && stillOne,
       info: '含渠道名=' + hasHead + ' 列出模型=' + listsBoth
@@ -674,7 +694,14 @@ const ASSERTS = String.raw`
     var btnW = Math.round(sz.width), btnH = Math.round(sz.height);
     var sizeOk = btnW >= 28 && btnW <= 32 && btnW === btnH;
     var stopped = 0, realStop = ttsStop;
+    /* 朗读本身也要 mock。无头 Edge 里没有可用音色，ttsSpeak 会（同步或很快）
+       走 onEnd → markSpeaking(-1) 把按钮复位，于是「点了却不高亮」。
+       那是**环境**问题不是产品问题 —— 真机上引擎不可用时复位同样是对的，
+       不能留一个停不下来的停止态。这里只验证交互本身：
+       点一下 → 高亮 + 图标变停止；再点 → 调 ttsStop 并复位成喇叭。 */
+    var realForce = ttsSpeakForce, forceCalled = 0;
     ttsStop = function(){ stopped++; };
+    ttsSpeakForce = function(){ forceCalled++; return true; };
     toggleSpeakMsg(0);
     var b1 = document.querySelector('[data-say="0"]');
     var onFirst = b1.classList.contains('on');
@@ -684,16 +711,17 @@ const ASSERTS = String.raw`
     var b2 = document.querySelector('[data-say="0"]');
     var onSecond = b2.classList.contains('on');
     var ico2 = b2.querySelector('.sb-i').innerHTML;
-    ttsStop = realStop;
+    ttsStop = realStop; ttsSpeakForce = realForce;
     if(keepTab2 && keepTab2 !== 'page-chat') go(keepTab2.replace('page-', ''));
     /* 打断必须真调了 ttsStop，且按钮复位成喇叭 ——
        不复位的话下次点会变成「再停一次」而不是重新朗读。 */
     return { ok: onFirst && isStop && stopped >= 2 && !onSecond
-        && ico2.indexOf('M4.5 9.4') >= 0 && sizeOk,
+        && ico2.indexOf('M4.5 9.4') >= 0 && sizeOk && forceCalled >= 1,
       info: '尺寸=' + btnW + 'x' + btnH + '（28~32 且为正方形=' + sizeOk + '）'
         + ' 首次高亮=' + onFirst + ' 图标变停止=' + isStop
         + ' ttsStop调用=' + stopped + ' 二次后复位=' + (!onSecond)
-        + ' 图标回喇叭=' + (ico2.indexOf('M4.5 9.4') >= 0) };
+        + ' 图标回喇叭=' + (ico2.indexOf('M4.5 9.4') >= 0)
+        + ' 朗读调用=' + forceCalled };
   });
 
   T('对话：附件做成胶囊挂件，不塞进输入框', function(){
@@ -718,7 +746,7 @@ const ASSERTS = String.raw`
       return s && s.innerHTML.length > 4;
     });
     var hasNames = txt.indexOf('讲义.txt') >= 0 && txt.indexOf('实验指导.pdf') >= 0;
-    var hasMeta = txt.indexOf('KB 文本') >= 0 && txt.indexOf('PDF') >= 0;
+    var hasMeta = txt.indexOf('TXT') >= 0 && txt.indexOf('k字') >= 0 && txt.indexOf('PDF') >= 0;
     var hasRemove = row.querySelectorAll('.attach .ax').length === 2;
     /* 输入框正文一个字都不能被塞进去 */
     var inputClean = inp.value === '';
@@ -1199,7 +1227,7 @@ const ASSERTS = String.raw`
                'aiEntry', 'skillBadge', 'skillCountHint', 'themeSeg', 'accentList',
                'vWorkMin', 'vShortMin', 'vLongMin', 'swAutoNext', 'swClassRemind',
                'vRemindBefore', 'swEndRemind', 'swClassMute', 'swFocusNotify', 'exactBadge',
-               'swIslandOn', 'vTermStart', 'termStartInput', 'swHoliday', 'holidayCountHint',
+               'islandBadge', 'vTermStart', 'termStartInput', 'swHoliday', 'holidayCountHint',
                'h2TabletNav', 'tabletNavList', 'restoreFile'];
     var lost = ids.filter(function(x){ return !document.getElementById(x); });
     /* 不能有游离的小节：每个 .h2 都得在某个组标题之后 */
@@ -1567,10 +1595,13 @@ const ASSERTS = String.raw`
       && !!chat.querySelector('svg') && !!home.querySelector('svg'),
       info: 'center=' + chat.classList.contains('center') + ' fab=' + !!chat.querySelector('.fab') };
   });
-  T('专注条可收起成悬浮块 / 展开 / 进专注页', function(){
-    return { ok: typeof fbClick === 'function' && typeof fbApply === 'function'
-      && typeof fbBindDrag === 'function' && typeof fbToggleShape === 'function',
-      info: 'fbClick=' + typeof fbClick };
+  T('专注条的入口齐全（收起 / 展开 / 点按 / 应用形态 / 绑定拖动）', function(){
+    var need = ['fbCollapse', 'fbExpand', 'fbTap', 'fbApply', 'fbBindDrag', 'fbSetShape', 'fbRelayout'];
+    var missing = need.filter(function(k){ return typeof window[k] !== 'function'; });
+    /* 旧的三段式入口必须已经消失，不然说明那套「第几下才全屏」又回来了 */
+    var gone = typeof window.fbClick === 'undefined' && typeof window.fbToggleShape === 'undefined';
+    return { ok: missing.length === 0 && gone,
+      info: '缺=' + (missing.join(',') || '无') + ' · 旧三段式入口已清除=' + gone };
   });
   T('节假日入口在「我的」页，不在完整课表页', function(){
     go('me'); renderProfile();
@@ -1668,11 +1699,12 @@ const ASSERTS = String.raw`
     return { ok: used.length > 0 && miss.length === 0,
       info: '被打开 ' + used.length + ' 种 / 分支 ' + branches.length + ' 个' + (miss.length ? '；缺失=[' + miss.join(' ') + ']' : '') };
   });
-  T('7 个曾丢分支的弹层能真正渲染出内容', function(){
+  T('曾丢分支的弹层能真正渲染出内容', function(){
     /* 'cam'（拍照给 AI 的确认弹层）已删除：拍照/相册改成直接唤起系统相机，
-       图片直接用胶囊附件带走，不再经过确认弹层。 */
+       图片直接用胶囊附件带走，不再经过确认弹层。
+       'chathist' 也移出这份名单：历史会话从底部弹层改成了左侧抽屉，
+       它的行为在「历史对话侧栏」那条里量。 */
     var cases = [
-      ['chathist', '聊天记录', {}],
       ['todoform', '添加待办', {}],
       ['tableform', '插入表格', {}],
       ['skillform', '新建技能', { id: '' }],
@@ -2181,23 +2213,297 @@ const ASSERTS = String.raw`
     return { ok: a && b, info: '纯文字图=' + _pngPlain.length + ' 字符 · 含图=' + _pngImg.length + ' 字符' };
   });
 
-  /* ================= 聊天记录：删除 ================= */
-  T('聊天记录可以删除', function(){
-    var keep = JSON.parse(JSON.stringify(S.chatHistory || []));
-    S.chatHistory = [
-      { title:'测试会话A', when:'今天', msgs:[{r:'me', t:'hi'}] },
-      { title:'测试会话B', when:'昨天', msgs:[{r:'ai', t:'yo'}] }
-    ];
-    save();
+  /* ================= 历史对话侧栏 ================= */
+  T('历史侧栏：老数据能迁移，点一条会先存当前，长按菜单可收藏/归档/删除', function(){
+    var keep = JSON.stringify({ h:S.chatHistory, m:msgs, c:S.curChatId });
+    var d = document.getElementById('histDrawer'), scrim = document.getElementById('histScrim');
+    var list = document.getElementById('histList');
+    if(!d || !list) return { ok:false, info:'找不到 #histDrawer / #histList' };
+    try{
+      /* 老格式：只有 {title,when,msgs}，没有 id / ts / fav */
+      S.chatHistory = [
+        { title:'老会话甲', when:'周一', msgs:[{r:'me',t:'a'},{r:'ai',t:'b'}] },
+        { title:'老会话乙', when:'周二', msgs:[{r:'me',t:'c'}] }
+      ];
+      var migrated = migrateChatHistory();
+      var hasIds = S.chatHistory.every(function(h){ return h.id != null && h.ts != null; });
+
+      openHistDrawer();
+      var opened = d.classList.contains('show') && scrim.classList.contains('show');
+      var cards = [].slice.call(list.querySelectorAll('.hist-card'));
+
+      /* 点一条 = 切过去，且「手上这段」先被归档（不丢当前对话） */
+      msgs = [{r:'ai',t:'系统开场'},{r:'me',t:'正在写的'},{r:'ai',t:'答'}];
+      S.curChatId = '';
+      cards[0].click();
+      var switched = msgs.some(function(m){ return m.t === 'a'; });
+      var curSaved = (S.chatHistory || []).some(function(h){ return h.title === '正在写的'; });
+      var drawerClosed = !d.classList.contains('show');
+
+      /* 收藏 → 置顶 + 出现在「收藏」筛选里 */
+      var topId = S.chatHistory[0].id;
+      favChatSession(topId);
+      var starred = !!histById(topId).fav;
+      setHistFilter('fav');
+      var favOnly = [].slice.call(list.querySelectorAll('.hist-card')).length === 1;
+
+      /* 归档 → 从「全部」里消失，「已归档」里能看到，且可恢复 */
+      setHistFilter('all');
+      var beforeArch = list.querySelectorAll('.hist-card').length;
+      archiveChatSession(topId);
+      var afterArch = list.querySelectorAll('.hist-card').length;
+      setHistFilter('arch');
+      var inArch = list.querySelectorAll('.hist-card').length === 1;
+      archiveChatSession(topId);
+      setHistFilter('all');
+      var restored = list.querySelectorAll('.hist-card').length === beforeArch;
+
+      /* 长按菜单：页面侧断言是同步跑的，setTimeout 在忙等里不会触发，
+         所以这里直接调 histActions 验菜单内容，
+         「手势真的绑上了 + 480ms 阈值」交给下面那条源码守卫。 */
+      var c0 = list.querySelector('.hist-card');
+      var hid = c0.getAttribute('data-hid');
+      histActions(hid, {x:120, y:400});
+      var mm = document.getElementById('msgMenu');
+      var menuTxt = (mm.textContent || '').replace(/\s+/g,' ');
+      var menuOk = mm.classList.contains('show')
+        && menuTxt.indexOf('收藏') >= 0 && menuTxt.indexOf('归档') >= 0 && menuTxt.indexOf('删除') >= 0;
+      closeMsgMenu();
+
+      /* 删除走确认弹层，删完回到侧栏而不是关掉它 */
+      var n0 = (S.chatHistory || []).length;
+      delChatSession(S.chatHistory.findIndex(function(h){ return String(h.id) === String(topId); }));
+      var n1 = (S.chatHistory || []).length;
+      var backToDrawer = d.classList.contains('show');
+
+      return {
+        ok: migrated && hasIds && opened && cards.length === 2 && switched && curSaved
+          && drawerClosed && starred && favOnly && afterArch === beforeArch - 1
+          && inArch && restored && menuOk && n1 === n0 - 1 && backToDrawer,
+        info: '迁移=' + migrated + '/有id=' + hasIds + ' · 列表 ' + cards.length + ' 条 · 点开切换=' + switched
+          + ' · 当前已存=' + curSaved + ' · 选完收栏=' + drawerClosed
+          + ' · 收藏置顶=' + (starred && favOnly) + ' · 归档' + beforeArch + '→' + afterArch + '/可恢复=' + restored
+          + ' · 长按菜单=' + menuOk + ' · 删除 ' + n0 + '→' + n1 + ' 回侧栏=' + backToDrawer
+      };
+    } finally {
+      var o = JSON.parse(keep);
+      S.chatHistory = o.h; msgs = o.m; S.curChatId = o.c;
+      histFilter = 'all'; save(); closeHistDrawer(); closeMsgMenu();
+    }
+  });
+
+  /* 顶部那两块（小径头像行 + 「已接上…」状态条）是皮肤里的黑块来源，整块删掉；
+     但删元素最容易留雷：还写着 #chatModel / #aiAvatar 的渲染函数会在切页时抛异常。 */
+  T('对话页顶部两块已删除，且没有遗留代码引用它们', function(){
+    var gone = !document.getElementById('chatAiBar') && !document.getElementById('chatAiName')
+      && !document.getElementById('chatModel') && !document.querySelector('#page-chat .chat-head');
+    var btns = !!document.querySelector('#page-chat .chat-top .icon-btn[onclick="openHistDrawer()"]')
+      && !!document.querySelector('#page-chat .chat-top .icon-btn[onclick="startNewChat()"]');
+    var raw = document.documentElement.innerHTML;
+    /* 允许出现在注释里，不许还有活的 DOM 引用 */
+    var live = /getElementById\('(chatModel|chatAiName|aiAvatar)'\)\s*\.\s*(textContent|innerHTML|style)/.test(raw);
+    var noThrow = true;
+    try{ renderChatAiBar(); renderProfile(); }catch(e){ noThrow = e; }
+    /* openSheet('chathist') 保留成重定向：老调用点不能弹出一张空白 sheet */
     openSheet('chathist');
-    var sheetTxt = (document.getElementById('sheet') || {}).textContent || '';
-    var hasDel = sheetTxt.indexOf('删') >= 0;
-    delChatSession(0);
-    var left = (S.chatHistory || []).map(function(h){ return h.title; });
-    var okDel = left.length === 1 && left[0] === '测试会话B';
-    S.chatHistory = keep; save();
-    closeSheet();
-    return { ok: hasDel && okDel, info: '列表有删除=' + hasDel + ' 删后剩余=' + left.join('|') };
+    var redirected = document.getElementById('histDrawer').classList.contains('show')
+      && !document.getElementById('mask').classList.contains('show');
+    closeHistDrawer();
+    return {
+      ok: gone && btns && !live && noThrow === true && redirected,
+      info: '元素已删=' + gone + ' · 两颗按钮=' + btns + ' · 无活引用=' + !live
+        + ' · 渲染不抛=' + (noThrow === true ? true : String(noThrow)) + ' · 旧kind转侧栏=' + redirected
+    };
+  });
+
+  /* ================= 本轮真机反馈：几何与交互 ================= */
+
+  /* 分段控件的「椭圆滑块和外框没对齐」：皮肤给 .seg 加了 1px 边框，
+     而滑块是相对 padding box 定位的，于是上留 3px、下只留 1px。
+     这条量的是**真实四个方向的间隙**，不是样式字符串。 */
+  /* 分段控件的「椭圆滑块和外框没对齐」：皮肤给 .seg 加了 1px 边框，
+     而滑块是相对 padding box 定位的，于是上留 3px、下只留 1px。
+     这条量的是**真实四个方向的间隙**，不是样式字符串。
+     两档控件（主题）没有「中间那格」可量，几何部分并到下面那条异步断言里。 */
+  T('分段控件：滑块在轨道里上下左右四边间隙相等（真机踩过：外框和滑块不齐）', function(){
+    var seg = document.getElementById('themeSeg'), th = document.getElementById('segThumb');
+    if(!seg || !th) return { ok:false, info:'找不到 #themeSeg / #segThumb' };
+    function gaps(){
+      var a = seg.getBoundingClientRect(), b = th.getBoundingClientRect();
+      return { top: Math.round(b.top - a.top), bottom: Math.round(a.bottom - b.bottom),
+        left: Math.round(b.left - a.left), right: Math.round(a.right - b.right) };
+    }
+    var off = gaps();
+    S.uiTheme = 'pro'; applyLook();
+    var on = gaps();
+    S.uiTheme = 'classic'; applyLook();
+    var even = function(g){ return g.top === g.bottom && g.left === g.right && g.top >= 2 && g.top <= 4; };
+    return {
+      ok: even(off) && even(on),
+      info: '经典 上' + off.top + '/下' + off.bottom + '/左' + off.left + '/右' + off.right
+        + ' · 皮肤 上' + on.top + '/下' + on.bottom + '/左' + on.left + '/右' + on.right
+    };
+  });
+
+  /* 悬浮底栏原来只有图标变色，「认不出当前在哪一页」。
+     滑块是一颗 .tabbar::after，位置由 go() 写的 --tab-i 决定。
+     带 transition，所以每次切完要等一下再读（TA 是异步断言）。 */
+  await TA('底栏选中滑块：三档各自到位，且切页时 --tab-i 跟着走', async function(){
+    var bar = document.querySelector('.tabbar');
+    if(!bar) return { ok:false, info:'找不到 .tabbar' };
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    S.uiTheme = 'pro'; applyLook();
+    function pseudo(){ return getComputedStyle(bar, '::after'); }
+    function step(){
+      var t = pseudo().transform;
+      var m = /matrix\(([^)]*)\)/.exec(t);
+      return { raw: t, x: m ? parseFloat(m[1].split(',')[4]) : (t === 'none' ? 0 : NaN) };
+    }
+    async function at(tab){
+      go(tab);
+      /* 滑块走的是带回弹的曲线（ease-spring），会先冲过头再落回来；
+         420ms 时它还在收尾，读到 -0.14 这种值。等足 700ms 再量。 */
+      await sleep(700);
+      var s = step();
+      return { x: s.x, raw: s.raw, i: bar.style.getPropertyValue('--tab-i'),
+        w: parseFloat(pseudo().width) };
+    }
+    var h = await at('home'), c = await at('chat'), m2 = await at('me');
+    await at('home');
+    go(prev.replace('page-', ''));
+    S.uiTheme = keep; applyLook();
+    var shown = h.w > 20;
+    /* 一格 = 滑块自身宽度（translateX 用百分比），所以第二档 ≈ 2× 第一档间距 */
+    var moved = Math.abs(h.x) < 1 && c.x > 100 && m2.x > c.x + 100;
+    return {
+      ok: shown && moved && h.i === '0' && c.i === '1' && m2.i === '2',
+      info: '滑块宽=' + h.w.toFixed(0) + ' · 位移 ' + h.x + '→' + c.x + '→' + m2.x
+        + ' · --tab-i ' + h.i + '/' + c.i + '/' + m2.i + ' · raw=' + m2.raw
+    };
+  });
+
+  /* 加号菜单里「换个模型」点了没反应：applyModelPick 结尾会 openSheet('modelroles')，
+     快速切换也把它带上了 —— 菜单一收，整页弹层又盖上来。 */
+  T('加号菜单快速切模型：真的换掉，且不弹「模型与渠道」整页', function(){
+    var keep = JSON.stringify({ p:S.provider, r:S.roles, m:S.models, pm:S.providerModels, acc:S.providerAcc, url:S.baseUrl, key:S.apiKey });
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    try{
+      S.provider = 'deepseek'; S.baseUrl = 'https://x.test/v1'; S.apiKey = 'k';
+      S.providerAcc = {}; S.roles = { chat:{ p:'', m:'d-a', fx:false } };
+      S.providerModels = { deepseek:['d-a','d-b'] };
+      S.models = { chat:'d-a' };
+      go('chat');
+      plusModelMenu();
+      var box = document.getElementById('plusMenu');
+      var rows = [].slice.call(box.querySelectorAll('.actrow'));
+      var opened = box.classList.contains('show') && rows.length >= 2;
+      var maskBefore = document.getElementById('mask').classList.contains('show');
+      rows[1].click();
+      var now = roleCreds('chat').model;
+      var maskAfter = document.getElementById('mask').classList.contains('show');
+      var menuGone = !box.classList.contains('show');
+      return {
+        ok: opened && !maskBefore && now === 'd-b' && !maskAfter && menuGone,
+        info: '菜单开了=' + opened + '（' + rows.length + ' 档）· 切换后模型=' + now
+          + ' · 点后没弹整页=' + !maskAfter + ' · 菜单已收=' + menuGone
+      };
+    } finally {
+      var o = JSON.parse(keep);
+      S.provider=o.p; S.roles=o.r; S.models=o.m; S.providerModels=o.pm;
+      S.providerAcc=o.acc; S.baseUrl=o.url; S.apiKey=o.key;
+      closePlusMenu(); applyLook(); save();
+      /* 切走过的页要还回去：后面还有依赖「当前在 me 页」的量测 */
+      go(prev.replace('page-', ''));
+      try{ renderChatAiBar(); renderModels(); }catch(e){}
+    }
+  });
+
+  /* 输入行：加号 / 全屏 / 发送三颗按钮比输入框矮一截，真机上看着就是
+     「三个小东西围着一个大框」。皮肤里统一成 44×44。 */
+  T('对话输入行：三颗按钮和输入框同高', function(){
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    S.uiTheme = 'pro'; applyLook(); go('chat');
+    var inp = document.getElementById('chatInput');
+    var btns = [].slice.call(document.querySelectorAll('.composer .icon-btn'));
+    var ih = inp ? Math.round(inp.getBoundingClientRect().height) : 0;
+    var hs = btns.map(function(b){ return Math.round(b.getBoundingClientRect().height); });
+    var dbg = btns.length ? getComputedStyle(btns[0]).height : '-';
+    go(prev.replace('page-', ''));
+    S.uiTheme = keep; applyLook();
+    if(!inp || btns.length < 3) return { ok:false, info:'输入行元素不齐（按钮 ' + btns.length + ' 颗）' };
+    var same = hs.every(function(x){ return Math.abs(x - ih) <= 2; });
+    return { ok: same, info: '输入框 ' + ih + 'px · 按钮 ' + hs.join('/') + 'px · computed ' + dbg };
+  });
+
+  /* 全局背景图：开关、遮罩档位、清除三件事都要落在 html 的行内样式上 */
+  T('全局背景图：设置后挂 url 与遮罩，脏值不生效，清除后回到主题底色', function(){
+    var keepImg = S.bgImage, keepDim = S.bgDim;
+    var r = document.documentElement;
+    try{
+      var fake = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+      S.bgImage = fake; S.bgDim = 'heavy'; applyLook();
+      var on = r.classList.contains('has-bg');
+      var photo = r.style.getPropertyValue('--bg-photo');
+      var scrim = parseFloat(r.style.getPropertyValue('--scrim'));
+      S.bgImage = 'not-an-image'; applyLook();
+      var dirtyOff = !r.classList.contains('has-bg');
+      S.bgImage = fake; S.bgDim = 'light'; applyLook();
+      var lightScrim = parseFloat(r.style.getPropertyValue('--scrim'));
+      bgClear();
+      var cleared = !r.classList.contains('has-bg')
+        && r.style.getPropertyValue('--bg-photo') === 'none' && S.bgImage === '';
+      return {
+        ok: on && /data:image\/jpeg/.test(photo) && scrim > lightScrim && dirtyOff && cleared,
+        info: '挂上=' + on + ' · 遮罩 重' + scrim + '>轻' + lightScrim
+          + ' · 脏值不生效=' + dirtyOff + ' · 清除=' + cleared
+      };
+    } finally {
+      S.bgImage = keepImg; S.bgDim = keepDim; applyLook();
+    }
+  });
+
+  /* 裁切层是异步的（等 img.onload），所以用 TA。
+     量的是「选区不许跑出图片」+「应用后真的产出一张 JPEG」。 */
+  await TA('图片裁切：选区被夹在图片内，锁比例生效，应用后产出 JPEG', async function(){
+    var cv = document.createElement('canvas');
+    cv.width = 400; cv.height = 300;
+    var g = cv.getContext('2d');
+    g.fillStyle = '#334455'; g.fillRect(0, 0, 400, 300);
+    g.fillStyle = '#ee0055'; g.fillRect(100, 50, 120, 120);
+    var src = cv.toDataURL('image/png');
+    var got = null;
+    openCropper({ src: src, aspect: null, maxSide: 200, quality: 0.9,
+      onApply: function(url, w, h){ got = { url:url, w:w, h:h }; } });
+    var t0 = Date.now();
+    while(Date.now() - t0 < 2500 && !document.getElementById('cropMask').classList.contains('show'))
+      await sleep(50);
+    var img = document.getElementById('cropImg'), box = document.getElementById('cropBox');
+    if(!CROP) return { ok:false, info:'裁切层没打开' };
+    var ir = img.getBoundingClientRect(), br = box.getBoundingClientRect();
+    var inside = br.left >= ir.left - 1 && br.right <= ir.right + 1
+      && br.top >= ir.top - 1 && br.bottom <= ir.bottom + 1;
+    cropSetBox(-500, -500, 9999, 9999);
+    var clamped = CROP.box.x === 0 && CROP.box.y === 0
+      && CROP.box.w <= ir.width + 1 && CROP.box.h <= ir.height + 1;
+    var ratioFree = CROP.box.w / CROP.box.h;
+    cropApply();
+    var okOut = !!got && /^data:image\/jpeg;base64,/.test(got.url)
+      && Math.abs(got.w / got.h - ratioFree) < 0.06;
+    /* 锁 2:1（头像那档是 1:1，同一套代码） */
+    closeCropper();
+    openCropper({ src: src, aspect: 2, maxSide: 100, quality: 0.9, onApply: function(){} });
+    var t1 = Date.now();
+    while(Date.now() - t1 < 2500 && !(CROP && CROP.box)) await sleep(50);
+    var ratio2 = CROP ? (CROP.box.w / CROP.box.h) : 0;
+    closeCropper();
+    return {
+      ok: inside && clamped && okOut && Math.abs(ratio2 - 2) < 0.02,
+      info: '选区在图内=' + inside + ' · 越界被夹回=' + clamped
+        + ' · 产出=' + (got ? got.w + '×' + got.h : 'null')
+        + ' · 锁 2:1 实际=' + ratio2.toFixed(2)
+    };
   });
 
   /* ================= 联网搜索 ================= */
@@ -2368,7 +2674,7 @@ const ASSERTS = String.raw`
       var afterRepeat = pops;
 
       // ② 点「稍后提醒」后再推 3 次 —— 一次都不该弹
-      S.__pending = { day:dA, c:cA };
+      window.__pending = { day:dA, c:cA };
       window.snoozeAlert();
       var base = pops;
       for(var j=0;j<3;j++) window.onNativeClassAlert('start', '自测·重复课A');
@@ -2380,7 +2686,7 @@ const ASSERTS = String.raw`
       var poppedB = pops - beforeB;
 
       // ④ 点了「开始上课并记录专注」之后，这节也不该再弹
-      S.__pending = { day:dA, c:cB };
+      window.__pending = { day:dA, c:cB };
       try{ window.confirmStartClass(); }catch(e0){}
       var beforeC = pops;
       window.onNativeClassAlert('start', '自测·对照课B');
@@ -2399,7 +2705,7 @@ const ASSERTS = String.raw`
       window.closeAlert();
       S.courses = snapCourses;
       if(hadHold) S.__alertHold = snapHold; else delete S.__alertHold;
-      S.__pending = null;
+      window.__pending = null;
       delete S.classes[cid(dA, cB)];
       delete S.classes[cid(dA, cA)];
     }
@@ -2598,11 +2904,14 @@ const ASSERTS = String.raw`
     try{
       isApp = true;
       /* 假桥：待记账队列里躺着一条「跑了 25 分钟的番茄」。
+         时间戳用「刚刚」而不是写死的 2023 —— 真实场景就是通知栏跑完、App 被杀、
+         用户回来打开，endedAt 必然是刚才。写死的旧日期会被按天补记逻辑归到那一天去。
          ack 之后队列要真的清空 —— 模拟原生 FocusStore.ack 的行为，
          这样才测得出「来回切前后台会不会把同一轮记两次」。 */
+      var tNow = Date.now();
       var pending = [{id:'1700000000000', label:'自由专注', courseId:'', mode:'work',
                       dir:'down', totalSecs:1500, secs:1500,
-                      startAt:1700000000000, endedAt:1700000900000, reason:'natural'}];
+                      startAt:tNow - 1500000, endedAt:tNow - 60000, reason:'natural'}];
       NATIVE = {
         focusState: function(){
           return JSON.stringify({hasSession:false, running:false, pending:pending});
@@ -2632,6 +2941,44 @@ const ASSERTS = String.raw`
     } finally {
       NATIVE = oldN; isApp = oldApp;
       try{ S.days = JSON.parse(oldDays); S.classes = JSON.parse(oldCls); save(); }catch(e){}
+    }
+  });
+
+  // 跨天的补记必须记到「那一轮结束的那天」，不能全塞进今天
+  // （真机场景：通知栏跑完一轮 → App 被杀 → 第二天才打开，今天会凭空多 25 分钟，
+  //   今日/本周/连续打卡三口径一起虚高）
+  T('跨天补记记到结束那天，不记到今天', function(){
+    if(typeof syncFocusFromNative !== 'function') return { ok:false, info:'缺 syncFocusFromNative' };
+    var oldN = NATIVE, oldApp = isApp, oldDays = JSON.stringify(S.days);
+    try{
+      isApp = true;
+      var yD = new Date(); yD.setDate(yD.getDate() - 1);
+      var yKey = dayKey(yD), tKey = todayKey();
+      var ended = yD.getTime();
+      var pending = [{id:'xj-crossday-1', label:'自由专注', courseId:'', mode:'work',
+                      dir:'down', totalSecs:1500, secs:1500,
+                      startAt:ended - 1500000, endedAt:ended, reason:'natural'}];
+      NATIVE = {
+        focusState: function(){ return JSON.stringify({hasSession:false, running:false, pending:pending}); },
+        focusAck: function(ids){
+          try{
+            var drop = JSON.parse(ids || '[]').map(String);
+            pending = pending.filter(function(x){ return drop.indexOf(String(x.id)) < 0; });
+          }catch(e){}
+        }
+      };
+      var before = todayMin(), beforeY = dayMin(yKey);
+      syncFocusFromNative();
+      var grewToday = todayMin() - before;
+      var grewY = dayMin(yKey) - beforeY;
+      return {
+        ok: Math.abs(grewToday) < 0.001 && Math.abs(grewY - 25) < 0.01,
+        info: '今天多了=' + grewToday.toFixed(2) + '（期望 0） · 昨天多了=' + grewY.toFixed(2)
+          + '（期望 25，键 ' + yKey + '）'
+      };
+    } finally {
+      NATIVE = oldN; isApp = oldApp;
+      try{ S.days = JSON.parse(oldDays); save(); }catch(e){}
     }
   });
 
@@ -3028,6 +3375,971 @@ const ASSERTS = String.raw`
     }
   });
 
+  // ============ 灵动岛（v0.2.7）：两列排版 + 分项开关 ============
+  T('灵动岛设置页：两列预览、分项开关真的改状态并推给原生', function(){
+    var snapP = JSON.stringify(S.prefs);
+    var keepNative = (typeof NATIVE !== 'undefined') ? NATIVE : null;
+    var keepApp = (typeof isApp !== 'undefined') ? isApp : false;
+    try{
+      isApp = true;
+      var onCalls = [], cfgCalls = [];
+      NATIVE = {
+        setIslandOn: function(v){ onCalls.push(String(v)); },
+        setIslandPrefs: function(j){ cfgCalls.push(String(j)); },
+        testNotify: function(){}
+      };
+      S.prefs.islandOn = true; S.prefs.islandStart = true;
+      S.prefs.islandEnd = true; S.prefs.islandStay = true;
+      S.prefs.islandElems = ['course','place','countdown'];
+      noteMode = 'list'; noteCurId = null;
+      openView('island');
+      var host = document.getElementById('islandBody');
+      if(!host) return { ok:false, info:'缺 #islandBody' };
+
+      /* 两个预览：上面是上课提醒（右列分钟），下面是专注（右列 MM:SS）。
+         以前下面是「上课中」，用户要求换成专注预览 —— 两种右列格式不一样，
+         所以分开断言，别用一个正则通吃。 */
+      var pills = host.querySelectorAll('.isl-pill');
+      var rightOk = pills.length === 2;
+      if(rightOk){
+        var c1 = pills[0].querySelector('.ip-r'), n1 = pills[0].querySelector('.ip-l b');
+        var c2 = pills[1].querySelector('.ip-r'), n2 = pills[1].querySelector('.ip-l b');
+        rightOk = !!c1 && !!n1 && /分钟/.test(c1.textContent)
+               && !!c2 && !!n2 && /^\d{1,2}:\d{2}$/.test(c2.textContent.trim())
+               && n1.textContent.indexOf('数据结构') >= 0
+               && n2.textContent.indexOf('专注') >= 0;
+      }
+      /* 关掉「倒计时」元素：预览右列必须消失（不能留着骗人） */
+      islandToggleElem('countdown');
+      var noRight = !host.querySelector('.isl-pill .ip-r');
+      var cfg1 = {};
+      try{ cfg1 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      /* 关掉「地点」：左列副文本也必须消失。
+         第一版这里写反了（sub 无条件初始化，if 里赋同一个值），
+         截图才发现预览一直在显示地点 —— 所以这条一起量。 */
+      islandToggleElem('place');
+      var noSub = !host.querySelector('.isl-pill .ip-l small');
+      islandToggleElem('place'); islandToggleElem('countdown');
+      /* 关「上课期间常驻」：JSON 里 stay 必须真变 false */
+      islandToggle('islandStay');
+      var cfg2 = {};
+      try{ cfg2 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      /* 关「专注计时上岛」：focus 必须真变 false（以前专注上岛不可配） */
+      islandToggle('islandFocus');
+      var cfgF = {};
+      try{ cfgF = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      islandToggle('islandFocus');
+      /* 切岛屿形态：len 必须跟着变（0 短岛 / 1 标准 / 2 完整） */
+      islandSetForm(0);
+      var cfgL1 = {};
+      try{ cfgL1 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      var shortPill = host.querySelector('.isl-pill.short');
+      var shortNoSub = !!shortPill && !shortPill.querySelector('.ip-l small')
+        && !!shortPill.querySelector('.isl-ring') && !!shortPill.querySelector('.ip-r');
+      islandSetForm(2);
+      var cfgL2 = {};
+      try{ cfgL2 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      var fullBar = !!host.querySelector('.isl-bar');
+      islandSetForm(1);
+      /* 切停留时长：stayMin 必须跟着变，与形态互不影响 */
+      islandSetStay(30);
+      var cfgT1 = {};
+      try{ cfgT1 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      islandSetStay(10);
+      /* 元素自定义是折叠的：默认收起，点标题行才展开 */
+      var fold = document.getElementById('islFold');
+      var foldClosed = fold && !fold.classList.contains('open');
+      islandToggleFold();
+      var foldOpen = fold && fold.classList.contains('open');
+      islandToggleFold();
+      var foldClosedAgain = fold && !fold.classList.contains('open');
+      /* 关总开关：既要通知原生收回，也要把 on 一起推过去 */
+      islandToggle('islandOn');
+      var cfg3 = {};
+      try{ cfg3 = JSON.parse(cfgCalls[cfgCalls.length - 1]); }catch(e){}
+      var badge = (document.getElementById('islandBadge') || {}).textContent || '';
+      islandToggle('islandOn');
+      var ok = rightOk && noRight && noSub
+        && cfg1.elems && cfg1.elems.indexOf('countdown') < 0
+        && cfg2.stay === false && cfgF.focus === false
+        && cfgL1.len === 0 && cfgL2.len === 2
+        && cfgT1.stayMin === 30
+        && shortPill && shortNoSub && fullBar
+        && foldClosed && foldOpen && foldClosedAgain
+        && cfg3.on === false
+        && onCalls.indexOf('0') >= 0 && badge === '已关';
+      return {
+        ok: ok,
+        info: '两列预览=' + rightOk + ' · 关倒计时后右列消失=' + noRight
+          + ' · 关地点后副文本消失=' + noSub
+          + ' · elems同步=' + (cfg1.elems ? cfg1.elems.join('|') : 'x')
+          + ' · stay=false=' + (cfg2.stay === false)
+          + ' · 专注可关=' + (cfgF.focus === false)
+          + ' · 形态len=' + cfgL1.len + '/' + cfgL2.len + ' · 停留stayMin=' + cfgT1.stayMin
+          + ' · 短岛极窄+环=' + shortNoSub + ' · 完整档横条=' + fullBar
+          + ' · 折叠 收/开/收=' + foldClosed + '/' + foldOpen + '/' + foldClosedAgain
+          + ' · on=false=' + (cfg3.on === false)
+          + ' · 通知原生收回=' + (onCalls.indexOf('0') >= 0)
+          + ' · 角标=' + badge
+      };
+    } finally {
+      S.prefs = JSON.parse(snapP); save();
+      NATIVE = keepNative; isApp = keepApp;
+      try{ closeView('island'); }catch(e){}
+    }
+  });
+  // 真机踩过的排版事故：停留时长的三档被压成 56px 宽，「标准」竖排成两行
+  //（图上看着像乱码）。原因是 .seg 是 .li 的 flex 子项、不写 flex 时基准宽
+  // 取内容宽，而档位又是 flex:1。这里把「够宽 + 不换行」钉死。
+  T('分段控件够宽、档位不竖排（真机踩过：「标准」被挤成两行）', function(){
+    var snapP = JSON.stringify(S.prefs);
+    var keepApp = (typeof isApp !== 'undefined') ? isApp : false;
+    try{
+      isApp = true;
+      NATIVE = { setIslandOn: function(){}, setIslandPrefs: function(){}, testNotify: function(){} };
+      noteMode = 'list'; noteCurId = null;
+      openView('island');
+      var segs = ['islandFormSeg', 'islandStaySeg'].map(function(id){
+        var s = document.getElementById(id);
+        if(!s) return { id:id, ok:false, info:'找不到 #' + id };
+        var sr = s.getBoundingClientRect();
+        var th = s.querySelector('.segThumb');
+        var tR = th ? th.getBoundingClientRect() : null;
+        var ovY = tR ? Math.round((sr.top - tR.top) + (tR.bottom - sr.bottom)) : 999;
+        var ovX = tR ? Math.round((sr.left - tR.left) + (tR.right - sr.right)) : 999;
+        var items = [].map.call(s.querySelectorAll('.segI'), function(x){
+          var r = x.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height), t: x.textContent.trim() };
+        });
+        return { id:id, ok: sr.width >= 150
+            && items.filter(function(i){ return i.h > 32; }).length === 0
+            && items.filter(function(i){ return i.w < 44; }).length === 0
+            && !!tR && ovY === -6 && ovX <= -2 && Math.round(tR.height) === Math.round(sr.height) - 6,
+          info: Math.round(sr.width) + 'px / ' + items.map(function(i){ return i.t; }).join(' ') };
+      });
+      var seg = segs[0].id ? document.getElementById('islandFormSeg') : null;
+      var segW = seg ? seg.getBoundingClientRect().width : 0;
+      var rowW = seg && seg.closest('.li') ? seg.closest('.li').getBoundingClientRect().width : 0;
+      /* 也钉一下「正文大小」那处：它是同一个 .seg 组件，一起量才放心 */
+      closeView('island');
+      go('me');
+      var fs = document.getElementById('fsSeg');
+      var fsItems = fs ? [].map.call(fs.querySelectorAll('.segI'), function(x){
+        return Math.round(x.getBoundingClientRect().width);
+      }) : [];
+      if(keepApp && keepApp !== true) go('me');
+      var ok = segs.every(function(s){ return s.ok; })
+            && segW >= 150 && rowW > segW && fsItems.length === 4
+            && fsItems.every(function(w){ return w >= 60; });
+      return {
+        ok: ok,
+        info: segs.map(function(s){ return s.id + ' ' + s.info; }).join(' | ')
+          + ' · 形态seg 宽=' + Math.round(segW) + '（父行 ' + Math.round(rowW) + '）'
+          + ' · 正文大小各档宽=' + (fsItems.join('/') || '量不到')
+      };
+    } finally {
+      S.prefs = JSON.parse(snapP); save();
+      isApp = keepApp;
+      try{ closeView('island'); }catch(e){}
+      try{ renderNotes(); }catch(e){}
+    }
+  });
+
+  // 一级：所有二级页都必须登记进 SUBVIEWS（真机踩过：陪伴页侧滑直接退桌面）。
+  // 不写死名单 —— 直接拿 DOM 里 class="view" 的元素对账，以后新增页面漏登记会自动被抓。
+  T('架构守卫：每个 .view 都登记进 SUBVIEWS（返回层认得它）', function(){
+    var domIds = [].map.call(document.querySelectorAll('.view'), function(v){
+      return (v.id || '').replace(/^view-/, '');
+    }).filter(Boolean);
+    var missing = domIds.filter(function(id){ return SUBVIEWS.indexOf(id) < 0; });
+    var ghost = SUBVIEWS.filter(function(id){ return domIds.indexOf(id) < 0; });
+    return {
+      ok: missing.length === 0 && ghost.length === 0,
+      info: 'DOM 二级页=' + domIds.length + ' · 未登记=' + (missing.join(',') || '无')
+        + ' · 名单里查无此页=' + (ghost.join(',') || '无')
+    };
+  });
+
+  // AI 档案 / 行程上下文里不能出现 undefined —— 字段名写错时不报错，
+  // 只是把「undefined（未完成）」喂给模型，等于静默丢掉一整行上下文。
+  T('架构守卫：给 AI 的档案里没有 undefined 字段', function(){
+    var before = JSON.stringify(S.tasks);
+    try{
+      S.tasks[taskKey(todayI)] = [{h:'09:00', t:'测试验证字段', s:'', done:false, pomo:1, mins:25}];
+      var p = profileBlock();
+      var ctx = dayContext ? dayContext(todayI) : '';
+      var bad = /undefined/.test(p) || /undefined/.test(ctx);
+      var hit = '';
+      if(bad){
+        var line = (p + '\n' + ctx).split('\n').filter(function(l){ return l.indexOf('undefined') >= 0; })[0] || '';
+        hit = line.slice(0, 60);
+      }
+      return { ok: !bad, info: bad ? ('出现 undefined：' + hit) : '档案与当日上下文都干净' };
+    } finally {
+      S.tasks = JSON.parse(before); save();
+    }
+  });
+
+  // 备份清单必须覆盖所有会持久化的状态键。
+  // 这条是真踩过坑才加的：providerAcc / customProviders / roles / 定价 这些后加的键
+  // 没人记得补进 BACKUP_KEYS，换机就静默丢一半配置。
+  T('架构守卫：每个持久化状态键都在备份清单里', function(){
+    /* 故意不备份的键：跑一轮就变的会话态、启动标记、纯派生缓存、诊断信息 */
+    var SKIP = {schema:1, onboarded:1, focus:1, holLastErr:1, __holFlat:1,
+                sysHolidays:1, holidays:1, summaryTried:1};
+    var covered = {};
+    BACKUP_KEYS.study.concat(BACKUP_KEYS.ai).forEach(function(k){ covered[k] = 1; });
+    var leaked = Object.keys(S).filter(function(k){ return !covered[k] && !SKIP[k]; });
+    var dup = BACKUP_KEYS.study.filter(function(k){ return BACKUP_KEYS.ai.indexOf(k) >= 0; });
+    return {
+      ok: leaked.length === 0 && dup.length === 0,
+      info: '状态键 ' + Object.keys(S).length + ' 个 · 备份清单 '
+        + Object.keys(covered).length + ' 个 · 没覆盖=' + (leaked.join(',') || '无')
+        + ' · 两组重复=' + (dup.join(',') || '无')
+    };
+  });
+
+  // 全屏文字笔记的「完成」按钮：高亮摆在那儿却没人绑定，点了没反应（真机踩过同类）。
+  T('全屏笔记的「完成」按钮真的能退出', function(){
+    var b = document.getElementById('noteDoneBtn');
+    if(!b) return { ok:false, info:'找不到 #noteDoneBtn' };
+    var bound = typeof b.onclick === 'function' || !!b.getAttribute('onclick');
+    var before = document.getElementById('noteFull').classList.contains('show');
+    document.getElementById('noteFull').classList.add('show');
+    b.click();
+    var closed = !document.getElementById('noteFull').classList.contains('show');
+    if(before) document.getElementById('noteFull').classList.add('show');
+    return { ok: bound && closed, info: '有绑定=' + bound + ' · 点一下真的关了=' + closed };
+  });
+
+  // 跨零点：todayI 是启动时快照的，页面整夜开着不重算就会把昨天当今天。
+  T('跨零点后 initClock 会把「今天」重算回来', function(){
+    var real = todayIdx();
+    var oldSel = selIdx, oldI = todayI;
+    try{
+      todayI = (real + 6) % 7;          /* 假装是昨天启动的 */
+      selIdx = todayI;
+      initClock();
+      var fixed = (todayI === real);
+      var selFollowed = (selIdx === real);  /* 原来停在今天，换日后该跟着走 */
+      return { ok: fixed && selFollowed,
+        info: '重算后 todayI=' + todayI + '（期望 ' + real + '） · selIdx 跟上=' + selFollowed };
+    } finally {
+      todayI = oldI; selIdx = oldSel;
+    }
+  });
+
+  // 手写防抖的**行为**验证（不只是源码形状）：矢量立刻进笔记，位图要等冲盘
+  T('手写落盘：调用了先存矢量，位图在 inkFlushSave 才导出', function(){
+    if(typeof inkSaveToNote !== 'function' || typeof inkFlushSave !== 'function')
+      return { ok:false, info:'缺 inkSaveToNote / inkFlushSave' };
+    var oldNotes = JSON.stringify(S.notes), oldOn = inkOn, oldCur = noteCurId, oldItems = inkItems;
+    try{
+      S.notes = [{ id:'xj-ink-1', title:'自测', body:'', ink:'', inkItems:[], at:1 }];
+      noteCurId = 'xj-ink-1'; inkOn = true; inkDark = false; inkBgImage = null;
+      /* 无头环境里全屏画布没被 prep 过就是 0×0，toDataURL 只会得到空串 ——
+         先给个真实尺寸，让「位图有没有导出」这个判据有意义。 */
+      var cv0 = inkCanvasEl();
+      if(!cv0) return { ok:false, info:'找不到手写画布元素' };
+      cv0.width = 300; cv0.height = 420;
+      var g0 = cv0.getContext('2d');
+      g0.fillStyle = '#111111'; g0.fillRect(10, 10, 60, 60);
+      inkItems = [{ kind:'stroke', tool:'pencil', color:'#111111', alpha:1, size:6, prs:false,
+                   pts:[{x:12,y:14,p:.6},{x:60,y:88,p:.6},{x:120,y:40,p:.6}] }];
+      inkSaveToNote();
+      var n1 = noteById('xj-ink-1');
+      var vecNow = !!(n1.inkItems && n1.inkItems.length === 1);
+      var bmpBefore = n1.ink;
+      inkFlushSave();
+      var bmpAfter = noteById('xj-ink-1').ink;
+      /* 冲完必须把待发状态清干净，否则再调一次会把同一份再写一遍 */
+      var pendingClean = !inkSaveTimer && !inkPending;
+      return {
+        ok: vecNow && !bmpBefore && /^data:image\/png/.test(String(bmpAfter)) && pendingClean,
+        info: '矢量立刻入笔记=' + vecNow
+          + ' · 防抖窗口内位图=' + (bmpBefore ? '已导出（不该）' : '空')
+          + ' · 冲盘后位图=' + String(bmpAfter).slice(0, 16) + '(len ' + String(bmpAfter).length + ')'
+          + ' · 待发状态已清=' + pendingClean
+      };
+    } finally {
+      S.notes = JSON.parse(oldNotes);
+      inkOn = oldOn; noteCurId = oldCur; inkItems = oldItems;
+      if(inkSaveTimer){ clearTimeout(inkSaveTimer); inkSaveTimer = null; }
+      inkPending = null;
+      try{ save(); }catch(e){}
+    }
+  });
+
+  // 专注条：一条一个动作（整条=进专注页 / 收起=折小块 / 小块=展回整条），
+  // 并盯住这几件真机踩过或一眼能看出的事：拖动跟手、松手吸附、越界回收、
+  // 暂停在小块上也要看得出来、结束后复位，以及不再有「第几下才全屏」那种状态。
+  T('专注条：整条进专注页 / 收起成小块 / 小块展回 / 拖动吸附不越界', function(){
+    var el = document.getElementById('focusBar');
+    if(!el) return { ok:false, info:'找不到 #focusBar' };
+    var oldFocus = JSON.stringify(S.focus), oldShape = S.fbShape, oldPos = JSON.stringify(S.fbPos);
+    var oldView = document.getElementById('view-focus').classList.contains('show');
+    function tap(x, y){
+      el.dispatchEvent(new PointerEvent('pointerdown', {pointerId:7, clientX:x, clientY:y, bubbles:true}));
+      el.dispatchEvent(new PointerEvent('pointerup', {pointerId:7, clientX:x, clientY:y, bubbles:true}));
+    }
+    function dragTo(dx, dy){
+      var r0 = el.getBoundingClientRect();
+      var x0 = r0.left + r0.width / 2, y0 = r0.top + r0.height / 2;
+      el.dispatchEvent(new PointerEvent('pointerdown', {pointerId:8, clientX:x0, clientY:y0, bubbles:true}));
+      el.dispatchEvent(new PointerEvent('pointermove', {pointerId:8, clientX:x0 + dx, clientY:y0 + dy, bubbles:true}));
+      el.dispatchEvent(new PointerEvent('pointerup', {pointerId:8, clientX:x0 + dx, clientY:y0 + dy, bubbles:true}));
+    }
+    try{
+      S.focus = JSON.parse(JSON.stringify(DEFAULT.focus));
+      S.focus.on = true; S.focus.label = '自测专注'; S.focus.mode = 'work';
+      S.focus.dir = 'down'; S.focus.total = 1500; S.focus.secs = 1500;
+      fbState = 'bar'; fbPos = null; S.fbPos = null; S.fbShape = null;
+      el.classList.remove('dragging', 'fb-morph');
+      renderFocus();
+      var shown = el.classList.contains('show');
+      var st0 = getComputedStyle(el);
+      /* 显隐与形变都要有过渡：以前只有进场一条 animation，收起等于 display:none 硬切 */
+      var hasTransition = parseFloat(st0.transitionDuration.split(',')[0]) > 0.05;
+      var r1 = el.getBoundingClientRect();
+      tap(r1.left + 30, r1.top + 20);
+      var openedView = document.getElementById('view-focus').classList.contains('show');
+      document.getElementById('view-focus').classList.remove('show');
+
+      /* 收起 → 小块：当场就该是 pill，并用 left/top 定位（可拖） */
+      document.getElementById('fbCollapse').dispatchEvent(new Event('click', {bubbles:true}));
+      var isPill = el.classList.contains('pill');
+      var positioned = !!el.style.left && !!el.style.top;
+      var pw = Math.round(el.getBoundingClientRect().width);
+
+      /* 往左上角死命拖：必须被夹回视口，并吸附到左边缘（14px） */
+      dragTo(-4000, -4000);
+      var r2 = el.getBoundingClientRect();
+      var inside = r2.left >= 0 && r2.top >= 0
+        && r2.right <= window.innerWidth + 1 && r2.bottom <= window.innerHeight + 1;
+      /* 吸附是「写 left=14 + 让 transition 过去」，同帧读 rect 还在半路上，
+         所以断言看真正写进去的定位值（吸附结果），rect 只用来判没越界。 */
+      var snapped = Math.abs(parseFloat(el.style.left) - 14) <= 1;
+      var savedPos = !!(S.fbPos && S.fbPos.x >= 0);
+
+      /* 暂停状态要在两种形态都看得出来（以前 pill 把 pulse 整颗 display:none） */
+      S.focus.paused = true; renderFocus();
+      var pausedClass = el.classList.contains('paused');
+      var pst = getComputedStyle(el.querySelector('.pulse'));
+      var pulseVisibleInPill = pst.display !== 'none';
+      var pulseFrozen = pst.animationName === 'none';
+      el.classList.remove('pill');            /* 下面量整条形态，先把 class 摆正 */
+      S.focus.paused = false;
+
+      /* 点小块 → 展回整条：不该顺手把全屏页也打开，内联定位要清掉 */
+      fbSetShape('pill');
+      fbPos = { x: 14, y: Math.round(r2.top) };
+      fbApply();
+      var wasPill = el.classList.contains('pill');
+      var r3 = el.getBoundingClientRect();
+      tap(r3.left + 20, r3.top + 20);
+      var backToBar = !el.classList.contains('pill');
+      var inlineCleared = !el.style.left && !el.style.top;
+      var viewStillClosed = !document.getElementById('view-focus').classList.contains('show');
+
+      /* 一轮结束：隐藏 + 形态与位置复位（走真实的 stopFocus，别只翻标志） */
+      S.focus.on = true; S.focus.total = 1500; S.focus.secs = 1500; renderFocus();
+      stopFocus();
+      var hidden = !el.classList.contains('show');
+      var reset = fbState === 'bar' && fbPos === null && !S.fbPos && !S.fbShape
+        && wasPill && backToBar !== undefined;
+
+      return {
+        ok: shown && hasTransition && openedView && isPill && positioned && pw <= 120
+          && inside && snapped && savedPos && pausedClass && pulseVisibleInPill && pulseFrozen
+          && wasPill && backToBar && inlineCleared && viewStillClosed && hidden && reset,
+        info: '可见=' + shown + ' · 有过渡=' + hasTransition + ' · 点整条进全屏=' + openedView
+          + ' · 收起成小块=' + (isPill && positioned) + '(宽' + pw + ')'
+          + ' · 拖出被夹回=' + inside + ' · 吸附左边缘=' + snapped + ' · 位置已存=' + savedPos
+          + ' · 暂停可见=' + (pausedClass && pulseVisibleInPill) + ' · pulse静止=' + pulseFrozen
+          + ' · 点小块展回=' + (wasPill && backToBar && inlineCleared && viewStillClosed)
+          + ' · 结束隐藏=' + hidden + ' · 复位=' + reset
+      };
+    } finally {
+      S.focus = JSON.parse(oldFocus); S.fbShape = oldShape;
+      S.fbPos = oldPos ? JSON.parse(oldPos) : null;
+      fbState = 'bar'; fbPos = null;
+      el.classList.remove('pill', 'paused', 'dragging', 'fb-morph');
+      el.style.left = ''; el.style.top = ''; el.style.right = ''; el.style.bottom = '';
+      try{
+        document.getElementById('view-focus').classList.toggle('show', oldView);
+        renderFocus(); save();
+      }catch(e){}
+    }
+  });
+
+  // 教学周口径：termStart 必须落在周一，否则同一个显示周里周一/周二与周三~周日
+  // 会差一个周次，单双周课整整错一天（真机表现为「双周的课今天没上」）。
+  T('教学周与自然周同一切口：开学日是周一，且整周周次一致', function(){
+    var iso = S.termStart;
+    if(!iso) return { ok:false, info:'termStart 为空' };
+    var d = isoToDate(iso);
+    var isMonday = d.getDay() === 1;
+    /* 课表网格那一行 7 天（周一~周日）算出来的周次必须全相等 */
+    var wnos = [];
+    for(var i = 0; i < 7; i++){
+      var dd = new Date(dayKeyOfWeek(i));
+      wnos.push(weekNo(dd));
+    }
+    var same = wnos.every(function(w){ return w === wnos[0]; });
+    /* 归一函数本身要能把任意日期拉回周一（老数据迁移与手动设置都走它） */
+    var shift = mondayOfIso('2026-09-02');           /* 2026-09-02 是周三 */
+    var shifted = shift === '2026-08-31';
+    /* 模拟老数据：非周一的 termStart 必须被启动迁移拉平 */
+    var oldTs = S.termStart, changed = false;
+    try{
+      S.termStart = '2026-09-02';
+      changed = normalizeTermStart();
+      var after = S.termStart;
+      var d2 = isoToDate(after);
+      return {
+        ok: isMonday && same && shifted && changed && after === '2026-08-31' && d2.getDay() === 1,
+        info: '当前开学日是周一=' + isMonday + '(' + iso + ')'
+          + ' · 整周周次一致=' + same + '(' + wnos.join('/') + ')'
+          + ' · 周三归一到周一=' + shifted + '(' + shift + ')'
+          + ' · 老数据可被拉平=' + (changed && after === '2026-08-31')
+      };
+    } finally { S.termStart = oldTs; }
+  });
+
+  // 课程状态 / 预约的键必须带日期：旧格式（只有星期）会让「跳过」永久生效、
+  // 让「已专注」跨周累计、让一条预约每周都自动开一次专注。
+  T('课程键带日期：跳过只影响当天，旧格式键能被迁移', function(){
+    var oldCls = JSON.stringify(S.classes), oldBook = JSON.stringify(S.bookings);
+    var oldCourses = JSON.stringify(S.courses[0]), oldI = todayI;
+    try{
+      /* ① 同一门课在两个日期上必须是两个键 */
+      S.courses[0] = [{ n:'自测·键', t:'08:00-09:40', loc:'', c:'#888', w:'all' }];
+      todayI = 0;
+      var kToday = cid(0, S.courses[0][0]);
+      var kOther = 'd' + dkAdd(todayKey(), 1) + '-08:00-09:40-自测·键';
+      var dated = /^d\d{4}-\d{2}-\d{2}-/.test(kToday) && kToday !== kOther;
+
+      /* ② 喂一份旧格式数据，跑迁移 */
+      var lastWeek = Date.now() - 9 * 86400000;
+      S.classes = { 'd0-08:00-09:40-自测·键': { status:'ongoing', min:12 },
+                    'd1-08:00-09:40-旧课': { status:'done', min:40 },
+                    'd3-10:00-09:40-旧课2': { status:'skipped' } };
+      S.bookings = { 'd0-08:00-09:40-自测·键': { day:0, t:'08:00-09:40', n:'自测·键', at:lastWeek },
+                     'd1-10:00-10:40-旧预约': { day:1, t:'10:00-10:40', n:'旧预约', at:Date.now() } };
+      migrateClassKeys();
+      var clsKeys = Object.keys(S.classes);
+      var clsOk = clsKeys.length === 1 && clsKeys[0] === kToday
+        && S.classes[kToday].status === 'ongoing' && S.classes[kToday].min === 12;
+      var bookKeys = Object.keys(S.bookings);
+      /* 上周创建的预约作废；本周的补上 date */
+      var bookOk = bookKeys.length === 1 && /^d\d{4}-\d{2}-\d{2}-/.test(bookKeys[0])
+        && !!S.bookings[bookKeys[0]].date;
+
+      /* ③ 新键下「跳过」不会波及另一个日期 */
+      S.classes = {}; S.classes[kToday] = { status:'skipped' };
+      var stillFresh = !(S.classes[kOther] && S.classes[kOther].status === 'skipped');
+
+      return {
+        ok: dated && clsOk && bookOk && stillFresh,
+        info: '键带日期且按天分开=' + dated + '(' + kToday + ')'
+          + ' · ongoing 搬到今天 / 历史丢弃=' + clsOk + '(' + clsKeys.join(',') + ')'
+          + ' · 过期预约作废 + 补 date=' + bookOk + '(' + bookKeys.join(',') + ')'
+          + ' · 跳过不波及别日=' + stillFresh
+      };
+    } finally {
+      S.classes = JSON.parse(oldCls); S.bookings = JSON.parse(oldBook);
+      S.courses[0] = JSON.parse(oldCourses); todayI = oldI;
+      try{ save(); }catch(e){}
+    }
+  });
+
+  // AI 请求要带 id：超时兜底放开队列后，上一条**迟到的回包**必须按 id 丢掉，
+  // 否则它会交给此刻占坑的那条任务 —— 表现是「问 A 答 B」。
+  T('AI 请求带 id：迟到的回包与增量都不会喂给下一条任务', function(){
+    var oldPend = AI_PENDING, oldWait = AI_WAITING.slice(), oldApp = isApp, oldN = NATIVE;
+    var oldKey = S.apiKey, oldUrl = S.baseUrl, oldProv = S.provider, oldStream = S.stream;
+    try{
+      isApp = true; S.provider = 'deepseek'; S.apiKey = 'k'; S.stream = false;
+      S.baseUrl = 'https://api.deepseek.com/v1';
+      AI_WAITING.length = 0; AI_PENDING = null;
+      var sentIds = [], gotA = [], gotB = [], deltaB = 0;
+      NATIVE = { aiPost: function(u, k, body, id){ sentIds.push(String(id)); return true; } };
+      aiRequest({ model: 'm', messages: [] }, function(ok, p){ gotA.push(p); });
+      var jobA = AI_PENDING; AI_PENDING = null;          /* 模拟 A 超时被作废 */
+      aiRequest({ model: 'm', messages: [] }, function(ok, p){ gotB.push(p); },
+        function(){ deltaB++; });
+      var jobB = AI_PENDING;
+      var idA = jobA && jobA.id, idB = jobB && jobB.id;
+      var distinctIds = !!idA && !!idB && idA !== idB && sentIds.length === 2
+        && String(sentIds[0]) === String(idA);
+
+      /* A 迟到的整包与增量：都不许落到 B 头上 */
+      window.onAiResult(String(idA), true, 'A的迟到答案');
+      window.onAiStreamDelta(String(idA), 'c', 'A的迟到增量');
+      var dropped = gotB.length === 0 && deltaB === 0 && AI_PENDING === jobB;
+      /* B 自己的回包：正常交付 */
+      window.onAiResult(String(idB), true, 'B的答案');
+      var delivered = gotB.length === 1 && gotB[0] === 'B的答案' && AI_PENDING === null;
+      /* 旧签名（没有 id）仍要能用，别把兼容路径打断 */
+      aiRequest({ model: 'm', messages: [] }, function(ok, p){ gotB.push(p); });
+      window.onAiResult(true, '无id答案');
+      var legacyOk = gotB[gotB.length - 1] === '无id答案';
+      return {
+        ok: distinctIds && dropped && delivered && legacyOk,
+        info: '两条任务id不同且已透传=' + distinctIds + '(' + idA + '/' + idB + ')'
+          + ' · 迟到包与增量被丢=' + dropped + ' · 本任务正常交付=' + delivered
+          + ' · 旧签名兼容=' + legacyOk
+      };
+    } finally {
+      AI_PENDING = oldPend; AI_WAITING = oldWait; isApp = oldApp; NATIVE = oldN;
+      S.apiKey = oldKey; S.baseUrl = oldUrl; S.provider = oldProv; S.stream = oldStream;
+    }
+  });
+
+  // 渠道绑定的两种语义：跟随当前渠道 / 固定在某渠道。
+  // 以前 roles[k].p 一律被填成「当时碰巧的当前渠道」，等于每个功能都被悄悄固定 ——
+  // 切了渠道之后设置页显示新渠道、实际还在调旧渠道，两边各说各话。
+  T('渠道绑定：跟随的跟着切，固定的钉住不动，老数据能正确归类', function(){
+    var keep = JSON.stringify({p:S.provider, r:S.roles, m:S.models, pm:S.providerModels, acc:S.providerAcc});
+    try{
+      S.provider = 'deepseek';
+      S.providerAcc = {deepseek:{url:'https://d.invalid/v1', key:'k-d'},
+                       zhipu:{url:'https://z.invalid/v4', key:'k-z'}};
+      S.providerModels = {deepseek:['d-fast','d-pro'], zhipu:['z-vision']};
+      /* ① 跟随：模型名跟着渠道走 */
+      S.roles = {plan:{p:'', m:'', fx:false}};
+      S.models = {chat:'d-fast', plan:'d-fast', summarize:'d-fast', vision:'d-fast', tts:''};
+      var followBefore = roleCreds('plan');
+      setProvider('zhipu');
+      var followAfter = roleCreds('plan');
+      var follows = followBefore.provider === 'deepseek' && followAfter.provider === 'zhipu'
+        && followAfter.url.indexOf('z.invalid') >= 0 && followAfter.key === 'k-z';
+
+      /* ② 固定：切全局渠道不影响它 */
+      S.provider = 'deepseek';
+      S.roles = {vision:{p:'zhipu', m:'z-vision', fx:true}};
+      var v1 = roleCreds('vision');
+      setProvider('zhipu');
+      var v2 = roleCreds('vision');
+      var pinned = v1.provider === 'zhipu' && v2.provider === 'zhipu'
+        && v2.model === 'z-vision' && roleFixed('vision');
+
+      /* ③ 老数据归类：p 恰好等于当时渠道 → 判为跟随；p 是别家 → 判为固定 */
+      S.provider = 'deepseek';
+      S.roles = {summarize:{p:'deepseek', m:'d-pro'}, chat:{p:'zhipu', m:'z-vision'}};
+      rolesCfg();
+      var legacy = roleFixed('summarize') === false && roleFixed('chat') === true;
+
+      /* ④ 标签要能把两种语义写出来，否则用户看不出手上的是哪一种 */
+      S.roles = {chat:{p:'zhipu', m:'z-vision', fx:true}};
+      S.models = {chat:'d-fast'};
+      var lblFixed = modelLabel('chat');
+      S.roles = {chat:{p:'', m:'', fx:false}};
+      S.models = {chat:'d-fast'};
+      var lblFollow = modelLabel('chat');
+      var labelled = /固定/.test(lblFixed) && !/固定/.test(lblFollow);
+
+      return {
+        ok: follows && pinned && legacy && labelled,
+        info: '跟随会切渠道=' + follows + ' · 固定钉住不动=' + pinned
+          + ' · 老数据归类正确=' + legacy + ' · 标签区分两种=' + labelled
+          + '（' + lblFollow + ' / ' + lblFixed + '）'
+      };
+    } finally {
+      var o = JSON.parse(keep);
+      S.provider = o.p; S.roles = o.r; S.models = o.m;
+      S.providerModels = o.pm; S.providerAcc = o.acc;
+      try{ save(); renderModels(); renderAiEntry(); }catch(e){}
+    }
+  });
+
+  // 主题皮肤：整份皮肤的选择器都挂在 html.ui-pro 下，
+  // 「选经典 = 这份 CSS 等于不存在」是前提，必须用真实 computed style 证明。
+  // v5 起是「通透 / 磨砂」两档，另外钉两件真机踩过的事：
+  //   ① 全屏 .view 不许挂 backdrop-filter（全屏模糊 + 内容滚动 = 狂闪）；
+  //   ② 描边开关要真的能关掉上沿亮边与细描边。
+  T('主题：Classic 无皮肤、通透/磨砂分得开、描边可关、全屏层不挂模糊', function(){
+    var card = document.querySelector('.card') || document.querySelector('.list');
+    var tile = document.querySelector('.g-tile');
+    var view = document.getElementById('view-notes');
+    var seg = document.getElementById('glassSeg');
+    if(!card || !tile || !view || !seg) return { ok:false, info:'缺 .card/.g-tile/#view-notes/#glassSeg' };
+    var oldTheme = S.uiTheme, oldGlass = S.uiGlass, oldEdge = S.uiEdge;
+    function bf(el){ var s = getComputedStyle(el); return s.backdropFilter || s.webkitBackdropFilter || 'none'; }
+    function radius(){ return getComputedStyle(card).borderTopLeftRadius; }
+    function blurPx(el){ var m = /blur\((\d+(?:\.\d+)?)px/.exec(bf(el)); return m ? parseFloat(m[1]) : 0; }
+    function alpha(el){ var p = getComputedStyle(el).backgroundColor.split(','); return parseFloat(p[p.length-1].replace(')','')); }
+    /* Chrome 把 computed box-shadow 序列化成「颜色 偏移 inset」，不是作者顺序的
+       「inset 偏移 颜色」—— 按后者写的正则永远匹配不上。 */
+    function hairline(el){ return /rgba\(255, 255, 255[^)]*\) 0px 1px 0px 0px inset/.test(getComputedStyle(el).boxShadow || ''); }
+    /* 描边关掉时边框**宽度还在**（1px），只是颜色变透明 —— 量颜色不是量宽度。 */
+    function edgeVisible(el){
+      var c = getComputedStyle(el).borderTopColor;
+      var m = /rgba\(\d+, \d+, \d+, ([\d.]+)\)/.exec(c);
+      if(m) return parseFloat(m[1]) > 0.01;
+      return c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)';
+    }
+    try{
+      setUiPro(false);
+      var offClass = !document.documentElement.classList.contains('ui-pro');
+      var offRadius = radius();
+      var rowsHidden = ['glassLi','edgeLi','bgLi'].every(function(id){
+        var el = document.getElementById(id);
+        return el && getComputedStyle(el).display === 'none';
+      });
+
+      setUiPro(true);
+      var onClass = document.documentElement.classList.contains('ui-pro');
+      var onRadius = radius();
+      var skinned = offRadius !== onRadius;
+      /* 「模糊没了」是上一轮的事故：内容面必须真的有模糊 */
+      var contentFrosted = blurPx(card) > 0 && blurPx(tile) > 0;
+      /* 全屏层不许挂模糊（闪烁源） */
+      var viewFlat = bf(view) === 'none';
+
+      setUiGlass('clear');
+      var cb = blurPx(card), ca = alpha(card);
+      setUiGlass('frost');
+      var fb = blurPx(card), fa = alpha(card);
+      var apart = fb > cb && fa > ca;
+
+      setUiEdge(true);
+      var edgeOn = hairline(tile) && edgeVisible(tile);
+      setUiEdge(false);
+      var edgeOff = !hairline(tile) && !edgeVisible(tile);
+      setUiEdge(true);
+
+      var rowsShown = ['glassLi','edgeLi','bgLi'].every(function(id){
+        var el = document.getElementById(id);
+        return el && getComputedStyle(el).display !== 'none';
+      });
+
+      return {
+        ok: offClass && onClass && skinned && rowsHidden && contentFrosted && viewFlat
+          && apart && edgeOn && edgeOff && rowsShown,
+        info: '经典=无类/' + offRadius + ' · Pro=有类/' + onRadius
+          + ' · 经典下三行收起=' + rowsHidden + ' · Pro 下展开=' + rowsShown
+          + ' · 内容面有模糊=' + contentFrosted + '（' + blurPx(card) + 'px）'
+          + ' · 全屏层无模糊=' + viewFlat
+          + ' · 通透→磨砂 模糊 ' + cb + '→' + fb + 'px、底色 α ' + ca + '→' + fa
+          + ' · 描边开/关=' + edgeOn + '/' + edgeOff
+      };
+    } finally {
+      S.uiTheme = oldTheme; S.uiGlass = oldGlass; S.uiEdge = oldEdge;
+      applyLook(); renderUiTheme(); save();
+    }
+  });
+
+  /* 真机第三轮的三条「玻璃没上」+ 一条「专注页不一样」。
+     这三条都必须量 computed style，看 CSS 源码是看不出层叠结果的：
+     ① 只把 background 换成半透明、不挂 backdrop-filter = 透明塑料，不是玻璃
+        （用户：气泡 / 加号 / 全屏 / 输入框「透明而非模糊」）；
+     ② 皮肤选择器比基础的 .qsw.on 多一层类 → 权重更高，把开启态的品牌色盖掉了
+        （用户：深度思考/联网搜索「开启和关闭很难分得清」）。这类坑是结构性的，
+        所以量「on 和 off 两种底色不相等」而不是量「on 等于某个色」；
+     ③ 二级页铺一层灰纱、主页面铺光晕 → 专注页永远比别人闷。
+        量两个元素的 background-image 计算值是否同一份。 */
+  T('对话页与专注页：气泡/输入行是玻璃、开关分得清、专注页底与首页同底', function(){
+    var keep = { t: S.uiTheme, g: S.uiGlass, e: S.uiEdge };
+    var phone = document.querySelector('.phone');
+    var fv = document.getElementById('view-focus');
+    var notes = document.getElementById('view-notes');
+    var msgs = document.getElementById('msgs');
+    var sws = document.getElementById('chatSwitches');
+    var inp = document.getElementById('chatInput');
+    var cbtn = document.querySelector('.composer .icon-btn');
+    if(!phone || !fv || !notes || !msgs || !sws || !inp || !cbtn)
+      return { ok:false, info:'缺 .phone/#view-focus/#view-notes/#msgs/#chatSwitches/输入行' };
+    function bf(el){ var s = getComputedStyle(el); return s.backdropFilter || s.webkitBackdropFilter || 'none'; }
+    function blurPx(el){ var m = /blur\((\d+(?:\.\d+)?)px/.exec(bf(el)); return m ? parseFloat(m[1]) : 0; }
+    function probe(box, cls, html){
+      var d = document.createElement('div');
+      d.className = cls; d.innerHTML = html || '';
+      box.appendChild(d); return d;
+    }
+    try{
+      setUiPro(true); setUiGlass('frost');
+      /* ① 玻璃：气泡 / 输入框 / 三颗按钮 / 专注页两块面 */
+      var ai = probe(msgs, 'msg ai', '<div class="bubble">x</div>').firstChild;
+      var aiBlur = blurPx(ai);
+      var inpBlur = blurPx(inp), btnBlur = blurPx(cbtn);
+      var segs = probe(fv.querySelector('.viewbody') || fv, 'segs');
+      var fs = probe(fv.querySelector('.viewbody') || fv, 'focusstats');
+      var segsBlur = blurPx(segs), fsBlur = blurPx(fs);
+      /* ② 战术开关：开 / 关两态底色必须不同，且开启态是不透明的品牌色 */
+      var off = probe(sws, 'qsw'), on = probe(sws, 'qsw on');
+      var cOff = getComputedStyle(off).backgroundColor;
+      var cOn = getComputedStyle(on).backgroundColor;
+      var swApart = cOff !== cOn;
+      /* 开启态要「实」：算出来的底色不许带小数 alpha（半透明的品牌色压在照片上会发灰） */
+      var swOnOpaque = !/, ?0?\.\d+\)$/.test(cOn);
+      /* ③ 专注页与首页同底；手机上的 .vpanel 不再是整块玻璃 */
+      var sameBase = getComputedStyle(fv).backgroundImage
+        === getComputedStyle(phone).backgroundImage;
+      var vp = notes.querySelector('.vpanel');
+      var panelFlat = !vp || (bf(vp) === 'none');
+      var panelClear = !vp || getComputedStyle(vp).backgroundColor === 'rgba(0, 0, 0, 0)';
+      /* ④ 切页动画：Pro 下收掉，经典下必须还在（证明是皮肤在做这件事） */
+      var animPro = getComputedStyle(document.getElementById('page-home')).animationName;
+      setUiPro(false);
+      var animClassic = getComputedStyle(document.getElementById('page-home')).animationName;
+      setUiPro(true);
+      /* ⑤ 专注页进场不许再用「位移 + 缩放」，要和别的二级页同一语言 */
+      var fvAnim = getComputedStyle(fv).animationName;
+      var focusFades = fvAnim === 'none' || /Pro/.test(fvAnim);
+      ai.parentNode.remove(); segs.remove(); fs.remove(); off.remove(); on.remove();
+      return {
+        ok: aiBlur > 0 && inpBlur > 0 && btnBlur > 0 && segsBlur > 0 && fsBlur > 0
+          && swApart && swOnOpaque && sameBase && panelFlat && panelClear
+          && animPro === 'none' && animClassic !== 'none' && focusFades,
+        info: '气泡 ' + aiBlur + 'px · 输入框 ' + inpBlur + 'px · 按钮 ' + btnBlur + 'px'
+          + ' · 模式条/统计 ' + segsBlur + '/' + fsBlur + 'px'
+          + ' · 开关底色 关=' + cOff + ' 开=' + cOn
+          + ' · 专注页与首页同底=' + sameBase
+          + ' · vpanel 无模糊/透明=' + panelFlat + '/' + panelClear
+          + ' · 切页动画 Pro=' + animPro + ' 经典=' + animClassic
+          + ' · 专注页进场=' + fvAnim
+      };
+    } finally {
+      S.uiTheme = keep.t; S.uiGlass = keep.g; S.uiEdge = keep.e;
+      applyLook(); renderUiTheme(); save();
+    }
+  });
+
+  /* 「我切不回经典主题了」：上一版点的是 setUiPro(!S.uiPro)，
+     而 S.uiPro 这个键早已被 migrateUiTheme() 删掉 —— !undefined 恒为 true，
+     于是永远只在「开」这一侧打转。这条走**真实点击**做 classic→pro→classic 往返，
+     并要求类、选中格、滑块三者都跟着走，防止再把控件和状态解耦。
+     ⚠️ 必须是异步断言：.segThumb 的 transform 带 .28s 过渡，
+     同步读 getComputedStyle 拿到的还是**过渡起点**（踩过：量出来两态都是 335px，
+     看着像「滑块不动」，其实是我读太早）。等过渡落定再量几何。
+     ⚠️ 两档控件没有「中间格」，所以不能像明暗那样量 left===right，
+     改成量「选左格贴左 3px、选右格贴右 3px」，上下两个方向仍要相等。 */
+  await TA('主题滑块：点 UI Classic / UI Pro 双向可切，类·选中格·滑块都跟着走', async function(){
+    var keep = S.uiTheme;
+    var seg = document.getElementById('uiThemeSeg');
+    var th = document.getElementById('uiThemeThumb');
+    var pro = seg && seg.querySelector('.segI[data-v="pro"]');
+    var cls = seg && seg.querySelector('.segI[data-v="classic"]');
+    if(!seg || !th || !pro || !cls) return { ok:false, info:'缺 #uiThemeSeg / #uiThemeThumb 或两格选项' };
+    function gaps(){
+      var a = seg.getBoundingClientRect(), b = th.getBoundingClientRect();
+      return { top: Math.round(b.top - a.top), bottom: Math.round(a.bottom - b.bottom),
+        left: Math.round(b.left - a.left), right: Math.round(a.right - b.right) };
+    }
+    try{
+      S.uiTheme = 'classic'; applyLook(); renderUiTheme();
+      await sleep(420);
+      cls.click();                       /* 已经在经典：应无副作用 */
+      var noOp = S.uiTheme === 'classic';
+      pro.click();
+      var toPro = S.uiTheme === 'pro' && document.documentElement.classList.contains('ui-pro');
+      await sleep(420);
+      var gp = gaps();
+      var proOn = !!seg.querySelector('.segI[data-v="pro"].on');
+      cls.click();
+      var backClassic = S.uiTheme === 'classic'
+        && !document.documentElement.classList.contains('ui-pro');
+      await sleep(420);
+      var gc = gaps();
+      var clsOn = !!seg.querySelector('.segI[data-v="classic"].on');
+      var moved = gp.left !== gc.left;
+      /* 上下相等 + 各自贴边 3px（轨道 padding 就是 3px） */
+      var geom = gp.top === gp.bottom && gc.top === gc.bottom
+        && gp.top >= 2 && gp.top <= 4
+        && Math.abs(gc.left - 3) <= 1 && Math.abs(gp.right - 3) <= 1;
+      /* beta 角标：要在（皮肤关掉的）经典态也看得见，且不许把轨道撑高、
+         也不许把档位文字挤成两行 —— .segI 是 nowrap + flex 居中，
+         上标一旦参与行高，38px 的轨道就装不下，滑块几何跟着歪。 */
+      var beta = pro.querySelector('.beta');
+      var betaTxt = !!beta && beta.textContent.trim().toLowerCase() === 'beta';
+      var trackH = Math.round(seg.getBoundingClientRect().height);
+      var betaShown = !!beta && getComputedStyle(beta).display !== 'none'
+        && parseFloat(getComputedStyle(beta).fontSize) < 12;
+      var noWrap = pro.scrollWidth <= pro.clientWidth + 1;
+      S.uiTheme = 'classic'; applyLook();
+      var shownInClassic = !!beta && beta.getBoundingClientRect().width > 1;
+      return {
+        ok: noOp && toPro && backClassic && proOn && clsOn && moved && geom
+          && betaTxt && betaShown && noWrap && shownInClassic && trackH === 38,
+        info: '重复点同档=' + noOp + ' · 切到 Pro=' + toPro + ' · 切回经典=' + backClassic
+          + ' · 选中格 ' + clsOn + '/' + proOn
+          + ' · 经典态 左' + gc.left + '/上' + gc.top + '·Pro 态 右' + gp.right + '/上' + gp.top
+          + ' · 滑块位移=' + moved
+          + ' · beta=' + betaTxt + '/' + betaShown + '/经典可见=' + shownInClassic
+          + ' · 轨道高=' + trackH + ' · 不换行=' + noWrap
+      };
+    } finally {
+      S.uiTheme = keep; applyLook(); renderUiTheme(); save();
+    }
+  });
+
+  /* ================= 本地文件解析器 =================
+     样本是 Node 侧真造出来的 ZIP+XML（tools/filefix.mjs），页面拿到的是字节，
+     不是「我以为解析器能吃的字符串」。 */
+  function b64u(s){ var b = atob(s), u = new Uint8Array(b.length); for(var i=0;i<b.length;i++) u[i] = b.charCodeAt(i); return u; }
+  function FIX(){ return window.__FIX__ || {}; }
+
+  await TA('解析 docx：段落按顺序、表格拼成一行、实体还原', async function(){
+    var r = await parseOfficeFile('数据结构.docx', b64u(FIX().docx));
+    if(!r.ok) return { ok:false, info:'解析失败：' + r.err };
+    var t = r.text;
+    var order = t.indexOf('数据结构第 3 章') >= 0 && t.indexOf('数据结构第 3 章') < t.indexOf('课后习题');
+    var merged = t.indexOf('线性表与链表的比较') >= 0;   /* 同段多个 run 要拼成一句 */
+    var table = t.indexOf('查找方式 | 复杂度') >= 0 && t.indexOf('折半查找 | O(log n)') >= 0;
+    var ent = t.indexOf('<标记> 与 & 符号') >= 0;
+    var keep = t.indexOf('  课后习题 12、13、14') >= 0;   /* xml:space=preserve 的空格 */
+    var drawing = t.indexOf('图 3-2 折半查找判定树') >= 0;
+    return { ok: merged && order && table && ent && keep && drawing && r.fmt === 'docx',
+      info: 'fmt=' + r.fmt + ' · 段数=' + r.parts.length + ' · 合并 run=' + merged
+        + ' · 表格行=' + table + ' · 实体=' + ent + ' · 保留空格=' + keep + ' · 顺序=' + order };
+  });
+
+  await TA('解析 docx：stored（未压缩）条目也要能读', async function(){
+    var r = await parseOfficeFile('a.docx', b64u(FIX().docxStored));
+    return { ok: r.ok && r.text.indexOf('折半查找') >= 0,
+      info: 'ok=' + r.ok + ' · ' + (r.ok ? (r.text.length + ' 字') : r.err) };
+  });
+
+  await TA('解析 xlsx：共享字符串查表、内联字符串、表名进标签、空行跳过', async function(){
+    var r = await parseOfficeFile('成绩.xlsx', b64u(FIX().xlsx));
+    if(!r.ok) return { ok:false, info:'解析失败：' + r.err };
+    var t = r.text;
+    var shared = t.indexOf('姓名 | 学号') >= 0 && t.indexOf('张三 | 20250101') >= 0;
+    var inline = t.indexOf('富文本 | 内联') >= 0;
+    var sheets = t.indexOf('平时成绩') >= 0 && t.indexOf('考勤') >= 0;
+    var emptyRowSkipped = t.indexOf('| 20250102 |') < 0 && t.indexOf('李四 | 20250102') >= 0;
+    return { ok: shared && inline && sheets && emptyRowSkipped,
+      info: '共享表=' + shared + ' · 内联/富文本=' + inline + ' · 两张表名=' + sheets
+        + ' · 空单元格不留尾巴=' + emptyRowSkipped };
+  });
+
+  await TA('解析 pptx：逐页成段并标页码', async function(){
+    var r = await parseOfficeFile('复习.pptx', b64u(FIX().pptx));
+    if(!r.ok) return { ok:false, info:'解析失败：' + r.err };
+    var t = r.text;
+    var p1 = t.indexOf('第 1 页') >= 0 && t.indexOf('操作系统概述') >= 0;
+    var p2 = t.indexOf('死锁的四个必要条件') >= 0;
+    var runs = t.indexOf('进程与线程的区别') >= 0;
+    var labeled = r.parts.every(function(x){ return /^第 \d+ 页/.test(x.label); });
+    return { ok: p1 && p2 && runs && labeled,
+      info: '页码标签=' + p1 + ' · 两页都在=' + p2 + ' · 同段拼 run=' + runs + ' · 每段带页=' + labeled };
+  });
+
+  await TA('解析失败要如实报错，不许静默交出空文本', async function(){
+    var empty = await parseOfficeFile('a.docx', b64u(FIX().emptyZip));
+    var img = await parseOfficeFile('scan.docx', b64u(FIX().imgOnlyDocx));
+    var junk = await parseOfficeFile('a.docx', new Uint8Array([1,2,3,4,5,6,7,8]));
+    var ok = (!empty.ok) && (!img.ok) && (!junk.ok)
+      && !!empty.err && !!img.err && !!junk.ok === false
+      && /图片|没有/.test(img.err) && /损坏|压缩包/.test(junk.err);
+    return { ok: ok, info: '空包="' + empty.err + '" · 纯图片="' + img.err
+      + '" · 垃圾字节="' + junk.err + '"' };
+  });
+
+  T('编码嗅探：GBK 不再乱码、BOM 与 UTF-16 都能读', function(){
+    var gbk = decodeTextSmart(new Uint8Array(FIX().gbkBytes));
+    var bom = decodeTextSmart(new Uint8Array(FIX().utf8Bom));
+    var u16 = decodeTextSmart(new TextEncoder().encode('进程调度'));
+    var plain = decodeTextSmart(new TextEncoder().encode('普通 UTF-8 文本'));
+    return { ok: gbk === '中文' && bom === '带 BOM 的文本' && u16 === '进程调度' && plain === '普通 UTF-8 文本',
+      info: 'GBK→"' + gbk + '" · BOM→"' + bom + '" · UTF-16→"' + u16 + '" · UTF-8→"' + plain + '"' };
+  });
+
+  await TA('长文件按提问选段：命中段 + 第 1 段一定带上，并说明没带全文', async function(){
+    var r = await parseOfficeFile('长文档.docx', b64u(FIX().longDocx));
+    if(!r.ok) return { ok:false, info:'解析失败：' + r.err };
+    var all = r.parts.length;
+    var pk = pickParts(r.parts, '牛顿冷却定律是什么', 3000);
+    var body = pk.parts.map(function(p){ return p.text; }).join('\n');
+    var hasHit = body.indexOf('牛顿冷却定律') >= 0;
+    var hasFirst = body.indexOf('第 1 节') >= 0;
+    var trimmed = pk.parts.length < all;
+    var asc = pk.parts.every(function(p, i){ return i === 0 || p.text < pk.parts[i].text; })
+      || pk.parts.map(function(p){ return p.text.slice(2, 6); }).join(',') === pk.parts.map(function(p){ return p.text.slice(2, 6); }).sort().join(',');
+    /* 没提问时不许「乱挑」：按原顺序给开头，并标 matched=false */
+    var pk2 = pickParts(r.parts, '', 3000);
+    var head = pk2.matched === false && pk2.parts[0].text.indexOf('第 1 节') >= 0;
+    return { ok: all > 3 && hasHit && hasFirst && trimmed && head,
+      info: '总段=' + all + ' · 选中=' + pk.parts.length + ' · 含命中段=' + hasHit
+        + ' · 含第1段=' + hasFirst + ' · 无提问走开头=' + head };
+  });
+
+  await TA('走真实入口：选一个 docx → 胶囊出现段数、发出去的消息带选段说明', async function(){
+    var keepTheme = S.uiTheme, keepAttach = ATTACH.slice();
+    try{
+      clearAttach();
+      var f = new File([b64u(FIX().docx)], '数据结构第3章.docx',
+        { type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+      onChatFile(f);
+      var waited = 0;
+      while(waited < 4000 && !(ATTACH.length && !ATTACH[0].busy)){ await sleep(120); waited += 120; }
+      var a = ATTACH[0];
+      if(!a || a.busy) return { ok:false, info:'附件没解析完（等了 ' + waited + 'ms）' };
+      var chip = (document.querySelector('.attach .an small') || {}).textContent || '';
+      var payload = attachPayload('折半查找的复杂度是多少');
+      var ok = a.kind === 'text' && a.fmt === 'docx' && (a.parts || []).length >= 1
+        && /DOCX/.test(chip) && payload.text.indexOf('折半查找') >= 0
+        && payload.text.indexOf('数据结构第 3 章') >= 0;
+      return { ok: ok, info: '胶囊="' + chip + '" · 段=' + (a.parts||[]).length
+        + ' · 载荷含表格行=' + (payload.text.indexOf('折半查找 | O(log n)') >= 0)
+        + ' · 载荷长=' + payload.text.length };
+    } finally {
+      ATTACH = keepAttach; attachRow(); S.uiTheme = keepTheme; applyLook();
+    }
+  });
+
+  T('老格式 .doc 明确告知另存为，不假装在读', function(){
+    var keep = ATTACH.slice();
+    try{
+      clearAttach();
+      onChatFile(new File([1,2,3,4], '旧教案.doc'));
+      var txt = (document.getElementById('sheet') || {}).textContent || '';
+      var ok = ATTACH.length === 0 && /另存为/.test(txt) && /docx/.test(txt);
+      closeSheet();
+      return { ok: ok, info: '附件数=' + ATTACH.length + ' · 提示含「另存为」=' + /另存为/.test(txt) };
+    } finally { ATTACH = keep; attachRow(); closeSheet(); }
+  });
+
+  T('架构：解析器所需的函数都在', function(){
+    var fns = ['zipIndex','zipEntryBytes','zipText','decodeTextSmart','docxUnits','xlsxUnits',
+      'xlsxSheetNames','pptxUnits','packUnits','parseOfficeFile','queryTerms','pickParts',
+      'readFileSmart','pickOfficeAttach','attachFmtLabel'];
+    var missing = fns.filter(function(n){ return typeof window[n] !== 'function'; });
+    return { ok: !missing.length, info: '缺函数=' + (missing.join(',') || '0') };
+  });
+
+  /* 真机：UI Pro 下呼出键盘后「输入框太高」——浮空一截。
+     根因是皮肤给 .screen 垫了 96px 给悬浮底栏让位，而基础样式在键盘弹起时
+     把底栏整条 display:none 收掉了，让位高度却还留着。经典档没这段 padding，
+     所以只在 UI Pro 复现 —— 断言必须把「键盘弹起」这个状态真的挂上类再量。 */
+  T('键盘弹起时收掉底栏让位高度：输入框贴着键盘，不再浮空', function(){
+    var sc = document.querySelector('.screen');
+    var r = document.documentElement;
+    if(!sc) return { ok:false, info:'缺 .screen' };
+    if(r.classList.contains('layout-tablet')) return { ok:false, info:'自测视口是平板布局，量不到手机端的 dock 让位' };
+    var keep = S.uiTheme;
+    try{
+      S.uiTheme = 'pro'; applyLook();
+      r.classList.remove('kb-open');
+      var dockRoom = parseFloat(getComputedStyle(sc).paddingBottom);
+      r.classList.add('kb-open');
+      var kbRoom = parseFloat(getComputedStyle(sc).paddingBottom);
+      r.classList.remove('kb-open');
+      S.uiTheme = 'classic'; applyLook();
+      r.classList.add('kb-open');
+      var classicRoom = parseFloat(getComputedStyle(sc).paddingBottom);
+      r.classList.remove('kb-open');
+      return {
+        ok: dockRoom >= 90 && kbRoom === 0 && classicRoom < 20,
+        info: 'Pro 有底栏时 ' + dockRoom + 'px · 键盘弹起 ' + kbRoom + 'px · 经典档 ' + classicRoom + 'px'
+      };
+    } finally {
+      r.classList.remove('kb-open');
+      S.uiTheme = keep; applyLook();
+    }
+  });
+
   return JSON.stringify(R);
 })()
 `;
@@ -3043,7 +4355,7 @@ if (!EXPECT_VER) { console.error('读不到 android/app/build.gradle 的 version
 
 let html = fs.readFileSync(SRC, 'utf8');
 if (!/<\/body>/.test(html)) { console.error('index.html 里没有 </body>'); process.exit(1); }
-html = html.replace(/<\/body>/, '\n<script>\nwindow.__ASSERTSRC__ = ' + JSON.stringify(ASSERTS) + ';\nwindow.__EXPECT_VER__ = ' + JSON.stringify(EXPECT_VER) + ';\n</script>\n</body>');
+html = html.replace(/<\/body>/, '\n<script>\nwindow.__ASSERTSRC__ = ' + JSON.stringify(ASSERTS) + ';\nwindow.__EXPECT_VER__ = ' + JSON.stringify(EXPECT_VER) + ';\nwindow.__FIX__ = ' + JSON.stringify(fileFixtures()) + ';\n</script>\n</body>');
 fs.writeFileSync(path.join(root, 'tools', '_domtest.html'), html, 'utf8');
 
 const server = http.createServer((req, res) => {
@@ -3412,6 +4724,126 @@ try {
     results.push({ name: '架构守卫：笔刷说明', ok: false, info: 'THREW: ' + (e && e.message) });
   }
 
+  // M) 灵动岛（v0.2.7）：真机踩过「微缩岛左边只剩一个图标、文字全在右边」。
+  //    四件事必须同时成立，缺一个就退回老排版或退化成没人刷新的死数字：
+  //      · 用 RemoteViews 自定义两列（island_pill.xml）
+  //      · 文案单点在 pill()，通知标题/RemoteViews/MIUI JSON 四处共用
+  //      · 倒计时由 60 秒刷新闹钟推进，且只排到 endAt（有界，不是无界轮询）
+  //      · 课前/上课中是同一条通知的两种相位（同 ID），不拆两条
+  try {
+    /* J() 只在上一个 try 块里定义过，这里自己起一个（别图省事复用别人的作用域） */
+    const J = f => fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main',
+      'java', 'com', 'xuejing', 'app', f), 'utf8');
+    const isl = J('Island.java');
+    const nfy = J('Notify.java');
+    const recv = J('IslandActionReceiver.java');
+    const layout = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main',
+      'res', 'layout', 'island_pill.xml'), 'utf8');
+    const customView = /setCustomContentView\(/.test(isl)
+      && /new RemoteViews\(/.test(isl);
+    const twoCols = /islandName/.test(layout) && /islandCountdown/.test(layout)
+      && /android:layout_weight="1"/.test(layout);
+    const singlePill = /static Pill pill\(/.test(isl)
+      && /buildPill\([\s\S]{0,400}?Pill p/.test(isl)
+      && /miuiParamV2\(title, text, accent, pill\)/.test(isl);
+    /* v0.2.9：改成原生 Chronometer 计时。MIUI 的 timerInfo 真机上不跳秒
+       （官方模板库没给字段表），所以走 AOSP 的 setChronometer + setCountDown。
+       每分钟重发保留为兜底（enableFloat=false，不会因此反复展开）。 */
+    const boundedRefresh = /scheduleRefresh\(/.test(isl)
+      && /put\("enableFloat", false\)/.test(isl);
+    const sameId = /showClass\(c, Island.ID_CLASS_START,\s*\n\s*course \+ \(Island\.elTime \? \(" " \+ startHM\) : ""\),\s*\n\s*place, true, endAt, endAt, true\)/.test(nfy);
+    const refreshWired = /Island\.A_REFRESH\.equals\(a\)/.test(recv)
+      && /Island\.refresh\(context\)/.test(recv);
+    /* 小岛必须用官方认可的组件名。v0.2.7 塞的是 imageTextInfoLeft —— 那是
+       **大岛 A 区**的组件名，小岛不认，系统直接忽略，于是只剩一个图标。
+       v0.2.9 按用户要求改用 combinePicInfo（中心图标 + 外圈环形进度 = 倒计时环）。 */
+    const contractSrc = fs.readFileSync(path.join(root, 'tools', 'island_contract_test.mjs'), 'utf8');
+    const smallHasText = /put\("combinePicInfo"/.test(isl)
+      && /put\("progressInfo"/.test(isl)
+      && /put\("progress", pct\)/.test(isl)
+      && !/smallArea\.put\("imageTextInfoLeft"/.test(isl)
+      && /smallIslandArea/.test(contractSrc);
+    /* 三个分项开关必须在 Notify 里真的分流，不能只在设置页摆着 */
+    const cfgUsed = /Island\.cfgStart/.test(nfy) && /Island\.cfgEnd/.test(nfy)
+      && /Island\.cfgStay/.test(nfy);
+    /* 专注岛必须**复用**同一套两列排版（pillViews），不能自己另写一套 ——
+       两种动态两种风格，等于没设计过。而且专注以前不可配上岛，这个开关是新加的。 */
+    const focusShares = /Island\.cfgFocus/.test(nfy)
+      && /Island\.pillViews\(c, Island\.ICON_TIMER, p, Island\.ACCENT, running\)/.test(nfy)
+      && /static Pill pillTimer\(/.test(isl);
+    /* 停留时长档必须被用上，且走对字段。
+       官方：timeout 单位是**分钟**（默认 720），岛的停留时长是
+       param_island.islandTimeout，单位**秒**（默认 3600）。
+       v0.2.7 把秒塞进 timeout，等于把 5 分钟写成 300 分钟 —— 岛赖着不走。 */
+    const lenUsed = /Island\.stayMillis\(\)/.test(nfy)
+      && /put\("islandTimeout", \(int\) Math\.max\(60, stayMillis\(\) \/ 1000L\)\)/.test(isl)
+      && /put\("timeout", 720\)/.test(isl);
+
+    /* v0.2.8 新增守卫 A：enableFloat 的语义。
+       官方定义 islandFirstFloat=首次出现是否展开、enableFloat=**更新时**是否展开。
+       v0.2.7 两个都写 true → 每秒刷新一次通知 = 每秒强制展开一次，
+       用户真机反馈「岛反复弹开，没法正常用」。 */
+    const floatRight = /put\("islandFirstFloat", true\)/.test(isl)
+      && /put\("enableFloat", false\)/.test(isl)
+      && !/put\("enableFloat", true\)/.test(isl);
+
+    /* v0.2.9 守卫 B：倒计时必须走**原生** Chronometer。
+       真机实测 MIUI 的 timerInfo 不跳秒（官方模板库只给了名字、没给字段表），
+       所以改用 AOSP 的 RemoteViews.setChronometer + setCountDown，
+       布局里承载它的控件也必须从 TextView 换成 Chronometer。 */
+    const timerSys = /rv\.setChronometer\(R\.id\.islandCountdown/.test(isl)
+      && /setInt\(R\.id\.islandCountdown, "setCountDown", 1\)/.test(isl)
+      && /<Chronometer/.test(layout)
+      && /setChronometerCountDown\(true\)/.test(nfy)
+      && /put\("sameWidthDigitInfo", digit\)/.test(isl);
+    const focusJ = J('FocusService.java');
+    /* 每秒重发保留为兜底（Chronometer 之外的第二条腿），但总时长必须一起传下去，
+       否则进度环/进度条拿不到分母，永远画不出来。 */
+    const totalWired = /private static\s+(?:volatile\s+)?int sTotal = 0/.test(focusJ)
+      && /totalSecs/.test(focusJ)
+      && /Notify\.buildFocus\(c, sLabel, remainSecs\(\), true, sTotal\)/.test(focusJ);
+
+    /* v0.2.9 守卫 D：短岛语义。cfgLen 是岛屿形态（0/1/2），
+       停留时长另立 stayMin —— 两者混成一个字段就是 v0.2.8 的错。 */
+    const shortOk = /shortMode = cfgLen == 0/.test(isl)
+      && /if \(o\.has\("stayMin"\)\)/.test(isl)
+      && /shortMode \? "" : sub/.test(isl)
+      && /nameOnly\(\)/.test(isl);
+
+    /* v0.2.8 新增守卫 C：picInfo.pic 里写的只是 key，
+       系统还要去 miui.focus.pics Bundle 取图。以前只写 key 从不放图，
+       取不到就回退应用默认图标 —— 排版看着「像只剩图标」。 */
+    const picsOk = /putBundle\("miui\.focus\.pics", pics\)/.test(isl)
+      && /putParcelable\(K_PIC, Icon\.createWithResource/.test(isl)
+      && /put\("pic", K_PIC\)/.test(isl);
+
+    results.push({
+      name: '架构守卫：岛更新不强制展开（真机踩过：每秒弹开一次）',
+      ok: floatRight && timerSys && totalWired && picsOk,
+      info: `enableFloat=false=${floatRight} · 原生Chronometer=${timerSys}`
+        + ` · 总时长已接线=${totalWired} · picsBundle可取图=${picsOk}`
+    });
+
+    results.push({
+      name: '架构守卫：短岛形态与停留时长分离（真机踩过：理解错需求）',
+      ok: shortOk && lenUsed,
+      info: `形态/时长已拆开=${shortOk} · 停留时长走islandTimeout=${lenUsed}`
+    });
+
+    results.push({
+      name: '架构守卫：微缩岛两列排版与小岛组件合法性（真机踩过：只剩图标）',
+      ok: customView && twoCols && singlePill && boundedRefresh && sameId
+        && refreshWired && cfgUsed && smallHasText && focusShares && lenUsed,
+      info: `自定义两列=${customView && twoCols} · 文案单点=${singlePill}`
+        + ` · 已排有界刷新=${boundedRefresh} · 同ID两相位=${sameId}`
+        + ` · 刷新已接线=${refreshWired} · 三个开关分流=${cfgUsed}`
+        + ` · 小岛用right组件=${smallHasText}`
+        + ` · 专注复用同一套排版=${focusShares} · 时长档生效=${lenUsed}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：微缩岛排版', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
   // L) 笔记的返回必须是三级（真机踩过：编辑页按返回直接掉回主页）。
   //    两条一起盯：头部箭头不许直接 closeView，androidBack 必须把 notes 交给 noteBackAction。
   try {
@@ -3429,6 +4861,297 @@ try {
     });
   } catch (e) {
     results.push({ name: '架构守卫：笔记返回三级', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // N) 原生侧的三类「不报错但功能没了」——这次通读抓出来的，全部钉住不许回来：
+  //    ① 上课提醒：上了岛才不发通知；机型不支持、分项开关关掉、时间解析失败
+  //       这三种情况都必须退回普通通知（以前是直接 return，通知分支永远走不到）
+  //    ② PDF 转图：成功路径的 err 本来就是 null，却被交给会 s.length() 的 jsString
+  //       —— 在 pdf-preview 工作线程上抛 NPE，没人接，整个 App 闪退
+  //    ③ 课表闹钟：只校验小时，分钟 -1 会被 lenient 的 Calendar 回拨成上一分钟
+  try {
+    const J2 = f => fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main',
+      'java', 'com', 'xuejing', 'app', f), 'utf8');
+    const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    const nfy2 = strip(J2('Notify.java'));
+    const pdf2 = strip(J2('PdfPreview.java'));
+    const rem2 = strip(J2('ReminderScheduler.java'));
+    const ma2 = strip(J2('MainActivity.java'));
+    const isl2 = strip(J2('Island.java'));
+
+    /* ① 分流函数存在、且判了机型支持；三条静默路径都不许再裸 return */
+    const islandFallback = /islandClassOnIsland/.test(nfy2)
+      && /Island\.supported\(\)/.test(nfy2)
+      && !/if \(!Island\.cfgStart\) return;/.test(nfy2)
+      && !/if \(!okTime\) return;/.test(nfy2)
+      && !/if \(!Island\.cfgEnd\) \{ Island\.hide\(c, Island\.ID_CLASS_START\); return; \}/.test(nfy2);
+    /* ② err 为 null 要写成 JS 的 null；jsString 自己也要兜住 null */
+    const pdfNull = /r\.err == null \? "null"/.test(pdf2)
+      && !/r\.more \? "null" : MainActivity\.jsString\(r\.err\)/.test(pdf2)
+      && /if \(s == null\) return "\\"\\"";/.test(ma2);
+    /* ③ 两处排程（常规课表 + 补课）都要把分钟兜住 */
+    const minuteGuard = (rem2.match(/if \(sm < 0\) sm = 0;/g) || []).length === 2
+      && (rem2.match(/sm > 59 \|\| em > 59/g) || []).length === 2;
+    /* ④ 桥线程不许直接改 View / 拉起权限框 */
+    const mainThread = /void applyDarkMode[\s\S]{0,200}?runOnUiThread/.test(ma2)
+      && /void askNotificationPermission[\s\S]{0,200}?runOnUiThread/.test(ma2);
+    /* ⑤ 语音合成的 mp3 不能用 file:// 交给 WebView（targetSdk 30+ 默认禁止文件访问），
+          要走 FileProvider，并且清单侧要有对应的 cache 路径 */
+    const ttsUri = !/callbackTts\(true, "file:\/\/"/.test(ma2)
+      && /FileProvider\.getUriForFile\(this,\s*getPackageName\(\) \+ "\.fileprovider", out\)/.test(ma2)
+      && /<cache-path name="tts" path="tts\/" \/>/.test(
+        fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main', 'res', 'xml', 'file_paths.xml'), 'utf8'));
+    /* ⑥ 岛的下岛/刷新闹钟：am.set() 不抛异常，原来的 catch 兜底等于死代码 */
+    const alarmIdle = !/am\.set\(AlarmManager\.RTC_WAKEUP/.test(isl2)
+      && /setAndAllowWhileIdle\(AlarmManager\.RTC_WAKEUP, at, pi\)/.test(isl2);
+
+    results.push({
+      name: '架构守卫：原生静默失效五连（提醒退路 / PDF 转图 / 闹钟分钟 / 桥线程 / TTS 播放）',
+      ok: islandFallback && pdfNull && minuteGuard && mainThread && ttsUri && alarmIdle,
+      info: `提醒能退回通知=${islandFallback} · PDF 空值不炸=${pdfNull}`
+        + ` · 分钟兜底两处=${minuteGuard} · UI与权限回主线程=${mainThread}`
+        + ` · 语音走content://=${ttsUri} · 岛闹钟豁免Doze=${alarmIdle}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：原生静默失效五连', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // O) 手写落盘：矢量立即进内存，位图导出与整库写盘防抖。
+  //    盯四件事，少一件就退回「每抬一笔卡一次」或者「切笔记丢笔迹」：
+  //      · inkSaveToNote 只存快照 + 排防抖，不再自己调 inkExportPng/save
+  //      · 快照必须带笔记 id 与 items（防抖窗口里切笔记会写错对象）
+  //      · 退出全屏 / 点保存 / 换笔记 / 切后台 都强制冲一次
+  //      · 清空要取消还没冲的防抖（否则旧快照会把笔迹写回来）
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const js = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const sched = (js.match(/function inkSaveToNote\(\)[\s\S]*?\n\}/) || [''])[0];
+    const cheapSchedule = /setTimeout\(inkFlushSave/.test(sched)
+      && !/inkExportPng\(\)/.test(sched) && !/\bsave\(\)/.test(sched);
+    const snapshot = /inkPending = \{\s*id: noteCurId, items: inkItems\.map\(inkStrip\)/.test(js);
+    const forced = /function inkExitFull\(\)[\s\S]{0,120}?inkFlushSave\(\)/.test(js)
+      && /function inkSaveOnly\(\)\{ inkFlushSave\(\)/.test(js)
+      && /function inkLoadFromNote\(\)[\s\S]{0,160}?inkFlushSave\(\)/.test(js)
+      && /pagehide[\s\S]{0,120}?inkFlushSave\(\)/.test(js);
+    const clearCancels = /function inkClear\(\)[\s\S]{0,220}?clearTimeout\(inkSaveTimer\)/.test(js);
+    results.push({
+      name: '架构守卫：手写落盘防抖（不再每抬一笔导一次位图）',
+      ok: cheapSchedule && snapshot && forced && clearCancels,
+      info: `调度便宜=${cheapSchedule} · 快照带归属=${snapshot}`
+        + ` · 关键路径强制冲=${forced} · 清空取消防抖=${clearCancels}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：手写落盘防抖', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // P) 专注条的拖动不许再占用 window 上的永久非被动监听（真机滚动掉帧的经典来源），
+  //    也不许把「第几下才全屏」那种靠记忆的状态机带回来。
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const js = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const drag = (js.match(/function fbBindDrag\(\)[\s\S]*?\n\}/) || [''])[0];
+    const noWindowHooks = !/window\.addEventListener\(['"](?:touchmove|mousemove|mouseup|touchend)['"]/.test(drag);
+    const pointerBased = /pointerdown/.test(drag) && /pointermove/.test(drag)
+      && /pointerup/.test(drag) && /setPointerCapture/.test(drag);
+    const noLeakFlag = !/var fbFromPill/.test(js);
+    /* 形态切换要当场生效（自测同帧可断言），不能靠 setTimeout 分两段 */
+    const shapeSync = /function fbSetShape\(next\)\{[\s\S]{0,400}?fbState = next;[\s\S]{0,400}?fbApply\(\);/.test(js)
+      && !/function fbSetShape\(next\)\{[\s\S]{0,400}?setTimeout\(/.test(js);
+    /* 展开回整条必须清掉内联定位 —— 留着就是「专注条浮在屏幕中间盖住内容」 */
+    const barDocked = /function fbApply\(\)[\s\S]{0,900}?el\.style\.left = ''; el\.style\.top = '';/.test(js);
+    /* 显隐与形变走 transition，不许退回 display:none 硬切 */
+    const styled = /\.focusbar\{[^}]*transition:opacity/s.test(raw)
+      && !/\.focusbar\.show\{display:flex/.test(raw);
+    results.push({
+      name: '架构守卫：专注条（Pointer Events 拖动 / 同步换形态 / 整条回底部 / 有过渡）',
+      ok: !!drag && noWindowHooks && pointerBased && noLeakFlag && shapeSync && barDocked && styled,
+      info: `不占全局监听=${noWindowHooks} · Pointer Events=${pointerBased}`
+        + ` · 三段式标志已清除=${noLeakFlag} · 换形态同步=${shapeSync}`
+        + ` · 整条回底部布局=${barDocked} · 显隐走transition=${styled}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：专注条', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // Q) 两条「结构就是契约」的守卫：
+  //    ① DEFAULT 里不许有同名键 —— 对象字面量后写的赢，前一份是静默的死配置
+  //       （v0.2.9 之前 prefs 就被写了两遍，改上面那份完全看不出效果）。
+  //    ② 预约课的正点闹钟必须走精确档（setAlarmClock）：Android 12+ 后台启动前台服务受限，
+  //       官方只给精确闹钟豁免；落到非精确档就意味着「约了却从来没自动开始过」。
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const js = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const defBlock = (js.match(/var DEFAULT = \{[\s\S]*?\n\};/) || [''])[0];
+    const topKeys = [...defBlock.matchAll(/^ {2}([A-Za-z_$][\w$]*)\s*:/gm)].map(x => x[1]);
+    /* 匹配不到就是守卫自己坏了：宁可报错，也不许它默默为真 */
+    if (topKeys.length < 20) throw new Error('DEFAULT 块没匹配到（顶层键 ' + topKeys.length + ' 个）');
+    const dup = topKeys.filter((k, i) => topKeys.indexOf(k) !== i);
+
+    const remSrc = fs.readFileSync(path.join(root, 'android', 'app', 'src', 'main',
+      'java', 'com', 'xuejing', 'app', 'ReminderScheduler.java'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const urgentTier = /boolean urgent/.test(remSrc)
+      && /setAlarmClock\(new AlarmManager\.AlarmClockInfo/.test(remSrc);
+    const bookedWired = /set\(c, am, codeBegin, startAt, true, name, detail, 0, w,\s*\n?\s*isBookedIn/.test(remSrc);
+    /* 匹配判据只许有一份：bookedCourseId 与 isBookedIn 都走 bookedKeyHits */
+    const singleMatcher = /bookedKeyHits\(k, name, time\)/.test(remSrc)
+      && !/k\.contains\(name\) && \(time == null/.test(remSrc);
+
+    results.push({
+      name: '架构守卫：DEFAULT 无同名键 + 预约闹钟走精确档',
+      ok: dup.length === 0 && urgentTier && bookedWired && singleMatcher,
+      info: `DEFAULT 顶层键 ${topKeys.length} 个 · 重复=${(dup.join(',') || '无')}`
+        + ` · urgent 档存在=${urgentTier} · 预约课已接上=${bookedWired}`
+        + ` · 匹配判据单份=${singleMatcher}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：DEFAULT 同名键 / 精确闹钟', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  // R) UI Pro 皮肤的结构契约。皮肤本体只有一份真相：tools/pro-ui/pro-skin.css，
+  //    index.html 里那段由 tools/pro-ui/sync.mjs 同步 —— 拷贝一定会漂移，所以盯三件事：
+  //    ① 两份内容一致（改了源文件忘了同步 = 打包出去的还是旧皮肤）；
+  //    ② 每一条选择器都被 html.ui-pro 圈住（漏一条，没开开关的用户界面就被改掉了）；
+  //    ③ 开关与两档强度都真的接在 applyLook 上（皮肤靠类生效，JS 不挂类就是死代码）。
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const HEAD = '/* ==== UI Pro 皮肤 · 由 tools/pro-ui/sync.mjs 从 pro-skin.css 同步，勿手改此段 ==== */';
+    const TAIL = '/* ==== UI Pro 皮肤 结束 ==== */';
+    const i = raw.indexOf(HEAD), j = raw.indexOf(TAIL);
+    if (i < 0 || j < 0) throw new Error('index.html 里找不到皮肤段（被误删了？）');
+    const inlined = raw.slice(i, j + TAIL.length).replace(/\r\n/g, '\n');
+    const src = fs.readFileSync(path.join(root, 'tools', 'pro-ui', 'pro-skin.css'), 'utf8')
+      .replace(/\r\n/g, '\n').trimEnd();
+    const same = inlined === HEAD + '\n' + src + '\n' + TAIL;
+
+    /* 逐条选择器查门禁：取每个 { 之前的文本，逗号拆开，每段都要含 html.ui-pro。
+       @ 开头的是 at-rule 前导（@media / @supports / @keyframes），不是选择器。 */
+    const css = src.replace(/\/\*[\s\S]*?\*\//g, '');
+    const ungated = [];
+    let count = 0;
+    for (const m of css.matchAll(/([^{}]+)\{/g)) {
+      const prelude = m[1].replace(/\s+/g, ' ').trim();
+      if (!prelude || prelude.startsWith('@')) continue;
+      /* 前导里可能残留上一条规则的收尾文本，只取最后一段候选选择器 */
+      const cand = prelude.split('}').pop().trim();
+      /* @keyframes 的步进名（from / to / 50%）不是选择器，别当漏门禁 */
+      if (!cand || /^(from|to|[\d.]+%)$/.test(cand)) continue;
+      count++;
+      cand.split(',').forEach(s => {
+        const sel = s.trim();
+        if (sel && !/\bhtml\.ui-pro/.test(sel)) ungated.push(sel);
+      });
+    }
+    /* 匹配不到规则 = 守卫自己坏了，宁可报错也不许它默默为真 */
+    if (count < 40) throw new Error('皮肤选择器只扫出 ' + count + ' 条，正则可能失效');
+
+    const js = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+    const wired = /classList\.toggle\('ui-pro', pro\)/.test(js)
+      && /dataset\.edge = S\.uiEdge === false \? 'off' : 'on'/.test(js)
+      && /dataset\.glass = S\.uiGlass === 'frost' \? 'frost' : 'clear'/.test(js)
+      && !/--blur-n/.test(js);
+    const inDefault = /^ {2}uiTheme: 'classic',/m.test(js) && /^ {2}uiEdge: true,/m.test(js)
+      && /^ {2}uiGlass: 'clear',/m.test(js);
+    const rows = /id="uiThemeSeg"/.test(raw) && /id="uiThemeThumb"/.test(raw)
+      && /id="uiEdgeSw"/.test(raw) && /id="glassSeg"/.test(raw) && /id="view-theme"/.test(raw);
+    /* 主题入口不许再写「旧布尔取反」：S.uiPro 这个键已被迁移删掉，
+       !undefined 恒为 true → 只能开不能关（真机报「切不回经典」）。
+       ⚠️ 只剥 HTML 注释，不剥 /* *\/：这条规则的成因就写在 HTML 注释里，
+       连着注释查会把「解释自己为什么这么写」当成违规（riseIn 那条踩过同一个坑）。
+       而 JS 块注释不能顺手一起剥 —— 这个文件里 /* 与 *\/ 的数量对不上
+       （字符串里也有），非贪婪配对会吃掉大片正常代码，守卫就永远匹配不到东西了。 */
+    const code = raw.replace(/<!--[\s\S]*?-->/g, '');
+    const noInvertedOldKey = !/setUiPro\(\s*!S\.uiPro\s*\)/.test(code)
+      && /setUiTheme\('classic'\)/.test(code) && /setUiTheme\('pro'\)/.test(code);
+    /* 玻璃档/描边/背景三行默认收起：没开 Pro 却给一行改了没反应的设置，比不给更糟 */
+    const rowHiddenByDefault = /id="edgeLi"[^>]*display:none/.test(raw)
+      && /id="glassLi"[^>]*display:none/.test(raw);
+    /* 通透/磨砂 × 明暗 = 四段令牌块，少一段就会有一档在某个主题下失效 */
+    const fourBlocks = (src.match(/data-glass="(clear|frost)"/g) || []).length >= 4;
+    /* 色散高光（--rim）随玻璃档一起砍掉了，别再溜回来 */
+    const noRim = !/--rim/.test(src);
+    /* 皮肤改的是令牌而不是点名类名：--card 必须在皮肤里被重新定义 */
+    const cardToken = /--card:rgba\(/.test(src);
+
+    /* ===== 防闪三件事（v5 真机「狂闪」之后加的）=====
+       ① 全屏 .view 不许挂 backdrop-filter；
+       ② 内容面不许叠 background-image 高光（背景图 + 模糊 + 圆角裁剪三者叠加会丢层/重绘）；
+       ③ 不许有入场动画（列表每次重渲染都会重放，看着就是刷一下闪一下）。 */
+    const viewRule = css.match(/([^{}]*\b\.view\b[^{}]*)\{([^{}]*)\}/g) || [];
+    const viewNoBlur = viewRule
+      .filter(r => /^\s*(html\.ui-pro[^{}]*\.view|html\.ui-pro #view-focus)/.test(r.trim()))
+      .every(r => !/backdrop-filter/.test(r));
+    const contentSheen = [];
+    for(const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+      const sel = m[1].replace(/\s+/g, ' ').trim();
+      if(!/\bhtml\.ui-pro/.test(sel)) continue;
+      if(!/\.(card|list|g-tile|course|day)(?![\w-])/.test(sel)) continue;
+      if(/background-image/.test(m[2])) contentSheen.push(sel.slice(0, 40));
+    }
+    /* 注释里说明「去掉了 riseIn」本身不算违规，所以查去注释后的 css */
+    const noRise = !/@keyframes\s+riseIn/.test(css) && !/riseIn/.test(css);
+    /* ④ 二级页的底必须和 .phone 用同一份令牌：一处写死灰纱、一处写光晕，
+          就是「专注页和别人不一样」的成因（真机连报三轮）。 */
+    const viewBase = [];
+    for(const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+      const sel = m[1].replace(/\s+/g, ' ').trim();
+      if(!/html\.ui-pro[^{}]*\b\.view\b|html\.ui-pro[^{}]*#view-focus/.test(sel)) continue;
+      /* 只管「铺底」的规则：进场动画那条（animation:fvInPro）不该被算进来 */
+      if(!/[{;]\s*background\s*:/.test(m[2])) continue;
+      if(!/--base-bg(-photo)?\b/.test(m[2])) viewBase.push(sel.slice(0, 44));
+    }
+    /* ⑤ 手机端 .vpanel 不许是整块玻璃：整页糊一张，结构就和主页面不同了 */
+    const panelFlat = /html\.ui-pro:not\(\.layout-tablet\)\s*\.vpanel\s*\{[^{}]*backdrop-filter:none/.test(css);
+    /* ⑥ 状态用 :not() 让开：皮肤的基础态规则一旦压过 .on/:active，
+          开与关就长一个样（真机：深度思考/联网搜索分不清）。 */
+    const stateGuards = /html\.ui-pro \.qswrow \.qsw:not\(\.on\)/.test(css)
+      && /html\.ui-pro \.quickwrap \.quick:not\(:active\)/.test(css)
+      && /html\.ui-pro \.qswrow \.qsw\.on/.test(css);
+
+    results.push({
+      name: '架构守卫：主题皮肤（两档令牌 / 门禁 / 防闪三件事）',
+      ok: same && !ungated.length && wired && inDefault && rows && rowHiddenByDefault
+        && fourBlocks && noRim && cardToken && viewNoBlur
+        && contentSheen.length === 0 && noRise && noInvertedOldKey
+        && viewBase.length === 0 && panelFlat && stateGuards,
+      info: `皮肤与源文件一致=${same} · 选择器 ${count} 条未门禁=${ungated.length ? ungated.slice(0, 3).join(' | ') : 0}`
+        + ` · applyLook 已接=${wired} · DEFAULT 有键=${inDefault} · 主题页控件齐=${rows}`
+        + ` · 主题入口不许取反旧键=${noInvertedOldKey}`
+        + ` · 三行默认收起=${rowHiddenByDefault} · 四段玻璃令牌=${fourBlocks}`
+        + ` · 色散已移除=${noRim} · --card 已令牌化=${cardToken}`
+        + ` · 全屏层无模糊=${viewNoBlur} · 内容面叠高光的规则=${contentSheen.length ? contentSheen.join(' | ') : 0}`
+        + ` · 无入场动画=${noRise} · 二级页没铺自己那份底的规则=${viewBase.length ? viewBase.join(' | ') : 0}`
+        + ` · 手机端 vpanel 整块模糊已关=${panelFlat} · 状态用 :not() 让开=${stateGuards}`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：主题皮肤', ok: false, info: 'THREW: ' + (e && e.message) });
+  }
+
+  /* 架构守卫：本地文件解析器必须零依赖、且每条失败路径都给人话。
+     查的是**源码文件**而不是页面 DOM —— 断言里写着的模式串自己就在 DOM 里，
+     在页内查自己等于自己给自己判红（第一版就踩过）。 */
+  try {
+    const raw = fs.readFileSync(SRC, 'utf8');
+    const code = raw.replace(/<!--[\s\S]*?-->/g, '');
+    const ext = /<script[^>]+src\s*=\s*["']https?:\/\//i.test(code);
+    /* 查**调用形状**而不是库名：库名会出现在我们自己写的注释里
+       （附件系统那段就写着「没有 pdf.js」，按名字查等于给自己判红）。 */
+    const libs = ['JSZip\\s*\\(', 'XLSX\\.read', 'mammoth\\.', 'unzipper\\.', 'AdmZip', 'pdfjsLib', 'word-extractor']
+      .filter(n => new RegExp(n).test(code));
+    const a = code.indexOf('async function parseOfficeFile');
+    const b = code.indexOf('/* ---------- 按问题选段');
+    if (a < 0 || b < a) throw new Error('找不到 parseOfficeFile 的函数体，守卫失效');
+    const body = code.slice(a, b);
+    const fails = (body.match(/return \{ok:false/g) || []).length;
+    const withErr = (body.match(/return \{ok:false[^}]*err/g) || []).length;
+    results.push({
+      name: '架构守卫：本地文件解析器（零依赖 / 失败必带人话）',
+      ok: !ext && !libs.length && fails > 0 && fails === withErr,
+      info: `外链脚本=${ext} · 第三方解析库=${libs.length ? libs.join(',') : 0}`
+        + ` · 解析器失败分支 ${fails} 条，带说明的 ${withErr} 条`
+    });
+  } catch (e) {
+    results.push({ name: '架构守卫：本地文件解析器', ok: false, info: 'THREW: ' + (e && e.message) });
   }
 
   let fail = 0;

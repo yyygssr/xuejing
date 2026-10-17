@@ -8,4 +8,8 @@
     <cache-path name="capture" path="capture/" />
     <!-- 分享笔记图片时的中转目录：先写到这里，再以 content:// 交给其它应用 -->
     <cache-path name="share" path="share/" />
+    <!-- 模型语音合成的 mp3：页面用 new Audio() 播它。
+         targetSdk 30+ 的 WebView 默认禁止 file:// 访问，直接给 file:// 路径
+         表现为「合成成功但没有声音」，所以这里也走 content://。 -->
+    <cache-path name="tts" path="tts/" />
 </paths>

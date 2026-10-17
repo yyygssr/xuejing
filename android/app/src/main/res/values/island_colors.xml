@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 微缩岛胶囊的配色。浅色底：近白的冷灰，深色底：偏蓝的深灰。
+     图标颜色不在这里 —— 它由 Island.java 用 ACCENT 现染（跟随主题色），
+     而 ImageView.setColorFilter 只能传 int，拿不到用户选的主题色变量。 -->
+<resources>
+    <color name="island_bg">#F1F2F7</color>
+    <color name="island_text">#1A1C24</color>
+    <color name="island_sub">#6B7280</color>
+    <!-- 倒计时进度条：与岛的主色同族，深浅底都读得清 -->
+    <color name="island_bar">#5A5AD6</color>
+</resources>

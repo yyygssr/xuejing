@@ -137,6 +137,22 @@ public class NativeBridge {
         act.setIslandEnabled("1".equals(on));
     }
 
+    /**
+     * 灵动岛分项配置（JSON：start / end / stay / elems）。
+     * 一次推完，别为每个开关加一个桥方法 —— 加一个忘一个是常态，
+     * v0.2.6 刚为「笔记返回」踩过同类的坑（页面改了、原生没接）。
+     */
+    @JavascriptInterface
+    public void setIslandPrefs(String json) {
+        Island.setPrefs(json);
+    }
+
+    /** 关掉灵动岛总开关时，把还挂在岛上的几条都收下来 */
+    @JavascriptInterface
+    public void hideIslands() {
+        Island.hideAll(act);
+    }
+
     /** 机型名，便于页面展示「上岛」在当前设备上的支持情况 */
     @JavascriptInterface
     public String vendorName() {
@@ -309,21 +325,32 @@ public class NativeBridge {
 
     /**
      * 通用模型调用入口。页面把完整请求体（JSON 字符串）组装好传进来，
-     * 原生发 POST 并把响应体原样回吐到 window.onAiResult(ok, payload)。
+     * 原生发 POST 并把响应体原样回吐到 window.onAiResult(jobId, ok, payload)。
      */
     @JavascriptInterface
+    public void aiPost(String url, String apiKey, String bodyJson, String jobId) {
+        act.aiPost(url, apiKey, bodyJson, jobId);
+    }
+
+    /** 旧签名（页面没带 id 时）：等价于 jobId="" —— 结果按「当前任务」处理 */
+    @JavascriptInterface
     public void aiPost(String url, String apiKey, String bodyJson) {
-        act.aiPost(url, apiKey, bodyJson);
+        act.aiPost(url, apiKey, bodyJson, "");
     }
 
     /**
-     * 流式版本（SSE）。增量通过 window.onAiStreamDelta(kind, text) 边收边推，
-     * 结束时仍以 window.onAiResult(ok, payload) 回一份**和整包格式相同**的响应 ——
+     * 流式版本（SSE）。增量通过 window.onAiStreamDelta(jobId, kind, text) 边收边推，
+     * 结束时仍以 window.onAiResult(jobId, ok, payload) 回一份**和整包格式相同**的响应 ——
      * 页面侧解析逻辑只保持一份，流式只是让首字早点出来的加速通道。
      */
     @JavascriptInterface
+    public void aiPostStream(String url, String apiKey, String bodyJson, String jobId) {
+        act.aiPostStream(url, apiKey, bodyJson, jobId);
+    }
+
+    @JavascriptInterface
     public void aiPostStream(String url, String apiKey, String bodyJson) {
-        act.aiPostStream(url, apiKey, bodyJson);
+        act.aiPostStream(url, apiKey, bodyJson, "");
     }
 
     /**

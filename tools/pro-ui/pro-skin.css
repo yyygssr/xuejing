@@ -1,0 +1,466 @@
+/* ==========================================================================
+   学径 · UI Pro 皮肤
+   --------------------------------------------------------------------------
+   定位：一套「只改皮肤，不改骨架」的 CSS 覆盖层。
+     · 选择器一律挂在 html.ui-pro 下 → 不开开关时这份文件等于不存在
+       （domtest 有守卫逐条检查这件事，漏一条就是没开开关的用户界面被改掉）
+     · 只覆盖取值（颜色/圆角/阴影/时长/曲线）与少量表现（玻璃、按压、入场）
+     · 不新增 DOM 结构、不改类名、不碰任何 JS 渲染函数
+   本文件是唯一真相，index.html 里那一段由 tools/pro-ui/sync.mjs 同步，勿手改。
+
+   v5：回到「通透 / 磨砂」两档（用户指定）
+   --------------------------------------------------------------------------
+   上一版试过的「玻璃（纯透明 + 色散）/ 模糊（单一高斯）」被用户否掉并回退：
+   真机上纯透明会把内容吃掉，而把那轮为修渲染问题加的全屏 `.view` 模糊
+   又带来了闪烁。这一版回到两档预设，并针对「闪」做了三处收敛：
+     ① 全屏的 `.view` 不再上 backdrop-filter（只留半透底），
+        全屏模糊 + 内容滚动是 WebView 上最典型的闪烁来源；
+     ② 内容面（卡片/磁贴/周条）不再叠 `background-image: var(--sheen)` ——
+        「背景图 + backdrop-filter + 圆角裁剪」三者叠加容易整块丢掉或反复重绘；
+        顶部那道高光改由 inset box-shadow 承担；
+     ③ 去掉内容面的入场动画（riseIn）：列表每次重渲染都会重放一遍，
+        看着就是「一次刷新闪一下」。
+
+   v5.1：真机第三轮之后补的六件事
+     · 专注页统一：二级页的底改成和 .phone 同一份 --base-bg（原来是层灰纱），
+       手机端去掉 .vpanel 整块玻璃，专注页自己的 .segs/.focusstats 补上模糊；
+     · 对话页「透明而非模糊」：气泡 / 输入框 / 加号全屏按钮 / 战术开关补
+       backdrop-filter —— 只换半透背景不挂模糊，出来就是塑料片；
+     · .qsw.on / .quick:active 的状态底色被皮肤的基础态规则覆盖掉了
+       （皮肤选择器多一层类，权重更高）→ 开/关看着一样。基础态改走 :not()；
+     · 切大页面「模糊慢半拍」：.page 的整页透明度淡入带着页内模糊一起长出来，
+       皮肤里收掉；
+     · 主题切换从开关改回两格滑块（UI Classic / UI Pro）。
+   ========================================================================== */
+
+/* ---------- 1. 令牌层 ---------- */
+html.ui-pro{
+  /* 圆角：四档，比默认更松（HyperOS 的大圆角观感） */
+  --r-sm:14px; --r-md:20px; --r-lg:28px; --r-xl:34px;
+  /* 同心圆角：外层改了圆角，贴着内边距的子元素必须跟着减，否则「外圆内方」一眼看出来。
+     规则：内层 = 外层 − 两者之间的间距。数值对齐各容器自己的 padding。 */
+  --r-in-seg:calc(var(--r-md) - 3px);    /* .seg 的 padding 是 3px  → 滑块 */
+  --r-in-tile:calc(var(--r-lg) - 13px);  /* .g-tile 左右 padding 13 → 图标块 */
+  --r-in-sheet:calc(var(--r-xl) - 18px); /* .sheet 左右 padding 18  → 弹层里的卡片 */
+  --r-in-panel:var(--r-md);              /* .vpanel 34 / padding 22 → 二级页里的卡片 */
+  /* 动效：三档时长 + 两条曲线（标准减速 / 轻微回弹） */
+  --dur-f:130ms; --dur:230ms; --dur-s:360ms;
+  --ease:cubic-bezier(.22,.9,.24,1);
+  --ease-spring:cubic-bezier(.34,1.36,.44,1);
+  --glass-line:rgba(23,26,38,.07);
+  --hair:rgba(255,255,255,.80);
+  --lift:0 10px 30px rgba(23,26,38,.10);
+  /* --card 在皮肤里被改成了半透明（全应用 48 处 background:var(--card) 一次变），
+     但「系统不支持模糊」时必须有实色可退 —— 那份留在 --card-solid 里。 */
+  --card-solid:#ffffff;
+  /* 页面底：玻璃要有东西可透，所以底不再是平色 */
+  --bloom-1:rgba(var(--brand-rgb),.42);
+  --bloom-2:rgba(var(--accent-rgb,15,184,165),.30);
+  --bloom-3:rgba(251,146,60,.22);
+  /* 背景图上的可读性垫层（三档由设置页选） */
+  --scrim:.62;
+  /* 底栏选中滑块：中性深色，不用品牌色 —— 品牌色叠在照片上会糊成一坨 */
+  --tab-pill:rgba(23,26,38,.14);
+  /* 页面底色做成**可复用的令牌**：主页面（.phone）和二级页（.view / #view-focus）
+     必须用同一份，否则「专注页就是和其他三个不一样」——
+     二级页原来铺的是一层灰纱，四段光晕被挡在下面，整页观感就比别人闷。
+     ⚠️ 用变量而不是在两处各写一遍：两处手写迟早会漂（改了一处忘了另一处）。 */
+  --bloom-stack:
+    radial-gradient(120% 58% at 8% -10%, var(--bloom-1), transparent 60%),
+    radial-gradient(100% 48% at 106% 4%, var(--bloom-2), transparent 62%),
+    radial-gradient(88% 42% at 82% 46%, var(--bloom-3), transparent 66%),
+    radial-gradient(96% 46% at 18% 92%, var(--bloom-2), transparent 64%),
+    radial-gradient(80% 40% at 50% 108%, var(--bloom-1), transparent 62%);
+  --scrim-layer:linear-gradient(rgba(var(--scrim-rgb),var(--scrim)),rgba(var(--scrim-rgb),var(--scrim)));
+  --base-bg:var(--bloom-stack), var(--bg);
+  --base-bg-photo:var(--bloom-stack), var(--scrim-layer), var(--bg-photo) center/cover no-repeat, var(--bg);
+}
+
+/* ===== 两档预设：通透 / 磨砂 =====
+   通透（data-glass="clear"）：模糊 10px、底色薄 —— 底纹看得穿，最轻。
+   磨砂（data-glass="frost"）：模糊 46px、底色厚 —— 背景化成色块，最安静。
+   ⚠️ 下面四段令牌块要同步改：浅通透 / 浅磨砂 / 深通透 / 深磨砂。
+      同权重靠顺序取胜，所以「深色」两段必须排在「浅色」两段之后，
+      且深色磨砂那段要把深色通透被覆盖掉的项全部重写一遍。 */
+html.ui-pro,html.ui-pro[data-glass="clear"]{
+  --blur:blur(10px) saturate(150%) brightness(1.02);
+  --blur-md:blur(7px) saturate(145%);
+  --blur-soft:blur(4px) saturate(140%);
+  --mask-blur:blur(10px) saturate(125%);
+  --card:rgba(255,255,255,.66);
+  --glass:rgba(255,255,255,.30);
+  --glass-strong:rgba(255,255,255,.46);
+  --glass-sheet:rgba(255,255,255,.78);
+  --scrim:.62;
+}
+html.ui-pro[data-glass="frost"]{
+  --blur:blur(46px) saturate(200%) brightness(1.05);
+  --blur-md:blur(26px) saturate(185%) brightness(1.02);
+  --blur-soft:blur(14px) saturate(160%);
+  --mask-blur:blur(26px) saturate(150%);
+  --card:rgba(255,255,255,.84);
+  --glass:rgba(255,255,255,.56);
+  --glass-strong:rgba(255,255,255,.72);
+  --glass-sheet:rgba(255,255,255,.90);
+  --scrim:.42;
+}
+html.ui-pro[data-theme="dark"],
+html.ui-pro[data-theme="dark"][data-glass="clear"]{
+  /* 深色玻璃更难做：靠「更深的底 + 更明显的上沿高光」撑层次。
+     透明度给得比浅色高一点（黑玻璃透多了内容会糊成一片），
+     但亮度抬上来，让模糊的边缘能被看见。 */
+  --glass-line:rgba(255,255,255,.09);
+  --hair:rgba(255,255,255,.16);
+  --lift:0 12px 34px rgba(0,0,0,.46);
+  --bloom-1:rgba(var(--brand-rgb),.46);
+  --bloom-2:rgba(var(--accent-rgb,45,212,191),.26);
+  --bloom-3:rgba(251,146,60,.16);
+  --card-solid:#181b25;
+  --blur:blur(10px) saturate(140%) brightness(1.10);
+  --blur-md:blur(7px) saturate(135%) brightness(1.06);
+  --blur-soft:blur(4px) saturate(130%);
+  --mask-blur:blur(10px) saturate(120%);
+  --card:rgba(28,32,44,.66);
+  --glass:rgba(30,34,46,.34);
+  --glass-strong:rgba(38,43,58,.48);
+  --glass-sheet:rgba(40,45,61,.86);
+  --scrim:.52;
+  --tab-pill:rgba(0,0,0,.34);
+}
+html.ui-pro[data-theme="dark"][data-glass="frost"]{
+  --blur:blur(46px) saturate(175%) brightness(1.16);
+  --blur-md:blur(26px) saturate(160%) brightness(1.10);
+  --blur-soft:blur(14px) saturate(150%);
+  --mask-blur:blur(26px) saturate(135%);
+  --card:rgba(28,32,44,.86);
+  --glass:rgba(30,34,46,.60);
+  --glass-strong:rgba(38,43,58,.74);
+  --glass-sheet:rgba(40,45,61,.93);
+  --scrim:.34;
+}
+/* 高光描边开关：关掉时把描边与顶部高光一起收掉，只剩材质本身 */
+html.ui-pro[data-edge="off"]{
+  --glass-line:transparent;
+  --hair:transparent;
+}
+
+/* ---------- 2. 底面：光晕 + 可选背景图 ----------
+   背景图（S.bgImage → --bg-photo）铺在最底，上面盖一层 --scrim 垫层保证可读；
+   光晕叠在垫层之上，切了背景图也还有「玻璃后面有东西」的层次。 */
+html.ui-pro .phone,html.ui-pro.app-mode .phone{background:var(--base-bg)}
+/* 皮肤会整条覆盖 background，所以「有背景图」那份要在皮肤里也写一遍：
+   图 → 遮罩 → 光晕 → 底色，顺序就是层序。漏了这行，开皮肤 + 设了图会看不到图。 */
+html.ui-pro.has-bg .phone,html.ui-pro.app-mode.has-bg .phone{background:var(--base-bg-photo)}
+
+/* ---------- 3. 玻璃表面 ----------
+   主面（卡片 / 列表 / 磁贴）用大半径模糊；
+   一次可能出现十几张的面（课表、周条）用小半径，视觉一致但成本可控。
+   ⚠️ 这里**不再叠 background-image 高光**：背景图 + backdrop-filter + 圆角裁剪
+      三者叠加时，WebView 会把整块丢掉或反复重绘（真机：磁贴里的字没了、界面闪）。
+      顶部那道高光交给下面的 inset box-shadow，效果一样但没有额外图层。 */
+html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);
+  border-radius:var(--r-lg);
+  box-shadow:inset 0 1px 0 var(--hair),var(--lift);
+}
+html.ui-pro .course{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft);
+  border:1px solid var(--glass-line);
+  border-radius:var(--r-md);
+  box-shadow:inset 0 1px 0 var(--hair);
+}
+html.ui-pro .li{border-bottom-color:var(--glass-line)}
+html.ui-pro .li .ic{border-radius:var(--r-sm);background:var(--glass-strong)}
+/* 周条：一天一格，也要透。⚠️ 选中日是 .day.sel（品牌渐变 + 白字）、
+   节假日是 .day.other（品牌浅底），这两格靠 background 表达状态，
+   一律排除掉 —— 给它们铺玻璃会把「今天」洗成看不见。 */
+html.ui-pro .week .day:not(.sel):not(.other){
+  background:var(--glass);border:1px solid var(--glass-line);
+  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+html.ui-pro .week .day.sel,html.ui-pro .week .day.other{border-radius:var(--r-md)}
+html.ui-pro .week .day.sel{box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 8px 20px rgba(var(--brand-rgb),.34)}
+/* 弹层 / 二级页里的卡片：圆角跟着外层减掉内边距，不再「外大圆内小圆」 */
+html.ui-pro .sheet .list,html.ui-pro .sheet .card,
+html.ui-pro .picksheet .list,html.ui-pro .picksheet .card{border-radius:var(--r-in-sheet)}
+html.ui-pro .viewbody .list,html.ui-pro .viewbody .card{border-radius:var(--r-in-panel)}
+html.ui-pro .g-tile .gi{border-radius:var(--r-in-tile)}
+/* 其余以 --card 为底的面（专注页的 .segs/.focusstats、笔记工具条、空状态…）
+   由令牌本身变半透，这里只补圆角与描边色。 */
+html.ui-pro .segs,html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .stat,
+html.ui-pro .empty,html.ui-pro .sched-day,html.ui-pro .n-card,html.ui-pro .note-body{
+  border-color:var(--glass-line)}
+html.ui-pro .segs,html.ui-pro .focusstats{border-radius:var(--r-md)}
+html.ui-pro .segs .s.on{border-radius:calc(var(--r-md) - 4px)}
+/* 专注页的两块面（模式条 / 今日统计）单独铺玻璃：
+   它们不是 .card/.list/.g-tile，拿不到上面那条模糊规则，
+   于是同一页里「卡片是糊的、这几块是死的」—— 也是「专注页不一样」的一半原因。
+   ⚠️ 只改容器，**不许碰 .s.on**：选中格靠 background:var(--brand-soft) 表达状态，
+   皮肤权重压过它就会把「选没选中」洗成同一种白（和第八节 .qsw.on 同一个坑）。 */
+html.ui-pro .segs,html.ui-pro .focusstats{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);
+  box-shadow:inset 0 1px 0 var(--hair)}
+/* 另有一批「凹下去的槽」用的是 --bg（不透明），玻璃面板里就会出现
+   「外面透、里面一块死色」的不统一。列出来一起改透。 */
+html.ui-pro .think,html.ui-pro .filepeek,html.ui-pro .logbox,html.ui-pro .repbox,
+html.ui-pro .lgstat,html.ui-pro .dc,html.ui-pro .stbtn,html.ui-pro .btn.ghost,
+html.ui-pro .bubble .mdi,html.ui-pro .bubble .mdc,html.ui-pro .bubble table.mdtable th{
+  background:var(--glass-strong);border-color:var(--glass-line)}
+html.ui-pro .plusmenu{border-radius:var(--r-lg);
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md);
+  box-shadow:inset 0 1px 0 var(--hair),0 18px 44px rgba(23,26,38,.24)}
+
+/* ---------- 4. 控件 ---------- */
+html.ui-pro .btn{border-radius:var(--r-md);font-weight:700;letter-spacing:.2px;
+  transition:transform var(--dur-f) var(--ease),filter var(--dur-f) var(--ease),background var(--dur-f)}
+html.ui-pro .btn.primary{
+  background:var(--brand);border:0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 8px 22px rgba(var(--brand-rgb),.36)}
+html.ui-pro .btn.ghost{background:var(--glass);border:1px solid var(--glass-line);
+  box-shadow:inset 0 1px 0 var(--hair)}
+html.ui-pro .badge{border-radius:999px;font-weight:750;letter-spacing:.2px}
+html.ui-pro .switch{transition:background var(--dur) var(--ease)}
+html.ui-pro .switch::after{transition:left var(--dur) var(--ease-spring);
+  box-shadow:0 2px 6px rgba(0,0,0,.20)}
+/* 分段控件（浅色/深色切换那种滑块）。
+   ⚠️ 这里**不许用 border**：.seg 是 border-box，加 1px 边框会把 padding box
+   往里挤 1px，而滑块是相对 padding box 定位的 top:3px/height:32px ——
+   结果滑块「上留 3px、下留 1px」，真机截图里就是「椭圆滑块和外框没对齐」。
+   描边改用 inset box-shadow，它不参与布局，几何一点不动。 */
+html.ui-pro .seg{background:var(--glass-strong);border:0;border-radius:var(--r-md);
+  box-shadow:inset 0 0 0 1px var(--glass-line),inset 0 1px 0 var(--hair)}
+html.ui-pro .segThumb{border-radius:var(--r-in-seg);
+  box-shadow:inset 0 1px 0 var(--hair),0 3px 10px rgba(23,26,38,.16);
+  transition:transform var(--dur) var(--ease-spring)}
+html.ui-pro .f,html.ui-pro input.f,html.ui-pro textarea.f{
+  border-radius:var(--r-sm);background:var(--glass-strong);border:1px solid var(--glass-line)}
+
+/* ---------- 5. 底栏：悬浮 dock + 选中滑块 ----------
+   平板布局（w≥680 且 h≥500，应用自己切的竖排侧栏）保持侧栏骨架，只换材质。
+   以前把 absolute 的 dock 也套到 grid 第 1 列上，两种定位打架 → 底栏变成上下滚动。 */
+html.ui-pro:not(.layout-tablet) .tabbar,
+html.ui-pro.app-mode:not(.layout-tablet) .tabbar{
+  position:absolute;left:12px;right:12px;bottom:calc(12px + var(--nav-inset,0px));
+  height:68px;margin:0;padding:0;background:var(--glass-strong);
+  background-image:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 46%);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);border-radius:var(--r-xl);
+  box-shadow:inset 0 1px 0 var(--hair),0 16px 40px rgba(23,26,38,.24);
+  z-index:26}
+html.ui-pro:not(.layout-tablet) .tabbar::before,
+html.ui-pro.app-mode:not(.layout-tablet) .tabbar::before{display:none}
+html.ui-pro:not(.layout-tablet) .screen,
+html.ui-pro.app-mode:not(.layout-tablet) .screen{padding-bottom:96px}
+/* 键盘弹起时必须把这段让位高度收掉。基础样式在 kb-open 下把底栏整条 display:none
+   （html.app-mode.kb-open .tabbar），可皮肤这 96px 还留着 ——
+   真机上就是「输入框浮在键盘上方一大截」，而且只在 UI Pro 下出现，经典档没这问题。 */
+html.ui-pro.kb-open:not(.layout-tablet) .screen,
+html.ui-pro.app-mode.kb-open:not(.layout-tablet) .screen{padding-bottom:0}
+/* 选中滑块：只有图标变色「认不出在哪一页」太弱。用 .tabbar 的 ::after（不新增 DOM），
+   位置由 go() 写的 --tab-i 决定；三格等宽 → translateX(idx * 100%) 就是滑到第 idx 格。 */
+html.ui-pro:not(.layout-tablet) .tabbar::after{
+  content:"";position:absolute;left:6px;top:50%;width:calc((100% - 12px)/3);height:52px;
+  margin-top:-26px;border-radius:var(--r-lg);
+  background:var(--tab-pill);
+  transform:translateX(calc(var(--tab-i,0) * 100%));
+  transition:transform var(--dur-s) var(--ease-spring);pointer-events:none;z-index:-1}
+html.ui-pro:not(.layout-tablet) .tab.on{color:var(--brand)}
+/* 平板侧栏各格高度不等，等分 translate 不成立 → 退回「当前格铺底色」。 */
+html.ui-pro.layout-tablet .tabbar,
+html.ui-pro.app-mode.layout-tablet .tabbar{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border-top:0;border-right:1px solid var(--glass-line);
+  box-shadow:inset 1px 0 0 var(--hair)}
+html.ui-pro.layout-tablet .phone.nav-right .tabbar,
+html.ui-pro.app-mode.layout-tablet .phone.nav-right .tabbar{
+  border-right:0;border-left:1px solid var(--glass-line);
+  box-shadow:inset -1px 0 0 var(--hair)}
+html.ui-pro.layout-tablet .tab.on{border-radius:var(--r-md);background:rgba(var(--brand-rgb),.14)}
+html.ui-pro .tab{transition:color var(--dur-f) var(--ease),transform var(--dur-f) var(--ease-spring),
+  background var(--dur-f) var(--ease)}
+html.ui-pro:not(.layout-tablet) .tab.on{transform:translateY(-1px)}
+html.ui-pro .tab.center .fab{background:var(--brand);border-radius:var(--r-md);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 10px 24px rgba(var(--brand-rgb),.44)}
+
+/* ---------- 6. 弹层：方向感 + 弹簧 ----------
+   遮罩别压太黑：sheet 自己是半透明白玻璃，底下越暗它就越灰
+   （弹层采样的是「已被遮罩压暗」的背板）。磨砂感靠模糊，不靠压黑。 */
+html.ui-pro .mask,html.ui-pro .pickmask{
+  background:rgba(10,12,20,.28);
+  -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
+html.ui-pro[data-theme="dark"] .mask,
+html.ui-pro[data-theme="dark"] .pickmask{background:rgba(0,0,0,.42)}
+html.ui-pro .sheet,html.ui-pro .picksheet{
+  background:var(--glass-sheet);
+  background-image:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 46%);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);border-bottom:0;
+  border-radius:var(--r-xl) var(--r-xl) 0 0;
+  box-shadow:inset 0 1px 0 var(--hair),0 -18px 50px rgba(0,0,0,.28)}
+html.ui-pro .mask .sheet,html.ui-pro .pickmask .picksheet{
+  transition:transform var(--dur-s) var(--ease-spring)}
+html.ui-pro .sheet .sh{background:var(--sub);opacity:.35}
+html.ui-pro .alertcard{
+  background:var(--glass-sheet);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);border-radius:var(--r-lg);
+  box-shadow:inset 0 1px 0 var(--hair),0 16px 40px rgba(0,0,0,.26)}
+html.ui-pro .toast{
+  background:var(--glass-strong);
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md);
+  border:1px solid var(--glass-line);border-radius:999px;color:var(--text);
+  box-shadow:inset 0 1px 0 var(--hair),0 10px 30px rgba(0,0,0,.24)}
+html.ui-pro .focusbar{
+  background:var(--glass-strong);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);border-radius:var(--r-lg);color:var(--text);
+  box-shadow:inset 0 1px 0 var(--hair),0 14px 34px rgba(23,26,38,.22)}
+html.ui-pro .focusbar .fbtn,html.ui-pro .focusbar .fexp{background:rgba(var(--brand-rgb),.14)}
+html.ui-pro .focusbar.pill{border-radius:999px}
+
+/* ---------- 7. 二级页：和三个主页面同一块底 ----------
+   ⚠️ 必须连 #view-focus 一起写：它用 **ID 选择器** 定了 background:var(--bg)，
+   权重压过一切类选择器 —— 这就是「专注页始终没和其他页统一」的根因。
+   ⚠️ 底必须是 --base-bg（和 .phone 同一份），**不是灰纱**：
+   上一版这里铺 rgba(--scrim-rgb,.58)，等于在别人没有的一层灰布上摆卡片，
+   四段光晕被完全挡掉 → 专注页看着就是「比别人闷、比别人灰」。
+   ⚠️ 这里**不挂 backdrop-filter**：全屏元素 + 内容滚动是 WebView 上最典型的
+   闪烁来源（用户报「狂闪」）。模糊交给页内的卡片和面板自己。
+   ⚠️ 手机上去掉 .vpanel 整块的玻璃与模糊：整块糊时，页面是「一张大卡片」，
+   主页面是「底纹上飘着几张卡片」，结构感完全不同。让位给页内表面才叫统一。 */
+html.ui-pro .view,html.ui-pro #view-focus,
+html.ui-pro.layout-tablet #view-focus{background:var(--base-bg)}
+html.ui-pro.has-bg .view,html.ui-pro.has-bg #view-focus,
+html.ui-pro.layout-tablet.has-bg #view-focus{background:var(--base-bg-photo)}
+html.ui-pro .vpanel{background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);border-radius:var(--r-xl);
+  box-shadow:inset 0 1px 0 var(--hair),0 24px 60px rgba(0,0,0,.24)}
+html.ui-pro:not(.layout-tablet) .vpanel{
+  background:transparent;border:0;border-radius:0;box-shadow:none;
+  -webkit-backdrop-filter:none;backdrop-filter:none}
+html.ui-pro .viewhead{background:transparent;border-bottom-color:var(--glass-line)}
+html.ui-pro .icon-btn{border-radius:var(--r-sm);background:var(--glass-strong);
+  border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+/* 平板上二级页是居中那张卡，玻璃面板留在那里才有「浮起」的意思。 */
+/* 专注页的进出：基础样式给的是 translateY + scale 的 fvIn/fvOut，
+   别的二级页只是透明度淡入淡出 —— 同一层级的页面不该有两种进场语言。
+   ⚠️ 只能换成**同名的纯透明度动画**，不许直接 animation:none：
+   #view-focus 收起靠 .anim-out 撑住可见性（基础 visibility 没有过渡），
+   去掉动画会「啪」一下消失；JS 那边也用 setTimeout 收尾，不监听 animationend。 */
+html.ui-pro #view-focus.anim-in{animation:fvInPro var(--dur) ease both}
+html.ui-pro #view-focus.anim-out{animation:fvOutPro var(--dur) ease both;pointer-events:none}
+@keyframes fvInPro{from{opacity:0}to{opacity:1}}
+@keyframes fvOutPro{from{opacity:1}to{opacity:0}}
+
+/* ---------- 8. 对话页 ----------
+   输入行是「椭圆 + 三颗方块按钮」的组合：按钮要和输入框同高、同圆角节奏，
+   否则真机上看着就是三个小东西围着一个大框（用户：大小不一致）。
+   ⚠️ 这一节的东西**全都得有 backdrop-filter**：只把 background 换成半透明
+   而不挂模糊，在真机上的观感就是「一块透明塑料」而不是玻璃 ——
+   用户原话「消息气泡、加号和全屏，以及对话框都是透明而非模糊」。
+   气泡一次可能出现几十条，用 --blur-soft（4px）控制成本；
+   输入行只有一条，用 --blur-md。 */
+html.ui-pro .composer{background:transparent;border-top:0}
+html.ui-pro #chatInput{border-radius:var(--r-md);background:var(--glass-strong);
+  border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md)}
+html.ui-pro .composer .icon-btn{width:44px;height:44px;border-radius:var(--r-md);
+  display:flex;align-items:center;justify-content:center;
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md)}
+html.ui-pro .composer .icon-btn svg{width:19px;height:19px}
+html.ui-pro .msg.ai .bubble{background:var(--glass-strong);border:1px solid var(--glass-line);
+  border-radius:var(--r-md) var(--r-md) var(--r-md) 6px;
+  box-shadow:inset 0 1px 0 var(--hair),0 6px 18px rgba(23,26,38,.08);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+html.ui-pro .msg.me .bubble{background:var(--brand);border-radius:var(--r-md) var(--r-md) 6px var(--r-md);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 8px 22px rgba(var(--brand-rgb),.30)}
+html.ui-pro .aibar{background:var(--glass);border:1px solid var(--glass-line);
+  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md)}
+/* 快捷建议 / 战术开关：基础样式用 background 表达状态
+   （.quick:active 上品牌浅底、.qsw.on 直接铺品牌色），
+   而皮肤选择器 html.ui-pro .qswrow .qsw 是「3 类 + 1 元素」，
+   压过基础的「2 类」—— 结果开/关两块颜色一模一样，
+   用户报「深度思考和联网搜索开启和关闭很难分得清」。
+   修法：**基础态用 :not() 让开状态类**，再给状态类补一份皮肤版外观，
+   而不是把状态一起覆盖掉。 */
+html.ui-pro .quickwrap .quick{border-radius:999px;
+  border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+html.ui-pro .quickwrap .quick:not(:active){background:var(--glass-strong)}
+html.ui-pro .qswrow .qsw{border-radius:999px;
+  border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+html.ui-pro .qswrow .qsw:not(.on){background:var(--glass-strong)}
+/* 开启态：还是品牌色，但换成皮肤的语言 —— 大圆角 + 顶部高亮 + 品牌投影，
+   让「开着」在玻璃底上仍然一眼可辨。 */
+html.ui-pro .qswrow .qsw.on{background:var(--brand);border-color:transparent;color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.26),0 6px 16px rgba(var(--brand-rgb),.34)}
+html.ui-pro .qswrow .qsw.warn{border-style:dashed;border-color:var(--glass-line)}
+
+/* ---------- 9. 历史记录侧栏 ---------- */
+html.ui-pro .drawer{background:var(--glass-sheet);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border-right:1px solid var(--glass-line);
+  box-shadow:inset 1px 0 0 var(--hair),24px 0 60px rgba(0,0,0,.22)}
+html.ui-pro .drawer-scrim.show{
+  background:rgba(10,12,20,.28);
+  -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
+html.ui-pro .hist-card{background:var(--glass);border:1px solid var(--glass-line);
+  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair)}
+html.ui-pro .hist-card.on{background:var(--glass-strong)}
+
+/* ---------- 10. 排版层级 ---------- */
+html.ui-pro .h1{font-size:25px;font-weight:750;letter-spacing:-.2px}
+html.ui-pro .sec-title .t,html.ui-pro .h2{font-weight:750;letter-spacing:-.1px}
+html.ui-pro .li .tx b{font-weight:700}
+html.ui-pro .fs,html.ui-pro .course .time,html.ui-pro .week .day b{font-variant-numeric:tabular-nums}
+
+/* ---------- 11. 按压 / 切页动效 ----------
+   ⚠️ 这里**不再给内容面加入场动画**（旧版有 riseIn）：列表每次重渲染都会重放，
+   真机上就是「刷一下闪一下」，和 backdrop-filter 重绘叠在一起更明显。
+   要动效只保留按压缩放的反馈。 */
+html.ui-pro .li.tap:active,html.ui-pro .g-tile:active,html.ui-pro .course:active{
+  transform:scale(.988)}
+html.ui-pro .li.tap,html.ui-pro .g-tile,html.ui-pro .course{
+  transition:transform var(--dur-f) var(--ease),
+    background var(--dur-f) var(--ease),border-color var(--dur-f)}
+/* 切三个大页面时「模糊要慢半拍才出现」的根因：基础样式
+   .page{animation:fade .22s ease} 是整页透明度从 0 起，
+   而透明度动画期间，页内每个 backdrop-filter 元素采到的**自己那层**也在淡入，
+   于是玻璃的「糊」是跟着透明度一起长出来的 —— 看着就是延迟。
+   皮肤里把这段淡入收掉：切页本来有底栏滑块在动，够指明「切到哪了」。 */
+html.ui-pro .page{animation:none}
+
+/* ---------- 12. 系统不支持模糊时：退成实色，不塌版 ----------
+   ⚠️ 这里不许退回 var(--card) —— 皮肤里 --card 本身就是半透明的，
+   没有模糊又半透明 = 字压在内容上。必须用实色那份 --card-solid。 */
+@supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
+  html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile,html.ui-pro .course,
+  html.ui-pro .sheet,html.ui-pro .picksheet,html.ui-pro .vpanel,html.ui-pro .tabbar,
+  html.ui-pro .toast,html.ui-pro .alertcard,html.ui-pro .focusbar,html.ui-pro .aibar,
+  html.ui-pro .seg,html.ui-pro .segThumb,html.ui-pro .icon-btn,html.ui-pro .quickwrap .quick,
+  html.ui-pro .qswrow .qsw,html.ui-pro #chatInput,html.ui-pro .msg .bubble,
+  html.ui-pro .plusmenu,html.ui-pro .segs,html.ui-pro .focusstats,html.ui-pro .drawer,
+  html.ui-pro .view,html.ui-pro #view-focus{
+    background:var(--card-solid)}
+  html.ui-pro .mask,html.ui-pro .pickmask{background:rgba(10,12,20,.55)}
+  /* 上面那条靠「权重低的 .qsw / .quick」生效，但第八节把它们拆成了
+     :not(.on) / :not(:active) 两条高权重规则 —— 兜底里必须按同样的权重再写一遍，
+     否则没有模糊的浏览器上基础态还是半透的，字压在内容上。 */
+  html.ui-pro .quickwrap .quick:not(:active),
+  html.ui-pro .qswrow .qsw:not(.on){background:var(--card-solid)}
+}
+
+/* ---------- 13. 用户明确要减少动效时 ---------- */
+@media (prefers-reduced-motion:reduce){
+  html.ui-pro *{animation:none!important;transition-duration:1ms!important}
+}

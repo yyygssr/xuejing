@@ -56,7 +56,6 @@ const RAW_OK = new Map([
   ['nextPaint', '挑没用过的颜色（盘点）'],
   ['autoPaints', '批量挑颜色（盘点）'],
   ['findTodo', '找与课程相关的待办（结构）'],
-  ['renderSummaryQuick', '本周各科投入汇总（结构）'],
   ['priContextBlock', '给 AI 的优先级上下文（结构）'],
   /* ⑤ 契约：推给原生的 payload。原生要自己按同一套规则判，
         页面提前砍掉的话原生就再也不知道「这天本该有课但放假了」。 */
@@ -165,8 +164,7 @@ const NATIVE_CONSUMERS = {
 };
 
 /** 从 pushScheduleToNative 的 JSON 字面量里抠出字段名 */
-function pushedFields() {
-  const anchor = "nat('setSchedule', JSON.stringify({";
+function pushedFields() {  const anchor = "nat('setSchedule', JSON.stringify({";
   const i = HTML.indexOf(anchor);
   if (i < 0) return null;
   const body = HTML.slice(i + anchor.length);
@@ -185,13 +183,124 @@ function pushedFields() {
     漏了它会把明明读了 termStart 误报成「没人读」（第一版就踩了）。 */
 function javaReads(field) {
   const readers = [];
+  /* 不要加 g：带 g 的 RegExp 是有状态的，.test() 会把 lastIndex 带到下一轮循环，
+     一个字段被两个文件读时会漏判第二个（对账因此时好时坏）。这里只需要「有没有」，
+     不需要全局匹配。 */
   const rx = new RegExp(
     '(?:\\.(?:opt|get)(?:String|Int|Boolean|Long|Double|JSONArray|JSONObject)\\(\\s*"' + field + '"'
-    + '|\\boptText\\(\\s*\\w+\\s*,\\s*"' + field + '")', 'g');
+    + '|\\boptText\\(\\s*\\w+\\s*,\\s*"' + field + '")');
   for (const [f, src] of Object.entries(JAVA)) {
     if (rx.test(src)) readers.push(f);
   }
   return readers;
+}
+
+/* ============================================================
+   3b) 灵动岛分项配置对账（另一条桥，不在 setSchedule 里）
+   ============================================================ */
+
+const ISLAND_CONSUMERS = {
+  on: {
+    reads: ['Island.java'],
+    /* 总闸有两条桥：setIslandOn → Notify.islandExtrasOn（老路），
+       以及 setIslandPrefs 里的 on → Island.cfgOn。两条都送到才算数 ——
+       只信一条的话，另一条丢了就会出现「设置页显示关了、岛上还在跑」。
+       showClass() 第一行就是 if(!cfgOn) return，别改成只看 Notify 那个。 */
+    indirect: ['cfgOn：showClass() 的总闸，与 Notify.islandExtrasOn 双保险'],
+  },
+  start: {
+    reads: ['Island.java'],
+    indirect: ['cfgStart：课前提醒要不要上岛（Notify.showClass 分流）'],
+  },
+  end: {
+    reads: ['Island.java'],
+    indirect: ['cfgEnd：下课提醒要不要上岛（Notify.showClass 分流）'],
+  },
+  stay: {
+    reads: ['Island.java'],
+    indirect: ['cfgStay：上课后同一条岛翻成「离下课」，否则到点收摊'],
+  },
+  focus: {
+    reads: ['Island.java'],
+    indirect: ['cfgFocus：专注计时上不上岛（Notify.buildFocus 分流，与 islandExtrasOn 一起判）'],
+  },
+  len: {
+    reads: ['Island.java'],
+    indirect: ['cfgLen → stayMillis()：下课提醒/测试岛停留多久；MIUI timeout 也跟它走'],
+  },
+  stayMin: {
+    reads: ['Island.java'],
+    /* v0.2.9 把「岛屿形态」和「停留时长」拆成两个键：len 管排版，stayMin 管多久下岛。
+       以前两者共用一个键，选「短岛」会连带把停留时间也改掉。 */
+    indirect: ['stayMin → stayMillis()：事件型岛（下课提醒/测试岛）自动下岛前等多久'],
+  },
+  elems: {
+    reads: ['Island.java'],
+    indirect: ['elCourse/elPlace/elTime/elCountdown → pill() 决定两列放什么'],
+  },
+};
+
+/** 从 applyIslandPref 的 JSON 字面量里抠出字段名 */
+function islandPushedFields() {
+  const anchor = "nat('setIslandPrefs', JSON.stringify({";
+  const i = HTML.indexOf(anchor);
+  if (i < 0) return null;
+  const body = HTML.slice(i + anchor.length);
+  const end = body.indexOf('}));');
+  if (end < 0) return null;
+  const fields = [];
+  for (const line of body.slice(0, end).split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:/);
+    if (m) fields.push(m[1]);
+  }
+  return fields;
+}
+
+/** Island.setPrefs 是否真的读了这个键（o.optBoolean("start") / o.has("stay")） */
+function islJavaReads(field) {
+  const readers = [];
+  /* 同 javaReads：这里只需要「读没读」，加 g 会让 lastIndex 跨文件残留 */
+  const rx = new RegExp('\\.(?:has|optBoolean|optInt|optJSONArray)\\("' + field + '"\\)');
+  for (const [f, src] of Object.entries(JAVA)) {
+    if (rx.test(src)) readers.push(f);
+  }
+  return readers;
+}
+
+function checkIslandContract() {
+  const fields = islandPushedFields();
+  const problems = [];
+  if (!fields) {
+    problems.push('找不到 applyIslandPref 的 setIslandPrefs payload，无法对账');
+    return { fields: [], problems };
+  }
+  for (const f of fields) {
+    const decl = ISLAND_CONSUMERS[f];
+    const actual = islJavaReads(f);
+    if (!decl) {
+      problems.push(`灵动岛字段 ${f}：原生侧未登记消费者。`
+        + `请在 audit.mjs 的 ISLAND_CONSUMERS 里登记它由谁读、用来干什么。`);
+      continue;
+    }
+    for (const d of decl.reads) {
+      if (!JAVA[d]) { problems.push(`灵动岛字段 ${f}：登记的消费者 ${d} 不存在`); continue; }
+      if (!actual.includes(d)) {
+        problems.push(`灵动岛字段 ${f}：登记由 ${d} 读取，但 Island.setPrefs 里没读到 "${f}" `
+          + `—— 要么登记写错了，要么原生侧漏接了（表现：设置页开了、岛上没反应）`);
+      }
+    }
+    for (const a of actual) {
+      if (!decl.reads.includes(a)) {
+        problems.push(`灵动岛字段 ${f}：${a} 读了它，但没在 ISLAND_CONSUMERS.reads 里登记`);
+      }
+    }
+  }
+  for (const f of Object.keys(ISLAND_CONSUMERS)) {
+    if (!fields.includes(f)) {
+      problems.push(`灵动岛字段 ${f}：ISLAND_CONSUMERS 里有登记，但页面已经不再推送它了（陈旧登记）`);
+    }
+  }
+  return { fields, problems };
 }
 
 function checkContract() {
@@ -341,6 +450,32 @@ if (con.problems.length) {
   for (const p of con.problems) console.log('  · ' + p);
 } else {
   console.log('\n[通过] 两端字段对账一致');
+}
+
+/* ---- CONTRACT(2) 灵动岛分项配置 ----
+   这套配置走的是另一条桥（setIslandPrefs → Island.setPrefs），不在 setSchedule 里，
+   所以上面那套对账看不见它。但它是同一个性质的问题：页面加了开关、原生没接，
+   表现就是「设置页里明明开了，岛上却什么都不变」—— 而且没有任何报错。
+   v0.2.6 刚为「笔记返回」踩过同类的坑，这里提前把对账补上。 */
+const isl = checkIslandContract();
+line('3b) CONTRACT 灵动岛分项配置（setIslandPrefs → Island.setPrefs）');
+console.log('页面推送：' + (isl.fields.join(', ') || '（找不到 payload）'));
+for (const f of isl.fields) {
+  const d = ISLAND_CONSUMERS[f];
+  const reads = d ? d.reads : [];
+  const a = islJavaReads(f);
+  const mark = (reads.length && reads.every(x => a.includes(x))
+    && a.every(x => reads.includes(x))) ? '  ok ' : '  !! ';
+  console.log(`  ${mark}${f.padEnd(12)} 登记读取=${reads.join(',') || '（未登记）'}`
+    + `  实际读取=${a.join(',') || '（没人读）'}`);
+  if (d && d.indirect) console.log(`      用途：${d.indirect.join('；')}`);
+}
+if (isl.problems.length) {
+  failed++;
+  console.log('\n[违规]');
+  for (const p of isl.problems) console.log('  · ' + p);
+} else {
+  console.log('\n[通过] 灵动岛两端对账一致');
 }
 
 console.log('\n' + (failed ? `[审计未通过] ${failed} 项检查有问题` : '[审计通过] 全部一致'));

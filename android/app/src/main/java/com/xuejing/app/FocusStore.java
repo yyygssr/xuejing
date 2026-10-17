@@ -83,12 +83,12 @@ public class FocusStore {
         }
     }
 
-    static void saveCurrent(Context c, JSONObject o) {
+    synchronized static void saveCurrent(Context c, JSONObject o) {
         if (c == null) return;
         sp(c).edit().putString(K_CUR, o == null ? "" : o.toString()).apply();
     }
 
-    static void clearCurrent(Context c) {
+    synchronized static void clearCurrent(Context c) {
         if (c == null) return;
         sp(c).edit().putString(K_CUR, "").apply();
     }
@@ -98,7 +98,7 @@ public class FocusStore {
      *
      * @param dir down=倒计时（到点自动结束）/ up=正计时（手动结束才算）
      */
-    static JSONObject open(Context c, String label, String courseId, String mode,
+    synchronized static JSONObject open(Context c, String label, String courseId, String mode,
                            String dir, int totalSecs) {
         long now = System.currentTimeMillis();
         JSONObject o = new JSONObject();
@@ -124,7 +124,7 @@ public class FocusStore {
     }
 
     /** 暂停：把当前这一段结算进 accumSecs，并记住暂停时刻（恢复时要把 endAt 往后推） */
-    static void pause(Context c) {
+    synchronized static void pause(Context c) {
         JSONObject o = current(c);
         if (o == null) return;
         long now = System.currentTimeMillis();
@@ -144,7 +144,7 @@ public class FocusStore {
     }
 
     /** 恢复：倒计时的 endAt 要往后推「暂停了多久」，否则暂停会白白吃掉倒计时 */
-    static void resume(Context c) {
+    synchronized static void resume(Context c) {
         JSONObject o = current(c);
         if (o == null) return;
         long now = System.currentTimeMillis();
@@ -161,7 +161,7 @@ public class FocusStore {
     }
 
     /** 延长当前这一轮（秒）：倒计时的结束时刻跟着往后推，正计时只改计划总时长 */
-    static void extend(Context c, int secs) {
+    synchronized static void extend(Context c, int secs) {
         JSONObject o = current(c);
         if (o == null || secs <= 0) return;
         try {
@@ -179,7 +179,7 @@ public class FocusStore {
      * 写入按 5 秒节流 —— 每秒一次磁盘 I/O 太浪费，而 5 秒的精度对补算够用
      * （宽限有 10 秒，覆盖得住）。
      */
-    static void alive(Context c) {
+    synchronized static void alive(Context c) {
         JSONObject o = current(c);
         if (o == null) return;
         if (!ST_RUNNING.equals(o.optString("state"))) return;
@@ -196,7 +196,7 @@ public class FocusStore {
      *
      * @param reason natural 走完 / manual 手动结束 / discard 丢弃不记账
      */
-    static void finish(Context c, String reason) {
+    synchronized static void finish(Context c, String reason) {
         JSONObject o = current(c);
         if (o == null) return;
         String why = (reason == null || reason.isEmpty()) ? R_NATURAL : reason;
@@ -273,7 +273,7 @@ public class FocusStore {
     }
 
     /** 页面消费完一批记录后回执；按 id 幂等，重复 ack 不会出错 */
-    static void ack(Context c, String idsJson) {
+    synchronized static void ack(Context c, String idsJson) {
         if (c == null) return;
         Set<String> ids = new HashSet<>();
         try {

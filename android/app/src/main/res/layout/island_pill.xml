@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  灵动岛两列排版。v0.2.9 起按用户给的参考图重做「短岛」：
+    短岛 = 左边只一个名称（不够长就滚动），右边只一个倒计时。
+  之前把「长短」理解成了停留时长，那是另一码事。
+
+  ⚠️ 倒计时为什么用 Chronometer 而不是 TextView：
+     Chronometer 由**系统自己走秒**，不需要我们每秒重发通知。
+     RemoteViews.setChronometer + setChronometricCountDown 是 AOSP 标准能力
+     （API 24+），在自定义内容视图里可用。此前靠 FocusService 每秒重发通知
+     换数字，既费电又容易触发「岛被更新 → 重新展开」。
+
+  图标是纯白剪影（ic_stat_*.xml 的 fillColor 都是 #FFFFFFFF），
+  自定义内容视图不在系统染色范围内，所以底色用中性色 + 代码 setColorFilter。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/island_pill_bg"
+    android:paddingStart="14dp"
+    android:paddingTop="9dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="9dp">
+
+    <ImageView
+        android:id="@+id/islandIcon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginEnd="10dp"
+        android:contentDescription="@null" />
+
+    <!-- 短岛：名称独占剩余空间。不够长时 marquee 滚动而不是截断成「中华优秀传统…」
+         ——用户要「滚动显示」，省略号等于没给出信息。 -->
+    <TextView
+        android:id="@+id/islandName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:singleLine="true"
+        android:ellipsize="marquee"
+        android:focusable="true"
+        android:scrollHorizontally="true"
+        android:marqueeRepeatLimit="marquee_forever"
+        android:textColor="@color/island_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 副文本（地点）。短岛档位下由代码置 GONE —— 短岛只要「名称 + 倒计时」。 -->
+    <TextView
+        android:id="@+id/islandSub"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/island_sub"
+        android:textSize="11sp"
+        android:visibility="gone" />
+
+    <!-- 倒计时进度条。用户要求「右边放一个倒计时环」；
+         RemoteViews 能安全渲染的只有 ProgressBar（自定义 View 一律被拒），
+         所以这里用系统横向进度样式呈现「剩余量」。
+         真正带环的是 MIUI 侧 combinePicInfo（见 Island.java）。 -->
+    <ProgressBar
+        android:id="@+id/islandProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="34dp"
+        android:layout_height="3dp"
+        android:layout_marginStart="10dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="@color/island_bar" />
+
+    <!-- 倒计时数字。运行时由 setChronometricCountDown + setChronometer 驱动，
+         系统自走秒；pause / 静态文案时退回 setTextViewText。 -->
+    <Chronometer
+        android:id="@+id/islandCountdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:maxLines="1"
+        android:textColor="@color/island_text"
+        android:textSize="12.5sp"
+        android:textStyle="bold"
+        android:format="%m:%s" />
+</LinearLayout>

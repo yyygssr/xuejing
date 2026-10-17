@@ -86,9 +86,17 @@ public class Notify {
      * @param running    是否在走
      */
     public static Notification buildFocus(Context c, String label, int remainSecs, boolean running) {
+        return buildFocus(c, label, remainSecs, running, 0);
+    }
+
+    /** @param totalSecs 本轮总秒数，用来画倒计时进度条；<=0 表示不画 */
+    public static Notification buildFocus(Context c, String label, int remainSecs, boolean running,
+                                          int totalSecs) {
         String task = (label == null || label.trim().isEmpty()) ? "自由专注" : label.trim();
         int remain = Math.max(0, remainSecs);
-        boolean island = islandExtrasOn;
+        /* 专注上岛也受「灵动岛 → 专注计时」那个开关管。
+           以前只要总开关开着就上，用户没法单独关掉专注那一条。 */
+        boolean island = islandExtrasOn && Island.cfgFocus;
 
         NotificationCompat.Builder b = new NotificationCompat.Builder(c, CH_FOCUS)
                 .setSmallIcon(Island.ICON_TIMER)
@@ -101,13 +109,31 @@ public class Notify {
                 .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
 
+        /* 走不走系统计时：运行中就把终点时刻交给系统（chronometer / MIUI timerInfo），
+           秒由系统自己跳。v0.2.8 之前这里一律 setUsesChronometer(false)，
+           逼得 FocusService 每秒重发一次通知；而 MIUI 侧 enableFloat 又是 true，
+           于是「每秒刷新」直接翻译成「岛每秒弹开一次」。
+           ——这两处必须一起改，只改一处仍会反复展开。 */
+        long endAt = System.currentTimeMillis() + remain * 1000L;
+
         if (island) {
-            /* 岛上：标题 = 状态 + 倒计时，正文留空，不挂 chronometer */
-            b.setContentTitle((running ? "专注中 " : "已暂停 ") + hhmmss(remain))
-             .setContentText("")
-             .setSubText(task)
-             .setShowWhen(false)
-             .setUsesChronometer(false);
+            /* 上岛：走和上课提醒**同一套两列排版**（复用 Island.pillViews），
+               左 = 任务名，右 = MM:SS 倒计时。
+               以前这里把「专注中 24:35」整句塞进标题，于是左边只剩一个图标 ——
+               和上课提醒是同一个毛病，用户一起提的。 */
+            Island.Pill p = Island.pillTimer(task,
+                    (running ? "" : "已暂停 ") + hhmmss(remain),
+                    running ? endAt : 0L, totalSecs * 1000L);
+            /* running=true 时右列交给 Chronometer 自走秒 —— 系统计时，不用我们每秒发通知 */
+            b.setCustomContentView(Island.pillViews(c, Island.ICON_TIMER, p, Island.ACCENT, running))
+             .setContentTitle(p.name)
+             .setContentText(p.right)
+             .setShowWhen(running)
+             .setWhen(endAt)
+             .setUsesChronometer(running);
+            if (running && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                b.setChronometerCountDown(true);
+            }
         } else {
             /* 不上岛：倒计时交给系统 chronometer 自绘（不需要我们逐秒刷新） */
             b.setContentTitle(task)
@@ -124,9 +150,11 @@ public class Notify {
         Notification n = b.build();
         if (island) {
             /* 上岛：常驻 + FLAG_NO_CLEAR + promoted 标志 + 厂商参数。
-               前台服务通知保持 null TAG，才能与 startForeground 合成同一条。
-               标题就是岛上显示的那行，所以这里的 title 与上面一致。 */
-            Island.promote(n, (running ? "专注中 " : "已暂停 ") + hhmmss(remain), task, Island.ACCENT);
+               前台服务通知保持 null TAG，才能与 startForeground 合成同一条。 */
+            Island.promote(c, n, task, (running ? "" : "已暂停 ") + hhmmss(remain),
+                    Island.ACCENT, Island.pillTimer(task,
+                            (running ? "" : "已暂停 ") + hhmmss(remain),
+                            running ? endAt : 0L, totalSecs * 1000L));
         }
         return n;
     }
@@ -179,35 +207,19 @@ public class Notify {
      * 关掉时退回原来的高优先级一次性通知。
      *
      * detail 形如「08:00-09:40 · 实验楼 B204」——岛上位置窄，这里把它拆成
-     * 「时间是几点」+「在哪」，标题只留课程名与时刻，地点放正文并截断。
+     * 「时间是几点」+「在哪」，课程名与时刻上岛，地点放副文本。
+     *
+     * 上岛又分三种相位，都由 islandStart / islandStay / islandEnd 三个开关决定：
+     *   · 课前（before>0）        → 「还有 N 分钟上课」，上课那一刻收摊
+     *   · 正点（before==0）       → 开「上课期间常驻」就把**同一条岛**翻成
+     *                               「还有 N 分钟下课」并延长到下课；没开就收摊
+     *   · 下课（!isStart）        → 「已下课」；常驻那条能复用就复用，不新发
      */
     public static void showClass(Context c, boolean isStart, String name, String detail, int before) {
         ensureChannels(c);
         if (!canPost(c)) return;
 
-        if (islandExtrasOn) {
-            String course = shortName(name);
-            String time = timeRange(detail);
-            String place = placeOf(detail);
-            String startHM = hm(time, true), endHM = hm(time, false);
-            String title, text;
-            if (isStart) {
-                title = course + (startHM.isEmpty() ? " · 上课" : (" · " + startHM));
-                text = (place.isEmpty() ? "" : (place + " · ")) + "约 " + Math.max(1, before) + " 分钟后开始";
-            } else {
-                title = course + " · 已下课";
-                text = (endHM.isEmpty() ? "" : (endHM + (place.isEmpty() ? "" : " · "))) + place;
-            }
-            /* 课前提醒：上课那一刻自动下岛；下课提醒：10 分钟后自动下岛。
-               上岛通知是常驻的，不给出口就会一直占着岛。 */
-            long hideAt = System.currentTimeMillis()
-                    + (isStart ? Math.max(1, before) * 60_000L : 10 * 60_000L);
-            Island.show(c, isStart ? Island.ID_CLASS_START : Island.ID_CLASS_END,
-                    Island.ICON_CLASS, title, clip(text, 28), "学径",
-                    isStart ? Island.ACCENT_CLASS : Island.ACCENT,
-                    true, hideAt, 0L);
-            return;
-        }
+        if (islandClassOnIsland(c, isStart, name, detail, before)) return;
 
         try {
             NotificationManagerCompat.from(c)
@@ -215,15 +227,90 @@ public class Notify {
         } catch (SecurityException ignored) { }
     }
 
+    /**
+     * 上课/下课提醒该不该上岛；上了岛返回 true（这条提醒已经发出去了）。
+     *
+     * 返回 false 的四种情况一律**退回普通高优先级通知**，绝不静默丢掉提醒：
+     *   · 总闸关（islandExtrasOn=false）
+     *   · 机型不支持 —— Android 15 以下 requestPromotedOngoing 被系统忽略，
+     *     岛会退化成了「不响 + 划不掉」的常驻通知（CH_LIVE 是 IMPORTANCE_LOW、
+     *     setOngoing）。拿来当上课提醒，等于用户把手机静音都听不到。
+     *   · 对应的分项开关（islandStart / islandEnd）关着
+     *   · 时间解析不出来，岛上的倒计时会是错的数
+     * 以前这三种情况全是 `return`，通知分支永远走不到 ——
+     * 关掉「上课提醒上岛」就再也收不到上课提醒，是个能要命的静默失效。
+     */
+    private static boolean islandClassOnIsland(Context c, boolean isStart, String name,
+                                               String detail, int before) {
+        if (!islandExtrasOn || !Island.supported()) return false;
+        String course = shortName(name);
+        String time = timeRange(detail);
+        String place = placeOf(detail);
+        String startHM = hm(time, true), endHM = hm(time, false);
+        long now = System.currentTimeMillis();
+        /* 时间解析不出来就别硬上岛：倒计时会变成一个错的数，
+           那种错误比不上岛更难发现（用户以为课表现在是准的）。 */
+        long startAt = todayAt(startHM), endAt = todayAt(endHM);
+        boolean okTime = startAt > 0 && endAt > 0;
+
+        if (isStart) {
+            if (!Island.cfgStart) return false;
+            if (before > 0) {
+                if (!okTime) return false;
+                Island.showClass(c, Island.ID_CLASS_START,
+                        course + (Island.elTime ? (" " + startHM) : ""),
+                        place, false, startAt, startAt, true);
+                return true;
+            }
+            /* 正点上课 */
+            if (Island.cfgStay && okTime) {
+                Island.showClass(c, Island.ID_CLASS_START,
+                        course + (Island.elTime ? (" " + startHM) : ""),
+                        place, true, endAt, endAt, true);
+                return true;
+            }
+            /* 不常驻：把课前那条收掉。但「上课了」这条本身还得让用户知道，
+               所以退回普通通知（上岛之前本来就是这个行为）。 */
+            Island.hide(c, Island.ID_CLASS_START);
+            return false;
+        }
+
+        /* 下课提醒 */
+        if (!Island.cfgEnd) { Island.hide(c, Island.ID_CLASS_START); return false; }
+        long hideAt = now + Island.stayMillis();
+        if (Island.cfgStay && Island.isShowing(c, Island.ID_CLASS_START)) {
+            /* 常驻那条还在：翻成「已下课」，别新发一条（两条岛会叠在一起闪） */
+            Island.showClass(c, Island.ID_CLASS_START, course, place, true, 0L, hideAt, false);
+        } else {
+            Island.hide(c, Island.ID_CLASS_START);
+            Island.showClass(c, Island.ID_CLASS_END, course, place, true, 0L, hideAt, false);
+        }
+        return true;
+    }
+
+    /** 「08:00」→ 今天那个时刻的毫秒；解析失败返回 0，调用方据此退回普通通知 */
+    private static long todayAt(String hmStr) {
+        try {
+            String[] p = hmStr.split(":");
+            if (p.length < 2) return 0L;
+            java.util.Calendar cal = java.util.Calendar.getInstance();
+            cal.set(java.util.Calendar.HOUR_OF_DAY, Integer.parseInt(p[0].trim()));
+            cal.set(java.util.Calendar.MINUTE, Integer.parseInt(p[1].trim()));
+            cal.set(java.util.Calendar.SECOND, 0);
+            cal.set(java.util.Calendar.MILLISECOND, 0);
+            return cal.getTimeInMillis();
+        } catch (Throwable t) { return 0L; }
+    }
+
     public static void test(Context c) {
         ensureChannels(c);
         if (!canPost(c)) return;
-        if (islandExtrasOn) {
-            /* 直接在岛上发一条：60 秒后自己下来，方便一眼确认上岛与倒计时有没有生效 */
-            Island.show(c, Island.ID_TEST, Island.ICON_TIMER, "上岛测试 · 60 秒后退下",
-                    "专注计时会像这样在岛上显示倒计时", "学径", Island.ACCENT,
-                    true, System.currentTimeMillis() + 60_000L,
-                    System.currentTimeMillis() + 60_000L);
+        if (islandExtrasOn && Island.supported()) {
+            /* 直接在岛上发一条：60 秒后自己下来，方便一眼确认上岛与倒计时有没有生效。
+               走和上课提醒同一条路，预览到的排版就是真实排版。
+               机型不支持时退回普通通知 —— 否则测试按钮点了等于没反应。 */
+            long end = System.currentTimeMillis() + 60_000L;
+            Island.showClass(c, Island.ID_TEST, "上岛测试", "排版与倒计时", false, end, end, true);
             return;
         }
         try {

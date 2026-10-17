@@ -34,7 +34,18 @@ public class ReminderScheduler {
 
     private static final int REQ_BASE = 1000;
 
-    public static void reschedule(Context c, String scheduleJson, String prefsJson) {
+    /**
+     * 重排全部课表闹钟。
+     *
+     * ⚠️ static synchronized：这里会被三个线程并发调用 ——
+     *   · 桥线程（页面 setSchedule / setPrefs）
+     *   · 主线程（Activity.onResume）
+     *   · 接收器（开机、闹钟触发后 rescheduleFromStore）
+     * 整个流程是「cancelAll 把 codes 清空 → 重新排 → 写回 codes」。
+     * 两个线程交错跑，后写的那份 codes 会把前一份盖掉，被盖掉的闹钟就再也撤不掉
+     * （清单里没记它）—— 表现为同一节课提醒响两次。
+     */
+    public static synchronized void reschedule(Context c, String scheduleJson, String prefsJson) {
         if (c == null) return;
         AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
@@ -56,11 +67,13 @@ public class ReminderScheduler {
         // 页面新格式：{termStart, courses:{0:[…]}}；旧格式直接是 {0:[…]}
         String termStart = "";
         JSONObject coursesRoot;
+        JSONObject scheduleBookings = null;
         try {
             JSONObject root = new JSONObject(scheduleJson == null ? "{}" : scheduleJson);
             if (root.optJSONObject("courses") != null) {
                 termStart = optText(root, "termStart");
                 coursesRoot = root.getJSONObject("courses");
+                scheduleBookings = root.optJSONObject("bookings");
             } else {
                 coursesRoot = root;
             }
@@ -92,6 +105,12 @@ public class ReminderScheduler {
                     int sh = hourOf(se[0]), sm = minOf(se[0]);
                     int eh = hourOf(se[1]), em = minOf(se[1]);
                     if (sh < 0 || eh < 0) continue;
+                    /* 分钟也得兜住：课表写成「8-9」这种只有小时的，minOf 返回 -1，
+                       而 Calendar 是 lenient 的 —— MINUTE=-1 会顺位回拨成 07:59，
+                       提醒提前一分钟。缺分钟就当整点，越界的一律不排。 */
+                    if (sm < 0) sm = 0;
+                    if (em < 0) em = 0;
+                    if (sh > 23 || eh > 23 || sm > 59 || em > 59) continue;
 
                     long startAt = nextOccurrence(day, sh, sm);
                     long endAt = nextOccurrence(day, eh, em);
@@ -124,7 +143,11 @@ public class ReminderScheduler {
                        同一天的 i 现在极少超过 15，所以线上没炸；但这是定时炸弹，直接换段隔开。 */
                     int codeBegin = REQ_BASE + day * 100 + 200 + i;
                     if (startAt > now) {
-                        set(c, am, codeBegin, startAt, true, name, detail, 0, w);
+                        /* 预约过的课：这一条到点是「启动前台服务自动开专注」的，走 urgent 档。
+                           否则 Android 12+ 上广播里启动前台服务会被拒 ——
+                           表现就是「约了却从来没自动开始过」。 */
+                        set(c, am, codeBegin, startAt, true, name, detail, 0, w,
+                                isBookedIn(scheduleBookings, t, name));
                         codes.add(String.valueOf(codeBegin));
                     }
                     if (endRemind && endAt > now) {
@@ -160,6 +183,12 @@ public class ReminderScheduler {
                     int sh = hourOf(se[0]), sm = minOf(se[0]);
                     int eh = hourOf(se[1]), em = minOf(se[1]);
                     if (sh < 0 || eh < 0) continue;
+                    /* 分钟也得兜住：课表写成「8-9」这种只有小时的，minOf 返回 -1，
+                       而 Calendar 是 lenient 的 —— MINUTE=-1 会顺位回拨成 07:59，
+                       提醒提前一分钟。缺分钟就当整点，越界的一律不排。 */
+                    if (sm < 0) sm = 0;
+                    if (em < 0) em = 0;
+                    if (sh > 23 || eh > 23 || sm > 59 || em > 59) continue;
                     long startAt = dateTimeMillis(date, sh, sm);
                     long endAt = dateTimeMillis(date, eh, em);
                     if (startAt <= nowOv) continue;   /* 一次性：日期过了就不再排 */
@@ -277,16 +306,52 @@ public class ReminderScheduler {
 
     private static void set(Context c, AlarmManager am, int code, long triggerAt,
                             boolean isStart, String name, String detail, int before, String w) {
+        set(c, am, code, triggerAt, isStart, name, detail, before, w, false);
+    }
+
+    /**
+     * @param urgent 这一条到点要**启动前台服务**（预约的课自动开始专注）时用。
+     *
+     * 为什么要单独立一档：Android 12+ 限制后台启动前台服务，而官方对精确闹钟给了豁免
+     * —— 文档原话是「精确的闹钟被视为对时间敏感的紧急中断，不受前台服务启动限制的影响」。
+     * setAlarmClock 是这一档里最强的一种（不被 Doze 推迟、系统按真正的闹钟对待），
+     * 所以预约课的正点闹钟走它；普通提醒仍走 setExactAndAllowWhileIdle，
+     * 不去占系统的闹钟位。拿不到精确闹钟授权时退回非精确 —— 那时本来也谈不上准点。
+     */
+    private static void set(Context c, AlarmManager am, int code, long triggerAt,
+                            boolean isStart, String name, String detail, int before, String w,
+                            boolean urgent) {
         if (triggerAt <= System.currentTimeMillis()) return;
         PendingIntent pi = buildPi(c, code, isStart, name, detail, before, w, true);
         if (pi == null) return;
         try {
             boolean exact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms();
+            if (exact && urgent) {
+                try {
+                    /* AlarmClockInfo 的第二个参数是「用户点闹钟图标时去看什么」的 intent，
+                       这里指向我们自己：通知栏出现闹钟图标时，点它应该回到学径。 */
+                    PendingIntent show = appOpenPi(c);
+                    am.setAlarmClock(new AlarmManager.AlarmClockInfo(triggerAt, show), pi);
+                    return;
+                } catch (Throwable ignored) {
+                    /* 个别 ROM 不让普通应用用 setAlarmClock：退回精确闹钟，仍然是豁免档 */
+                }
+            }
             if (exact) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
             else am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi);
         } catch (SecurityException e) {
             try { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi); } catch (Throwable ignored) { }
         } catch (Throwable ignored) { }
+    }
+
+    private static PendingIntent appOpenPi(Context c) {
+        try {
+            Intent i = new Intent(c, MainActivity.class);
+            i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
+            return PendingIntent.getActivity(c, 7001, i, flags);
+        } catch (Throwable t) { return null; }
     }
 
     private static PendingIntent buildPi(Context c, int code, boolean isStart,
@@ -339,6 +404,21 @@ public class ReminderScheduler {
      * 拿到 id 才能把预约触发的专注标成「课程专注」而不是「一个番茄」：
      * 补记时靠 courseId 决定记到哪门课头上、算不算番茄数。
      */
+    /** 预约表的 key 形如 d{日期}-{时间}-{课名}；匹配判据只有一份（bookedKeyHits） */
+    private static boolean isBookedIn(JSONObject bookings, String time, String name) {
+        if (bookings == null || name == null || name.isEmpty()) return false;
+        java.util.Iterator<String> it = bookings.keys();
+        while (it.hasNext()) {
+            String k = it.next();
+            if (k != null && bookedKeyHits(k, name, time)) return true;
+        }
+        return false;
+    }
+
+    private static boolean bookedKeyHits(String key, String name, String time) {
+        return key.contains(name) && (time == null || time.isEmpty() || key.contains(time));
+    }
+
     static String bookedCourseId(Context c, String name, String time) {
         if (c == null || name == null || name.isEmpty()) return null;
         try {
@@ -352,9 +432,7 @@ public class ReminderScheduler {
             while (it.hasNext()) {
                 String k = it.next();
                 if (k == null) continue;
-                if (k.contains(name) && (time == null || time.isEmpty() || k.contains(time))) {
-                    return k;
-                }
+                if (bookedKeyHits(k, name, time)) return k;
             }
         } catch (Throwable ignored) { }
         return null;
