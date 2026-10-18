@@ -158,7 +158,21 @@ const boot = String.raw`
       /* 主题二级页：三张主题卡 + 无级滑杆 + 背景图 */
       go('me'); renderProfile(); renderUiTheme(); openView('theme');
     }
+    else if(screen === 'ident' || screen === 'term'){
+      /* 「它的身份」（AI 名字 / 称呼 / 头像）与「学期与节假日」两屏：
+         用户报的两条缺分隔线都在这里，且都在 .screen 靠下的位置，必须滚过去才看得见 */
+      go('me'); renderProfile(); refreshAll();
+      var want = screen === 'ident' ? '它的身份' : '学期与节假日';
+      var hs = [].slice.call(document.querySelectorAll('.h2'));
+      var hh = hs.filter(function(x){ return x.textContent.indexOf(want) >= 0; })[0];
+      if(hh){
+        var sc = hh.closest('.screen') || document.querySelector('.screen');
+        sc.scrollTop = hh.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 10;
+      }
+    }
     else if(screen === 'notes'){ openNotes(); }
+    /* 完整课表二级页：.sched-day 一天一条，是「二级页有没有糊」最直观的一屏 */
+    else if(screen === 'sched'){ go('home'); openView('schedule'); }
     setTimeout(apply, 30);
   }
   seed(); goScreen();
@@ -177,7 +191,7 @@ const boot = String.raw`
   btn('皮肤', function(){ pro = !pro; apply(); });
   btn('玻璃', function(){ glass = glass === 'clear' ? 'frost' : 'clear'; apply(); });
   btn('描边', function(){ edge = !edge; apply(); });
-  ['home','chat','me','focus','sheet','look','theme','hist','notes'].forEach(function(s){
+  ['home','chat','me','focus','sheet','look','theme','hist','notes','sched'].forEach(function(s){
     btn(s, function(){ screen = s; goScreen(); });
   });
   document.body.appendChild(bar);
@@ -215,12 +229,12 @@ console.log('  写出 preview.html (' + (out.length / 1024).toFixed(0) + ' KB)')
    皮肤必须两边都不塌版，所以两边都要有样张。 */
 const WIDTH = 1280, HEIGHT = 932;
 const VIEWS = [
-  { tag: 'phone', w: 430, h: 932, dsf: 2, pro: 1, bg: 0, screens: ['home', 'chat', 'me', 'focus', 'sheet', 'look', 'theme', 'hist', 'notes'] },
+  { tag: 'phone', w: 430, h: 932, dsf: 2, pro: 1, bg: 0, screens: ['home', 'chat', 'me', 'focus', 'sheet', 'look', 'theme', 'hist', 'notes', 'sched', 'ident', 'term'] },
   { tag: 'wide', w: 1280, h: 900, dsf: 1, pro: 1, bg: 0, screens: ['home', 'me'] },
   /* 反证：选「经典」时必须和「这份皮肤不存在」一模一样 */
   { tag: 'classic', w: 430, h: 932, dsf: 2, pro: 0, bg: 0, screens: ['look', 'theme', 'home', 'hist'] },
   /* 自定义背景图：这是上一版「根本用不了」的那张图，重点看内容还在不在 */
-  { tag: 'bgphoto', w: 430, h: 932, dsf: 2, pro: 1, bg: 1, screens: ['home', 'me'] },
+  { tag: 'bgphoto', w: 430, h: 932, dsf: 2, pro: 1, bg: 1, screens: ['home', 'me', 'sched', 'notes'] },
   /* 无级模糊的两个极端 */
   { tag: 'blurmin', w: 430, h: 932, dsf: 2, pro: 1, bg: 0, blur: 0,   screens: ['home'] },
   { tag: 'blurmax', w: 430, h: 932, dsf: 2, pro: 1, bg: 0, blur: 100, screens: ['home'] }
@@ -229,7 +243,7 @@ const VIEWS = [
 const GLASSES = [
   { tag: 'clear', glass: 'clear', edge: 1, screens: null },
   { tag: 'frost', glass: 'frost', edge: 1, screens: ['phone:home', 'phone:me', 'phone:sheet', 'phone:theme', 'bgphoto:home'] },
-  { tag: 'noedge', glass: 'clear', edge: 0, screens: ['phone:home', 'bgphoto:home'] }
+  { tag: 'noedge', glass: 'clear', edge: 0, screens: ['phone:home', 'phone:me', 'phone:ident', 'phone:term', 'bgphoto:home', 'bgphoto:me'] }
 ];
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -329,6 +343,58 @@ try {
       const f = path.join(SHOTDIR, `detail-${kind}-${theme}-el.png`);
       fs.writeFileSync(f, Buffer.from(shot.data, 'base64'));
       console.log('  写出 ' + f);
+    }
+    cleanup(); process.exit(0);
+  }
+
+  /* ---- 巡检模式：node tools/pro-ui/shot.mjs --sweep[=screen]
+     把每一屏里「底色是半透明、却没挂 backdrop-filter」的面揪出来。
+     这类面在 UI Pro 下就是透明塑料片 —— 用户报的「二级页没模糊」连着四轮都是它，
+     每轮只补被点到的那几个类，下一屏又冒出来新的。所以不再靠点名：
+     按「半透 + 无糊 = 违规」这条规则整屏扫，一次看全。
+     只统计真的在屏上占地方、且是「一张面」尺寸（≥40×40）的元素，
+     小徽标/图标底不在语义范围内（它们本来就该是实心色块）。 ---- */
+  if (process.argv.some(a => a === '--sweep' || a.startsWith('--sweep='))) {
+    const only = (process.argv.find(a => a.startsWith('--sweep=')) || '').split('=')[1];
+    await send('Emulation.setDeviceMetricsOverride', { width: 430, height: 932, deviceScaleFactor: 2, mobile: true });
+    const screens = only ? [only] : ['home', 'chat', 'me', 'focus', 'sched', 'notes', 'theme', 'hist', 'sheet', 'look'];
+    for (const sc of screens) {
+      for (const glass of ['clear', 'frost']) {
+        await send('Page.navigate', { url: `http://127.0.0.1:${port}/preview.html?bare=1&screen=${sc}&theme=light&glass=${glass}&pro=1&bg=1` });
+        await waitFor(async () => (await evaluate('document.readyState')) === 'complete');
+        await sleep(900);
+        const dump = await evaluate(`(function(){
+          var out=[];
+          [].slice.call(document.querySelectorAll('*')).forEach(function(e){
+            var c=getComputedStyle(e);
+            var b=c.backdropFilter||c.webkitBackdropFilter||'none';
+            if(b!=='none') return;
+            var bg=c.backgroundColor;
+            var m=/rgba\\((\\d+), (\\d+), (\\d+), ([\\d.]+)\\)/.exec(bg);
+            if(!m) return;                       /* 实色与透明不算面 */
+            var al = parseFloat(m[4]);
+            if(al >= 0.98 || al <= 0.02) return;  /* α=0 是「没有底」，不是透明塑料片 */
+            var r=e.getBoundingClientRect();
+            if(r.width<40||r.height<40) return;
+            if(r.bottom<0||r.top>window.innerHeight) return;
+            if(e.offsetParent===null&&getComputedStyle(e).position!=='fixed') return;
+            if(e.children.length && !e.textContent.trim()) return;  /* 纯容器交给子元素 */
+            var cls=(typeof e.className==='string'?e.className:e.tagName)||'(no class)';
+            out.push({cls:cls.slice(0,46), tag:e.tagName, alpha:m[4],
+              size:Math.round(r.width)+'x'+Math.round(r.height),
+              inView:(e.closest('.view')||{}).id||''});
+          });
+          /* 同一类只报一次，附上出现次数 */
+          var by={}; out.forEach(function(o){ var k=o.cls+'|'+o.inView;
+            by[k]=by[k]||{n:0,o:o}; by[k].n++; });
+          return JSON.stringify(Object.keys(by).map(function(k){
+            return by[k].o.cls+' @'+(by[k].o.inView||'主页面')+' ×'+by[k].n
+              + ' α='+by[k].o.alpha+' '+by[k].o.size; }));
+        })()`);
+        const list = JSON.parse(dump);
+        console.log(`\n[sweep] ${sc} · ${glass} · 半透无糊 ${list.length} 类`);
+        list.forEach(x => console.log('   · ' + x));
+      }
     }
     cleanup(); process.exit(0);
   }

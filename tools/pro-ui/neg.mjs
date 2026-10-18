@@ -18,6 +18,18 @@ const cases = {
   anim: 'html.ui-pro .page{animation:fade .22s ease!important}',
   panel: 'html.ui-pro:not(.layout-tablet) .vpanel{background:var(--glass)!important;'
        + 'backdrop-filter:var(--blur)!important;-webkit-backdrop-filter:var(--blur)!important}',
+  /* v0.3.0 真机第四轮：二级页那批面「半透明但不糊」 */
+  faces: 'html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .empty,html.ui-pro .note-body,'
+       + 'html.ui-pro .stat,html.ui-pro .n-card,html.ui-pro .sched-day:not(.today)'
+       + '{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+  /* 皮肤同权重排在基础样式之后 → 「今天」的品牌浅底被玻璃洗掉 */
+  today: 'html.ui-pro .sched-day{background:var(--glass)!important}',
+  /* 把某一条玻璃面撤掉模糊 → 「皮肤巡检」这条整屏扫的守卫应该红（不靠点名） */
+  ghost: 'html.ui-pro .btn.ghost{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}',
+  /* 分隔线重新共用描边令牌 → 关掉高光描边时列表线一起没（v0.3.1 用户报） */
+  edgediv: 'html.ui-pro .li,html.ui-pro .viewhead{border-bottom-color:var(--glass-line)!important}',
+  /* 回到「续行写 border:0」的旧写法 → 用户点名的两处应该红 */
+  nob: 'html.ui-pro .li.up,html.ui-pro .list .li.up{border-bottom:0!important}',
 };
 /* JS 侧的反面对照：函数都是全局 function 声明，后置脚本可以整体换掉。
    用来证明「解析器的断言是真的在量行为」，而不是碰巧为真。 */
@@ -37,6 +49,17 @@ const jsCases = {
   kb: 'document.head.insertAdjacentHTML("beforeend",'
     + '"<style>html.ui-pro.kb-open:not(.layout-tablet) .screen,'
     + 'html.ui-pro.app-mode.kb-open:not(.layout-tablet) .screen{padding-bottom:96px!important}</style>");',
+  /* 回到「菜单行的点击照样冒泡到点空白收起」→ 换个模型一点就消失 */
+  menu: "bindMenuRows=function(box,items){if(!box)return;box.__menuItems=items;"
+    + "if(box.__menuBound)return;box.__menuBound=1;"
+    + "box.addEventListener('click',function(e){"
+    + "var row=e.target&&e.target.closest?e.target.closest('.actrow'):null;if(!row)return;"
+    + "var it=(box.__menuItems||[])[Number(row.getAttribute('data-mi'))];if(!it||!it.run)return;"
+    + "try{(0,eval)(String(it.run))}catch(err){}})};",
+  /* 把附件正文重新塞回气泡（= 拆分之前的写法） */
+  leak: "attachBrief=function(){return ATTACH.length?'\\n'+(ATTACH[0].text||''):'';};",
+  /* 历史与重新生成不再取 sendText → 追问/重生成都看不见文件 */
+  sendtext: 'msgSendText=function(m){return (m&&m.t)||"";};',
 };
 if (process.argv[2] === 'restore') {
   if (!fs.existsSync(BAK)) { console.log('没有备份，无需还原'); process.exit(0); }

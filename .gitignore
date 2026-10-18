@@ -61,6 +61,7 @@ __pycache__/
 # ---------- 内部验证截图与历史备份（不属于源码） ----------
 验证截图/
 index.backup-*.html
+index.before-*.html
 图标设计/output/*.b64.txt
 
 # ---------- 发布包（用 GitHub Releases 分发，不要堆在仓库里） ----------

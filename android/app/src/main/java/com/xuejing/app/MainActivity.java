@@ -430,7 +430,9 @@ public class MainActivity extends AppCompatActivity {
                用户的话是「状态栏部分不沉浸了，割裂感很强」。
                改成把高度交给 CSS（--sb-inset），页面自己画到状态栏底下，
                自绘那条 .statusbar 只占位不显示。 */
-            v.setPadding(0, 0, 0, keyboardPad());
+            /* 键盘收起时这一句必须是 0 —— keyboardPad() 对 imeBottomPx<=0 已返回 0，
+               这里再按 open 显式兜一层，避免残留值把底部重新垫起来。 */
+            v.setPadding(0, 0, 0, open ? keyboardPad() : 0);
             /* bars.bottom 是**物理像素**，而 WebView 里 1 CSS px = 1 dp；
                不换算就直接塞给 CSS，1080p 机型（density ≈ 2.75~3）会把「~16dp 的手势条」
                报成 48 CSS px，底栏就会长出 30 多 px 的额外高度。换成 dp 再交出去。 */
@@ -441,6 +443,14 @@ public class MainActivity extends AppCompatActivity {
             if (open != kbOpen) {
                 kbOpen = open;
                 evalJs("window.onKb && window.onKb(" + (open ? 1 : 0) + ")");
+                if (!open) {
+                    /* 键盘收起后的兜底：MIUI 这类 ROM 里 ime.bottom 可能晚一两帧才归零，
+                       甚至这一帧还带着旧的键盘高度。若就此收工，root 底部那段 padding
+                       会留下来 —— 页面底部凭空多一截，弹层被整体顶上去
+                       （真机症状：「打开一次待办的输入框之后底部就抬高了一截」）。
+                       这里在 120ms / 400ms 各复查一次，高度已经恢复就直接归零。 */
+                    schedulePadReset();
+                }
             }
             /* 请求一次布局：让下面的全局布局监听按「最新的窗口高度」重算差额 */
             v.requestLayout();
@@ -449,8 +459,22 @@ public class MainActivity extends AppCompatActivity {
         /* 窗口被系统 resize 之后高度才更新，所以差额必须在这一刻重算 */
         root.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
             if (root == null) return;
-            if (imeBottomPx <= 0) {
-                if (root.getHeight() > 0) restHeightPx = root.getHeight();
+            /* kbOpen 是「键盘真的在」的唯一真相：它只在 insets 回调里按
+               ime.bottom > 0 更新。imeBottomPx 会在键盘收起后的那一两帧里过期 ——
+               布局回调若跑在 insets 回调之前，用它就会算出「该补」的假结论。 */
+            if (!kbOpen) {
+                /* 键盘收起了：**必须把之前补上的 padding 收回去**。
+                   以前这里直接 return —— 键盘弹起时补的那段 padding 就永远留着：
+                   root 被垫高 → WebView 变矮 → .phone 跟着变矮 →
+                   贴底的弹层被整体顶上去、下面空出一条背景。
+                   （真机症状：「打开一次待办的输入框之后底部就莫名其妙抬高了一截」。） */
+                if (root.getPaddingBottom() != 0) {
+                    root.setPadding(0, root.getPaddingTop(), 0, 0);
+                }
+                /* 基准只在「确定没有键盘」时更新，而且只在窗口确实没被压小的前提下 ——
+                   否则会把缩小的高度当成基准。 */
+                int hh = root.getHeight();
+                if (hh > 0 && (restHeightPx <= 0 || hh >= restHeightPx)) restHeightPx = hh;
                 return;
             }
             int want = keyboardPad();
@@ -468,11 +492,37 @@ public class MainActivity extends AppCompatActivity {
      * 差额 ≈ 键盘高度 —— 说明系统已经帮忙让位了，这里就不该再补（否则抬两遍）；
      * 若窗口高度纹丝不动（系统没 resize），差额为 0，才全额补上键盘高度。
      */
+    /**
+     * 键盘收起后的兜底：分两次复查窗口高度，确认没被撑着小就清掉底部 padding。
+     * 只在键盘开合时跑，不在主线程上常驻。
+     */
+    private void schedulePadReset() {
+        final Runnable[] tasks = new Runnable[2];
+        tasks[0] = () -> {
+            if (root == null) return;
+            /* 窗口已经恢复到「没键盘」的高度，就直接收干净 */
+            if (restHeightPx > 0 && root.getHeight() >= restHeightPx - 2) {
+                imeBottomPx = 0;
+                if (root.getPaddingBottom() != 0) {
+                    root.setPadding(0, root.getPaddingTop(), 0, 0);
+                }
+            }
+        };
+        root.postDelayed(tasks[0], 120);
+        root.postDelayed(tasks[0], 400);
+    }
+
     private int keyboardPad() {
         if (imeBottomPx <= 0) return 0;
         int h = root.getHeight();
         /* 基准高度还没测到就先不补，等下一次布局回调再来 —— 宁可晚一帧，也不要多垫一段 */
         if (h <= 0 || restHeightPx <= 0) return 0;
+        /* ⚠️ 基准可能被写小过：adjustResize 已经把窗口缩小、但 IME inset 还没报上来的
+           那一两帧里，全局布局监听会以为"键盘收起了"，把**缩小后**的高度记成基准。
+           基准一旦变小，shrink 恒为 0，这里就会全额再补一次键盘高度（抬两遍），
+           而且键盘收起后那段 padding 会留下来 —— 就是「底部抬高了一截」。
+           自愈：当前高度比基准大时说明基准是旧的/错的，往上修。 */
+        if (restHeightPx < h) restHeightPx = h;
         int shrink = Math.max(0, restHeightPx - h);
         return Math.max(0, imeBottomPx - shrink);
     }
@@ -1117,6 +1167,73 @@ public class MainActivity extends AppCompatActivity {
             try { if (os != null) os.close(); } catch (Throwable ignored) { }
         }
     }
+
+    /* ============================================================
+       资料库（RAG）正文的读写口
+       ------------------------------------------------------------
+       页面在 file:// 源下没有 IndexedDB，localStorage 又只有约 5MB，
+       正文只能落 App 私有目录 —— 实现在 DocStore，这里只做三件事：
+       切后台线程、调 DocStore、把结果按固定签名回吐给页面。
+       回调统一是 window.onDocStore(id, ok, payload, err)。
+       ============================================================ */
+    void docSave(final String id, final String body) {
+        new Thread(() -> {
+            String err = DocStore.save(this, id, body);
+            callbackDocStore(id, err == null, err == null ? "" : err, err == null ? "" : err);
+        }).start();
+    }
+
+    void docLoad(final String id) {
+        new Thread(() -> {
+            String body = DocStore.load(this, id);
+            if (body == null) callbackDocStore(id, false, "", "文件不存在或读不出来");
+            else callbackDocStore(id, true, body, "");
+        }).start();
+    }
+
+    void docDel(final String id) {
+        new Thread(() -> {
+            boolean ok = DocStore.delete(this, id);
+            callbackDocStore(id, ok, ok ? "1" : "", ok ? "" : "删不掉，可能被系统占用");
+        }).start();
+    }
+
+    void docClear() {
+        new Thread(() -> {
+            int n = DocStore.clear(this);
+            callbackDocStore("", true, String.valueOf(n), "");
+        }).start();
+    }
+
+    void docStat() {
+        new Thread(() -> {
+            long b = DocStore.usedBytes(this);
+            callbackDocStore("", true, "{\"bytes\":" + b + "}", "");
+        }).start();
+    }
+
+    void docDump() {
+        new Thread(() -> callbackDocStore("", true, DocStore.dumpAll(this), "")).start();
+    }
+
+    /**
+     * 资料库回调。payload 可能是几 MB 的正文 —— 不用 evaluateJavascript 的
+     * 返回值通道（那条会包一层 JSON 字符串，几 MB 正文要转义两遍），
+     * 直接拼一句函数调用交给页面。
+     *
+     * ⚠️ jsString 会把 < > & 转成 \u003c 这类转义（防注入更彻底）——
+     * 对正文没影响：JS 引擎解析字符串字面量时就会还原，页面拿到的是原文。
+     */
+    private void callbackDocStore(final String id, final boolean ok,
+                                  final String payload, final String err) {
+        final String js = "window.onDocStore && window.onDocStore("
+                + jsString(id == null ? "" : id) + ","
+                + (ok ? "true" : "false") + ","
+                + jsString(payload == null ? "" : payload) + ","
+                + jsString(err == null ? "" : err) + ")";
+        runOnUiThread(() -> evalJs(js));
+    }
+
 
     private void clearPendingDoc() {
         pendingDocName = null;

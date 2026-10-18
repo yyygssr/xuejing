@@ -3,7 +3,7 @@
 // ⚠️ 代码里「v0.2.9 重定」这类历史注释不许跟着替换 —— 那是「语义在哪一版定的」，
 //    跟着改等于把历史改掉。
 import fs from 'fs';
-const [cur, next] = ['0.2.10', '0.3.0'];
+const [cur, next] = ['0.3.37', '0.3.1'];
 let g = fs.readFileSync('android/app/build.gradle', 'utf8');
 const vc = /versionCode\s+(\d+)/.exec(g);
 if (!vc) { console.error('读不到 versionCode'); process.exit(8); }

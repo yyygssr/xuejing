@@ -466,6 +466,16 @@
 
   .list{background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow)}
   .li{display:flex;align-items:center;gap:12px;padding:14px;border-bottom:1px solid var(--line)}
+  /* 列表里的分隔线原来靠每行自己写行内样式：「标题 + 输入框」这种两项一组的，
+     续行上写 border:0 想表达「这两行是一组」，结果连这一组**收尾**的那条线也没了
+     （真机：AI 对我的称呼的输入框与 AI 的头像之间、学期起始日与节假日模式之间没有线）。
+     改成三个语义类，别再靠行内样式：
+       .li.nob  本行不画下边线（与下一条同属一项的标题行）
+       .li.up   续行：只收掉上内边距，收尾线保留
+     最后一条自动无线 —— 行内样式写「最后一条要去线」迟早会和条件渲染的行打架。 */
+  .li.nob{border-bottom:0}
+  .li.up{padding-top:0}
+  .list>.li:last-child{border-bottom:0}
   .li:last-child{border-bottom:0}
   .li.tap{cursor:pointer}.li.tap:active{background:var(--brand-soft)}
   .li .ic{width:32px;height:32px;border-radius:11px;background:var(--brand-soft);color:var(--brand);
@@ -1459,6 +1469,25 @@
      · 切大页面「模糊慢半拍」：.page 的整页透明度淡入带着页内模糊一起长出来，
        皮肤里收掉；
      · 主题切换从开关改回两格滑块（UI Classic / UI Pro）。
+
+   v5.2：真机第四轮 ——「二级页面根本没有模糊」
+     · .plan（AI 行程规划）/ .stat（本周总结、统计格）/ .empty（今日课程空白页）/
+       .sched-day（完整课表一天一条）/ .actlist / .n-card + .note-body（笔记）
+       补上 backdrop-filter，分两档：整屏一张跟 .card（--blur），
+       重复出现跟 .course（--blur-soft）。
+     · 这批面原来只改了 border-color —— 「半透明 + 无模糊」就是透明塑料片，
+       是同一类问题的第三批受害者（第一批气泡/输入行、第二批 .segs/.focusstats 都在 v5.1 补过）。
+       而 v5.1 为了「和主页面同底」撤掉了手机端 .vpanel 的整块模糊，
+       二级页里就没有任何一层在糊，一设自定义背景图立刻露馅。
+     · .sched-day.today 走 :not()：「今天」靠品牌浅底表达，不许被玻璃洗掉。
+     · 第 12 节的无模糊兜底同步列进这七个类，缺一类就是字压在内容上。
+
+   v5.3：描边开关与分隔线分家
+     · 新增 --divider（行间分隔线），不再与 --glass-line（玻璃面描边）共用一个令牌；
+       关掉「高光描边」只收描边与上沿高光，列表的线要留着。
+     · 配套的结构性修法在应用侧：.li 的「标题 + 输入框」两行一组改用 .nob / .up 两个类，
+       最后一条由 .list>.li:last-child 自动去线 —— 原来靠行内 border:0 表达「这两行是一组」，
+       把该留的收尾线一起删了（用户报的两处：AI 对我的称呼、学期起始日）。
    ========================================================================== */
 
 /* ---------- 1. 令牌层 ---------- */
@@ -1476,6 +1505,11 @@ html.ui-pro{
   --ease:cubic-bezier(.22,.9,.24,1);
   --ease-spring:cubic-bezier(.34,1.36,.44,1);
   --glass-line:rgba(23,26,38,.07);
+  /* 分隔线 ≠ 描边：原来两者共用 --glass-line，于是关掉「高光描边」把列表行与行之间
+     那条线也一起抹掉了（真机 v0.3.1 用户报）。拆成两个令牌：
+       --glass-line  玻璃面自己那一圈描边（+ 上沿高光 --hair）→ 归描边开关管
+       --divider     行与行之间的分隔线 → 一直在，不随描边开关走 */
+  --divider:rgba(23,26,38,.11);
   --hair:rgba(255,255,255,.80);
   --lift:0 10px 30px rgba(23,26,38,.10);
   /* --card 在皮肤里被改成了半透明（全应用 48 处 background:var(--card) 一次变），
@@ -1538,6 +1572,7 @@ html.ui-pro[data-theme="dark"][data-glass="clear"]{
      透明度给得比浅色高一点（黑玻璃透多了内容会糊成一片），
      但亮度抬上来，让模糊的边缘能被看见。 */
   --glass-line:rgba(255,255,255,.09);
+  --divider:rgba(255,255,255,.13);
   --hair:rgba(255,255,255,.16);
   --lift:0 12px 34px rgba(0,0,0,.46);
   --bloom-1:rgba(var(--brand-rgb),.46);
@@ -1566,7 +1601,9 @@ html.ui-pro[data-theme="dark"][data-glass="frost"]{
   --glass-sheet:rgba(40,45,61,.93);
   --scrim:.34;
 }
-/* 高光描边开关：关掉时把描边与顶部高光一起收掉，只剩材质本身 */
+/* 高光描边开关：只管「玻璃面那一圈描边 + 上沿那道亮边」。
+   ⚠️ 不许连带把 --divider（行与行之间的分隔线）也抹掉 —— 上一版这里清的是 --glass-line，
+      而 .li 的分隔线当时共用这个令牌，结果关掉描边等于把整个列表的线全删了。 */
 html.ui-pro[data-edge="off"]{
   --glass-line:transparent;
   --hair:transparent;
@@ -1600,7 +1637,7 @@ html.ui-pro .course{
   border-radius:var(--r-md);
   box-shadow:inset 0 1px 0 var(--hair);
 }
-html.ui-pro .li{border-bottom-color:var(--glass-line)}
+html.ui-pro .li{border-bottom-color:var(--divider)}
 html.ui-pro .li .ic{border-radius:var(--r-sm);background:var(--glass-strong)}
 /* 周条：一天一格，也要透。⚠️ 选中日是 .day.sel（品牌渐变 + 白字）、
    节假日是 .day.other（品牌浅底），这两格靠 background 表达状态，
@@ -1616,11 +1653,32 @@ html.ui-pro .sheet .list,html.ui-pro .sheet .card,
 html.ui-pro .picksheet .list,html.ui-pro .picksheet .card{border-radius:var(--r-in-sheet)}
 html.ui-pro .viewbody .list,html.ui-pro .viewbody .card{border-radius:var(--r-in-panel)}
 html.ui-pro .g-tile .gi{border-radius:var(--r-in-tile)}
-/* 其余以 --card 为底的面（专注页的 .segs/.focusstats、笔记工具条、空状态…）
-   由令牌本身变半透，这里只补圆角与描边色。 */
+/* 其余以 --card 为底的面：令牌把 --card 改成半透明只是「让它透」，
+   透而不糊 = 透明塑料片。真机 v0.3.0 报的「二级页面都没有模糊」就是这个：
+   .plan（AI 行程规划）/ .stat（本周总结、统计格）/ .empty（今日课程空白页）/
+   .sched-day（完整课表一天一条）/ .n-card + .note-body（笔记）/ .actlist（操作列表）
+   只在下面补了边框色，一条 backdrop-filter 都没挂；
+   而 v5.1 为了「和主页面同底」把手机端 .vpanel 的整块模糊撤掉了，
+   于是这些页里没有任何一层在糊 —— 一设自定义背景图就整个露馅。
+   分两档，和主页面同一套语言（成本照 .card / .course 的分工）：
+     · 整屏一张的面 → --blur（和 .card 同档）
+     · 一次出现几条的面 → --blur-soft（和 .course 同档，4px/14px）
+   ⚠️ .sched-day.today 用 background 表达「今天」，基础态必须 :not(.today) 让开，
+      否则皮肤这条同权重规则排在基础样式之后，会把今天洗成普通日（结构错误①）。
+   ⚠️ 仍然不许给这些面叠 background-image 高光（防闪第②条）。 */
 html.ui-pro .segs,html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .stat,
 html.ui-pro .empty,html.ui-pro .sched-day,html.ui-pro .n-card,html.ui-pro .note-body{
   border-color:var(--glass-line)}
+html.ui-pro .actlist,html.ui-pro .plan,
+html.ui-pro .empty,html.ui-pro .note-body{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  box-shadow:inset 0 1px 0 var(--hair)}
+html.ui-pro .stat,html.ui-pro .n-card,
+html.ui-pro .sched-day:not(.today){
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft);
+  box-shadow:inset 0 1px 0 var(--hair)}
 html.ui-pro .segs,html.ui-pro .focusstats{border-radius:var(--r-md)}
 html.ui-pro .segs .s.on{border-radius:calc(var(--r-md) - 4px)}
 /* 专注页的两块面（模式条 / 今日统计）单独铺玻璃：
@@ -1650,7 +1708,8 @@ html.ui-pro .btn.primary{
   background:var(--brand);border:0;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 8px 22px rgba(var(--brand-rgb),.36)}
 html.ui-pro .btn.ghost{background:var(--glass);border:1px solid var(--glass-line);
-  box-shadow:inset 0 1px 0 var(--hair)}
+  box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
 html.ui-pro .badge{border-radius:999px;font-weight:750;letter-spacing:.2px}
 html.ui-pro .switch{transition:background var(--dur) var(--ease)}
 html.ui-pro .switch::after{transition:left var(--dur) var(--ease-spring);
@@ -1684,6 +1743,11 @@ html.ui-pro:not(.layout-tablet) .tabbar::before,
 html.ui-pro.app-mode:not(.layout-tablet) .tabbar::before{display:none}
 html.ui-pro:not(.layout-tablet) .screen,
 html.ui-pro.app-mode:not(.layout-tablet) .screen{padding-bottom:96px}
+/* 键盘弹起时必须把这段让位高度收掉。基础样式在 kb-open 下把底栏整条 display:none
+   （html.app-mode.kb-open .tabbar），可皮肤这 96px 还留着 ——
+   真机上就是「输入框浮在键盘上方一大截」，而且只在 UI Pro 下出现，经典档没这问题。 */
+html.ui-pro.kb-open:not(.layout-tablet) .screen,
+html.ui-pro.app-mode.kb-open:not(.layout-tablet) .screen{padding-bottom:0}
 /* 选中滑块：只有图标变色「认不出在哪一页」太弱。用 .tabbar 的 ::after（不新增 DOM），
    位置由 go() 写的 --tab-i 决定；三格等宽 → translateX(idx * 100%) 就是滑到第 idx 格。 */
 html.ui-pro:not(.layout-tablet) .tabbar::after{
@@ -1768,7 +1832,7 @@ html.ui-pro .vpanel{background:var(--glass);
 html.ui-pro:not(.layout-tablet) .vpanel{
   background:transparent;border:0;border-radius:0;box-shadow:none;
   -webkit-backdrop-filter:none;backdrop-filter:none}
-html.ui-pro .viewhead{background:transparent;border-bottom-color:var(--glass-line)}
+html.ui-pro .viewhead{background:transparent;border-bottom-color:var(--divider)}
 html.ui-pro .icon-btn{border-radius:var(--r-sm);background:var(--glass-strong);
   border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
   -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
@@ -1837,8 +1901,13 @@ html.ui-pro .drawer{background:var(--glass-sheet);
 html.ui-pro .drawer-scrim.show{
   background:rgba(10,12,20,.28);
   -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
+/* 历史侧栏里的卡片：抽屉整块已经糊了一层，卡片自己也要是玻璃 ——
+   否则「抽屉是糊的、里面每条是塑料片」，和主页面同一类毛病。
+   用 --blur-soft：一次可能出现十几条，半径要跟 .course 一档。 */
 html.ui-pro .hist-card{background:var(--glass);border:1px solid var(--glass-line);
-  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair)}
+  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+/* 选中/收藏态靠 background 表达 → 基础态让开（同第八节 .qsw 的坑） */
 html.ui-pro .hist-card.on{background:var(--glass-strong)}
 
 /* ---------- 10. 排版层级 ---------- */
@@ -1873,7 +1942,16 @@ html.ui-pro .page{animation:none}
   html.ui-pro .seg,html.ui-pro .segThumb,html.ui-pro .icon-btn,html.ui-pro .quickwrap .quick,
   html.ui-pro .qswrow .qsw,html.ui-pro #chatInput,html.ui-pro .msg .bubble,
   html.ui-pro .plusmenu,html.ui-pro .segs,html.ui-pro .focusstats,html.ui-pro .drawer,
-  html.ui-pro .view,html.ui-pro #view-focus{
+  html.ui-pro .view,html.ui-pro #view-focus,
+  html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .empty,html.ui-pro .note-body,
+  html.ui-pro .stat,html.ui-pro .n-card,html.ui-pro .sched-day:not(.today),
+  html.ui-pro .hist-card,
+  /* 这批「凹下去的槽」和第 3 节的玻璃面一样吃令牌，兜底时也必须一起退回实色 ——
+     漏一类就是那类在没有模糊的浏览器上半透明地压在内容上。 */
+  html.ui-pro .think,html.ui-pro .filepeek,html.ui-pro .logbox,html.ui-pro .repbox,
+  html.ui-pro .lgstat,html.ui-pro .dc,html.ui-pro .stbtn,html.ui-pro .btn.ghost,
+  html.ui-pro .bubble .mdi,html.ui-pro .bubble .mdc,html.ui-pro .li .ic,
+  html.ui-pro .week .day:not(.sel):not(.other){
     background:var(--card-solid)}
   html.ui-pro .mask,html.ui-pro .pickmask{background:rgba(10,12,20,.55)}
   /* 上面那条靠「权重低的 .qsw / .quick」生效，但第八节把它们拆成了
@@ -2146,18 +2224,18 @@ html.ui-pro .page{animation:none}
 
       <div class="h2">它的身份</div>
       <div class="list">
-        <div class="li" style="border-bottom:0">
+        <div class="li nob">
           <div class="ic" data-i="bot"></div>
           <div class="tx"><b>AI 的名字</b><small>对话页顶部显示的名字</small></div>
         </div>
-        <div class="li" style="padding-top:0;border-bottom:1px solid var(--line)">
+        <div class="li up">
           <input class="f" id="aiNameInput" maxlength="12" placeholder="例如：小径" />
         </div>
-        <div class="li" style="padding-bottom:8px;border-bottom:0">
+        <div class="li nob" style="padding-bottom:8px">
           <div class="ic" data-i="at"></div>
           <div class="tx"><b>AI 对我的称呼</b><small id="callHint">留空则跟随昵称</small></div>
         </div>
-        <div class="li" style="padding-top:0;border:0">
+        <div class="li up">
           <input class="f" id="callInput" maxlength="12" placeholder="留空 = 跟随昵称" />
         </div>
         <div class="li tap" onclick="openSheetAvatar()">
@@ -2177,11 +2255,11 @@ html.ui-pro .page{animation:none}
 
       <div class="h2">昵称</div>
       <div class="list">
-        <div class="li" style="border-bottom:0">
+        <div class="li nob">
           <div class="ic" data-i="user"></div>
           <div class="tx"><b>我的昵称</b><small>用于问候语和你自己的显示名</small></div>
         </div>
-        <div class="li" style="padding-top:0;border:0">
+        <div class="li up">
           <input class="f" id="nickInput" maxlength="16" placeholder="点这里设置昵称" />
         </div>
       </div>
@@ -2311,12 +2389,12 @@ html.ui-pro .page{animation:none}
 
       <div class="h2">学期与节假日</div>
       <div class="list">
-        <div class="li" style="border-bottom:0">
+        <div class="li nob">
           <div class="ic" data-i="calendar"></div>
           <div class="tx"><b>学期起始日</b><small>判断单/双周课今天该不该上；填哪天都按那一周的**周一**起算</small></div>
           <div class="val"><span id="vTermStart">—</span><span class="arrow">›</span></div>
         </div>
-        <div class="li" style="padding-top:0;border:0">
+        <div class="li up">
           <input class="f" type="date" id="termStartInput" onchange="setTermStart(this.value)" />
         </div>
         <div class="li">
@@ -2389,7 +2467,7 @@ html.ui-pro .page{animation:none}
       <div class="h2">关于</div>
       <div class="list">
         <div class="li tap" onclick="openView('about')" style="border-bottom:0">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.2.10 · 开源版 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.3.1 · beta · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
       <div style="height:6px"></div>
@@ -2673,7 +2751,7 @@ html.ui-pro .page{animation:none}
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.2.10 · 开源版</div>
+        <div class="about-ver">v0.3.1 · beta</div>
       </div>
 
       <div class="about-motto">
@@ -2958,7 +3036,7 @@ html.ui-pro .page{animation:none}
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.2.10';
+var APP_VER = 'v0.3.1';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -8515,12 +8593,18 @@ function toggleThink(el){
   if(c) c.textContent = open ? '收起' : '展开';
 }
 function lastUserText(){
-  for(var i = msgs.length-1; i>=0; i--) if(msgs[i].r === 'me') return msgs[i].t;
+  for(var i = msgs.length-1; i>=0; i--) if(msgs[i].r === 'me') return msgSendText(msgs[i]);
   return '';
+}
+/* 这条用户消息**真正发给模型**的文本：附件正文存在 sendText 里，
+   气泡上的 m.t 只有提问和一行附件摘要。
+   历史拼接、重新生成、记忆提取都走这里 —— 漏掉一处就是「AI 忘了上一轮的文件」。 */
+function msgSendText(m){
+  return (m && (m.sendText || m.t)) || '';
 }
 function regenChat(idx){
   var q = '';
-  for(var i = idx-1; i>=0; i--) if(msgs[i] && msgs[i].r === 'me'){ q = msgs[i].t; break; }
+  for(var i = idx-1; i>=0; i--) if(msgs[i] && msgs[i].r === 'me'){ q = msgSendText(msgs[i]); break; }
   if(!q){ toast('没有对应的提问'); return; }
   /* 删掉该条 AI 回复后重发。必须带 noPush ——
      这条提问已经躺在 msgs 里了，send 再 push 一次就会多出一条相同的用户消息。 */
@@ -10313,7 +10397,7 @@ function renderCompanion(){
     + '</div></div>'
     + '<div class="li"><div class="ic" data-i="terminal"></div>'
     + '<div class="tx"><b>神秘代码</b><small>解锁调试</small></div></div>'
-    + '<div class="li" style="padding-top:0;border:0">'
+    + '<div class="li up">'
     + '<input class="f" id="cpCode" style="text-align:left" placeholder="…" oninput="cpCodeCheck(this)" />'
     + '</div>'
     + '</div>'
@@ -11026,10 +11110,18 @@ function send(preset, opts){
   var text = (typeof preset === 'string') ? preset : input.value.trim();
   /* 只有「用户什么都没输入」且「也没附件」才真的无事可做。
      光有附件时也允许直接发 —— 附件本身就是完整的问题。 */
-  var ap = attachPayload();
+  var ap = attachPayload(text);
   if(!text && !ap.text && !ap.images.length) return;
-  if(text) text = text + (ap.text ? ('\n\n' + ap.text) : '');
-  else text = ap.text;
+  /* 「发给模型的完整文本」和「气泡上显示的内容」是两件事，上一版把它们当成一件事：
+     text = 用户输入 + 附件正文，同一个串既渲染气泡又发请求 ——
+     真机上就是「上传一份文档，我自己的气泡里糊出一整篇文件内容」。
+     现在拆开：气泡只留提问 + 一行附件摘要，正文只进请求与后续轮次。
+     存进 msgs 的 sendText 是「这条消息真正发给模型的东西」，
+     历史与重新生成都从这里取，否则会修好泄漏、换来 AI 看不见文件。 */
+  var sendText = text ? (text + (ap.text ? ('\n\n' + ap.text) : '')) : ap.text;
+  var brief = attachBrief();
+  var shown = (text || '') + (brief ? ((text ? '\n' : '') + brief) : '');
+  if(!shown) shown = '[附件]';
   if(typeof preset !== 'string'){
     input.value = '';
     autoGrowInput(input);
@@ -11039,7 +11131,7 @@ function send(preset, opts){
   }
   /* noPush：重新生成时复用已经存在的用户消息，不再插入一条新的 ——
      否则 send 会把它再 push 一遍，页面上就出现两条一模一样的用户消息。 */
-  if(!opts.noPush){ msgs.push({r:'me', t:text}); renderMsgs(); }
+  if(!opts.noPush){ msgs.push({r:'me', t:shown, sendText:sendText}); renderMsgs(); }
 
   var box = document.getElementById('msgs');
   var ty = document.createElement('div');
@@ -11060,19 +11152,21 @@ function send(preset, opts){
   if(!aiReady()){
     setTimeout(function(){
       dropTyping();
-      var r = reply(text);
+      var r = reply(sendText);
       msgs.push({r:'ai', t:r.t, src:['未配置 AI · 本机规则回答']});
       renderMsgs();
     }, 500);
     return;
   }
 
-  /* 组装历史：排除 sys/图片；**必须把本轮用户话拼在最后**（旧逻辑循环到 n-1 把当前问题丢掉了） */
+  /* 组装历史：排除 sys/图片；**必须把本轮用户话拼在最后**（旧逻辑循环到 n-1 把当前问题丢掉了）。
+     用户消息取 sendText —— 气泡上只剩一行摘要，正文存在这里，
+     不从这里取的话「上一轮传的文件这一轮不记得」（追问会失忆）。 */
   var turns = [], n = msgs.length;
   for(var i = Math.max(0, n - 1 - CHAT_HISTORY_TURNS*2); i < n - 1; i++){
     var m = msgs[i];
     if(!m || !m.t || m.r === 'sys') continue;
-    var pt = plain(m.t);
+    var pt = plain(m.r === 'me' ? msgSendText(m) : m.t);
     if(!pt || pt.indexOf('[图片]') === 0) continue;
     turns.push({role: m.r === 'me' ? 'user' : 'assistant', content: pt});
   }
@@ -11082,11 +11176,11 @@ function send(preset, opts){
      没图就还是纯字符串 —— 有些网关对数组格式支持不好，
      没必要为一张图冒险。 */
   if(ap.images.length){
-    var segs = [{type:'text', text:text}];
+    var segs = [{type:'text', text:sendText}];
     ap.images.forEach(function(u){ segs.push({type:'image_url', image_url:{url:u}}); });
     turns.push({role:'user', content:segs});
   }else{
-    turns.push({role:'user', content: text});
+    turns.push({role:'user', content: sendText});
   }
   logIt('AI', '对话请求 · ' + S.models.chat + ' · ' + turns.length + ' 条消息'
     + (ap.names.length ? (' · 附件 ' + ap.names.join('/')) : '')
@@ -11258,7 +11352,7 @@ function send(preset, opts){
          而开关又没渲染在界面上 —— 用户既关不掉也看不到。 */
       try{ ttsSpeak(body || ''); }catch(e){}
       renderMsgs();
-      memTick(text);
+      memTick(sendText);
       clearAttach();
       try{ save(); }catch(e){}
     }, askOpts);
@@ -12935,7 +13029,7 @@ function renderUsagePanel(){
     + '<div class="li"><div class="ic" data-i="coin"></div>'
     + '<div class="tx"><b>API 余额</b><small>填入后自动算剩余</small></div>'
     + '<div class="val"><span id="vBalance">' + (bal==null ? '未填写' : ('¥' + bal.toFixed(2))) + '</span></div></div>'
-    + '<div class="li" style="padding-top:0;border:0">'
+    + '<div class="li up">'
     + '<input class="f" id="balInput" type="number" step="0.01" min="0" placeholder="例如 10.00" '
     + 'value="' + (bal==null?'':bal) + '" style="text-align:left" onchange="setAiBalance(this.value)" /></div>'
     + (left == null ? '' :
@@ -13973,6 +14067,14 @@ function bindMenuRows(box, items){
   box.addEventListener('click', function(e){
     var row = e.target && e.target.closest ? e.target.closest('.actrow') : null;
     if(!row) return;
+    /* 菜单行**不是「点空白」**：这个事件不许再冒泡到 document 上那个收起处理器。
+       真机 v0.3.0 的「换个模型点了菜单直接消失」就是这么来的 ——
+       plusModelMenu() 复用同一个 #plusMenu 盒子，innerHTML 重建后 .show 加回来了，
+       但同一次点击随后到 document，而 e.target 已经是被换掉的旧行（脱离文档），
+       closest('#plusMenu') 得到 null → 判成「点在菜单外」→ 刚展开的列表被立刻关掉。
+       互斥要自己补齐：这里不冒泡了，就手动收掉**另一个**菜单。 */
+    e.stopPropagation();
+    if(box.id === 'plusMenu') closeMsgMenu(); else closePlusMenu();
     var it = (box.__menuItems || [])[Number(row.getAttribute('data-mi'))];
     if(!it || !it.run) return;
     try{ (0, eval)(String(it.run)); }
@@ -14146,6 +14248,336 @@ function pickChatFile(){
   document.body.appendChild(el);
   el.click();
 }
+/* ============================ 本地文件解析器 ============================
+   为什么在 WebView 里解，而不是丢给原生 Java：
+     · docx / xlsx / pptx 本质就是 ZIP + XML。Chromium 自带
+       DecompressionStream('deflate-raw') 与 TextDecoder('gb18030')，
+       零外部依赖就能解开 —— 这个项目一直守着「不引第三方库」。
+     · 过原生桥要把整个文件 base64 拷一遍（30MB 文档 = 40MB 字符串，两头各一份），
+       而 <input type=file> 给到渲染进程的只有 Blob，没有路径可交给 Java。
+   ⚠️ 四条硬约束：
+     ① 只读中央目录、只解压需要的那几个 XML —— 一个 docx 里几十张配图，
+        全解开是白烧电（旧版 PDF 就是吃了这个亏）；
+     ② 解不出文字必须**如实说**，不许静默塞一段空文本给模型 ——
+        「上传形同废物」的直接原因就是用户不知道到底读没读到；
+     ③ 97-2003 的 .doc/.xls/.ppt 是 OLE 复合二进制文档，不是压缩包，
+        这里明确不支持，别装；
+     ④ 长文件不再「从头截断」。切成段，发送时按**本轮问题**挑相关的段，
+        并在消息里写清「共 N 段、本次带了 M 段」—— 模型没看到的，要让它知道没看到。
+   ========================================================================== */
+var OFFICE_EXT = /\.(docx|xlsx|pptx)$/i;
+/* 老二进制格式 + 苹果 iWork：这些我们解不了，说清楚而不是含糊 */
+var LEGACY_EXT = /\.(doc|xls|ppt|wps|et|dps|pages|numbers|key)$/i;
+var OFFICE_MAX_BYTES = 30 * 1024 * 1024;
+var PART_MAX = 1100;        // 一段多少字：比 FILE_TEXT_MAX 小得多，选段才有粒度
+var ATTACH_BUDGET = 12000;  // 每个附件一次最多带多少字进上下文（≈6k 汉字）
+
+/* ---------- ZIP：只读中央目录 ----------
+   不引库、不扫全文件：EOCD 一定在文件末尾 22~65557 字节内，
+   从尾部往前找签名，再按目录条目数逐条读文件名与本地头偏移。 */
+function zipIndex(u){
+  try{
+    var dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+    var end = -1, lo = Math.max(0, u.length - 66000);
+    for(var i = u.length - 22; i >= lo; i--){
+      if(dv.getUint32(i, true) === 0x06054b50){ end = i; break; }
+    }
+    if(end < 0) return null;
+    var n = dv.getUint16(end + 10, true), off = dv.getUint32(end + 16, true), out = {};
+    for(var k = 0; k < n; k++){
+      if(off + 46 > u.length || dv.getUint32(off, true) !== 0x02014b50) break;
+      var flag = dv.getUint16(off + 8, true);
+      var method = dv.getUint16(off + 10, true), csize = dv.getUint32(off + 20, true);
+      var nlen = dv.getUint16(off + 28, true), elen = dv.getUint16(off + 30, true);
+      var clen = dv.getUint16(off + 32, true), lho = dv.getUint32(off + 42, true);
+      var name = strOf(u.subarray(off + 46, off + 46 + nlen));
+      /* 加密条目（通用标志位 bit0）：Office 密码保护就是这个，直接判不支持 */
+      out[name] = {method:method, csize:csize, lho:lho, enc:(flag & 1) !== 0};
+      off += 46 + nlen + elen + clen;
+    }
+    return out;
+  }catch(e){ return null; }
+}
+function strOf(bytes){
+  try{ return new TextDecoder('utf-8').decode(bytes); }catch(e){
+    var s = ''; for(var i=0;i<bytes.length;i++) s += String.fromCharCode(bytes[i]); return s;
+  }
+}
+/* 本地文件头里也有文件名与扩展字段，数据区紧跟其后 —— 必须以本地头为准，
+   中央目录里的偏移只是数据区的**起点**，两者长度字段可以不一致。 */
+function zipEntryBytes(u, e){
+  var dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
+  if(e.lho + 30 > u.length || dv.getUint32(e.lho, true) !== 0x04034b50) return null;
+  var nlen = dv.getUint16(e.lho + 26, true), elen = dv.getUint16(e.lho + 28, true);
+  var start = e.lho + 30 + nlen + elen;
+  /* 流式写入的条目会把本地头的 size 字段留 0，这时只能用中央目录的 csize */
+  var end = start + e.csize;
+  if(end > u.length) return null;
+  return u.subarray(start, end);
+}
+async function zipText(u, ix, name){
+  var e = ix[name];
+  if(!e) return null;
+  if(e.enc) throw new Error('该文件已加密');
+  var raw = zipEntryBytes(u, e);
+  if(raw == null) return null;
+  if(e.method === 0) return decodeTextSmart(raw);   // stored：本来就没压
+  if(e.method !== 8) throw new Error('不支持的压缩方式');
+  if(typeof DecompressionStream !== 'function')
+    throw new Error('这台设备的 WebView 太旧，缺少解压能力（deflate-raw）');
+  var ds = new DecompressionStream('deflate-raw');
+  var w = ds.writable.getWriter();
+  /* copy 一份：subarray 是视图，写入端可能保留引用 */
+  w.write(new Uint8Array(raw)); w.close();
+  var buf = await new Response(ds.readable).arrayBuffer();
+  return decodeTextSmart(new Uint8Array(buf));
+}
+/* ---------- 文本编码嗅探 ----------
+   国内教材、课件导出的 txt/csv 大量是 GBK。readAsText 默认按 UTF-8 解，
+   出来就是一堆「锟斤拷」—— 模型读到乱码，用户看到的就是「上传没用」。
+   顺序：BOM → 严格 UTF-8（失败即换）→ GB18030（GBK 的超集）→ 兜底宽松 UTF-8。 */
+function decodeTextSmart(u8){
+  if(!u8 || !u8.length) return '';
+  if(u8[0] === 0xEF && u8[1] === 0xBB && u8[2] === 0xBF){
+    try{ return new TextDecoder('utf-8').decode(u8.subarray(3)); }catch(e){}
+  }
+  if(u8[0] === 0xFF && u8[1] === 0xFE){ try{ return new TextDecoder('utf-16le').decode(u8.subarray(2)); }catch(e){} }
+  if(u8[0] === 0xFE && u8[1] === 0xFF){ try{ return new TextDecoder('utf-16be').decode(u8.subarray(2)); }catch(e){} }
+  try{ return new TextDecoder('utf-8', {fatal:true}).decode(u8); }catch(e){}
+  try{ return new TextDecoder('gb18030').decode(u8); }catch(e){}
+  return new TextDecoder('utf-8').decode(u8);
+}
+function xmlUnesc(s){
+  return String(s == null ? '' : s)
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, function(_, d){ try{ return String.fromCodePoint(parseInt(d,10)); }catch(e){ return ''; } })
+    .replace(/&#x([0-9a-f]+);/gi, function(_, h){ try{ return String.fromCodePoint(parseInt(h,16)); }catch(e){ return ''; } })
+    .replace(/&amp;/g, '&');
+}
+function runsText(xml, tagRe){
+  var t = '', m;
+  tagRe.lastIndex = 0;
+  while((m = tagRe.exec(xml))) t += xmlUnesc(m[1]);
+  return t.replace(/\s+$/,'');
+}
+/* ---------- docx ----------
+   段落与表格**按文档顺序**一起扫：先匹配 <w:tbl>（整张表吃掉，避免嵌套重复），
+   再匹配 <w:p>。表格每行拼成「单元格 | 单元格」，否则表格会被拆成一地碎片。 */
+function docxUnits(xml){
+  var units = [], re = /<w:tbl[\s\S]*?<\/w:tbl>|<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g, m;
+  while((m = re.exec(xml))){
+    var blk = m[0];
+    if(/^<w:tbl/.test(blk)){
+      var rre = /<w:tr(?:\s[^>]*)?>[\s\S]*?<\/w:tr>/g, r;
+      while((r = rre.exec(blk))){
+        var cells = [], cre = /<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g, c;
+        while((c = cre.exec(r[0]))) cells.push(runsText(c[0], /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g).replace(/\s+/g,' '));
+        var line = cells.join(' | ');
+        /* 标签留空：docx 里表格只是正文的一部分，给它单独起一段会让文档被切碎，
+           「a | b」这个形状本身已经说明它是一行表格。 */
+        if(line.replace(/[|\s]/g,'')) units.push({label:'', text:line});
+      }
+    }else{
+      var t = runsText(blk, /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g);
+      if(t) units.push({label:'', text:t});
+    }
+  }
+  return units;
+}
+/* ---------- xlsx：sharedStrings + 每张表的行 ----------
+   单元格里 t="s" 表示值是 sharedStrings 的下标，不查表就会输出一堆 0 1 2 3。 */
+function xlsxSheetNames(workbookXml){
+  var names = [], m, re = /<sheet\b[^>]*>/g;
+  if(!workbookXml) return names;
+  while((m = re.exec(workbookXml))){
+    var nm = /\bname\s*=\s*"([^"]*)"/.exec(m[0]) || /\bname\s*=\s*'([^']*)'/.exec(m[0]);
+    names.push(nm ? xmlUnesc(nm[1]) : ('表' + (names.length + 1)));
+  }
+  return names;
+}
+function xlsxUnits(sheetXml, sheetLabel, shared){
+  var units = [], m, rre = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+  while((m = rre.exec(sheetXml))){
+    var cells = [], cre = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g, c;
+    while((c = cre.exec(m[1]))){
+      var attrs = c[1] || '', body = c[2] || '';
+      var vm = /<v>([\s\S]*?)<\/v>/.exec(body);
+      var tm = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/.exec(body);   // 内联字符串
+      var val = vm ? xmlUnesc(vm[1]) : (tm ? xmlUnesc(tm[1]) : '');
+      if(/t="s"/.test(attrs) && val !== ''){
+        var si = shared[parseInt(val, 10)];
+        val = (si == null ? val : si);
+      }
+      cells.push(val.replace(/\s+/g, ' ').trim());
+    }
+    while(cells.length && cells[cells.length-1] === '') cells.pop();
+    if(cells.join('').length) units.push({label:sheetLabel, text:cells.join(' | ')});
+  }
+  return units;
+}
+/* ---------- pptx：逐页，标题和正文都来自 <a:t> ---------- */
+function pptxUnits(slideXml, pageNo){
+  var units = [], m, pre = /<a:p(?:\s[^>]*)?>[\s\S]*?<\/a:p>/g;
+  var lines = [];
+  while((m = pre.exec(slideXml))){
+    var t = runsText(m[0], /<a:t>([\s\S]*?)<\/a:t>/g);
+    if(t) lines.push(t);
+  }
+  if(!lines.length){
+    var all = runsText(slideXml, /<a:t>([\s\S]*?)<\/a:t>/g);
+    if(all) lines.push(all);
+  }
+  if(lines.length) units.push({label:'第 ' + pageNo + ' 页', text:lines.join('\n')});
+  return units;
+}
+/* 把细碎的单位打包成「段」：一段 ≤ PART_MAX 字，标签取第一单位的（表格行/页码），
+   段是选段的最小粒度 —— 太碎则上下文里全是标签，太大又回到「从头截断」。
+   ⚠️ 标签一变就另起一段：一张 xlsx 里两张表、一份 pptx 里多页，
+   混在同一段里就只有第一张表的名字会出现，模型（和用户）不知道后半是哪来的。 */
+function packUnits(units, baseLabel){
+  var parts = [], cur = '', curLabel = '';
+  function flush(){ if(cur){ parts.push({label:curLabel, text:cur}); cur = ''; curLabel = ''; } }
+  for(var i = 0; i < units.length; i++){
+    var u = units[i];
+    var label = u.label || baseLabel || '段';
+    if(cur && (label !== curLabel || (cur.length + u.text.length + 1) > PART_MAX)) flush();
+    if(!curLabel) curLabel = label;
+    cur = cur ? (cur + '\n' + u.text) : u.text;
+  }
+  flush();
+  if(!parts.length) return parts;
+  /* 标签补上序号：用户在胶囊上看到「第 3 段」才知道模型大概看了多少 */
+  parts.forEach(function(p, k){ p.label = (p.label || baseLabel || '段') + '（第 ' + (k+1) + '/' + parts.length + ' 段）'; });
+  return parts;
+}
+function textUnits(raw){
+  var lines = String(raw).replace(/\r\n?/g, '\n').split('\n'), out = [];
+  for(var i = 0; i < lines.length; i++){
+    var t = lines[i].replace(/\s+$/,'');
+    if(t) out.push({label:'', text:t});
+  }
+  return out;
+}
+/* 主入口：按扩展名分派，返回 {ok, fmt, text, parts, err}。
+   任何一步失败都带一句**人话**的 err，调用方原样转给用户。 */
+async function parseOfficeFile(name, u8){
+  var lower = String(name || '').toLowerCase();
+  var ix = zipIndex(u8);
+  if(!ix) return {ok:false, err:'这个文件不是有效的压缩包（可能已损坏，或其实是老版 .doc/.xls/.ppt）'};
+  var keys = Object.keys(ix);
+  if(!keys.length) return {ok:false, err:'压缩包是空的'};
+  var enc = keys.some(function(k){ return ix[k].enc; }) || keys.some(function(k){ return /EncryptedData|encKey/i.test(k); });
+  if(enc) return {ok:false, err:'文件带密码，读不了内容'};
+  try{
+    if(/\.docx$/.test(lower)){
+      var dx = await zipText(u8, ix, 'word/document.xml');
+      if(dx == null) return {ok:false, err:'这个 docx 里没有正文（可能是空文档，或正文全在图片里）'};
+      var du = docxUnits(dx);
+      if(!du.length) return {ok:false, err:'正文里没有可提取的文字 —— 扫描版/纯图片的 Word 需要走图片识别'};
+      var dparts = packUnits(du, '段');
+      return {ok:true, fmt:'docx', parts:dparts, text:dparts.map(function(p){ return p.text; }).join('\n')};
+    }
+    if(/\.xlsx$/.test(lower)){
+      var shared = [], sx = await zipText(u8, ix, 'xl/sharedStrings.xml');
+      if(sx){
+        var m, sre = /<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g;
+        while((m = sre.exec(sx))) shared.push(runsText(m[1], /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g));
+      }
+      var wb = await zipText(u8, ix, 'xl/workbook.xml');
+      var names = xlsxSheetNames(wb);
+      var sheetKeys = Object.keys(ix).filter(function(k){ return /^xl\/worksheets\/sheet\d+\.xml$/.test(k); })
+        .sort(function(a,b){ return (/\d+/.exec(a)||[0,0])[0]*1 - (/\d+/.exec(b)||[0,0])[0]*1; });
+      if(!sheetKeys.length) return {ok:false, err:'这个 xlsx 里没有找到工作表'};
+      var xu = [];
+      for(var i = 0; i < sheetKeys.length; i++){
+        var xml = await zipText(u8, ix, sheetKeys[i]);
+        if(xml == null) continue;
+        var label = '表「' + (names[i] || ('第 ' + (i+1) + ' 张')) + '」';
+        xu = xu.concat(xlsxUnits(xml, label, shared));
+      }
+      if(!xu.length) return {ok:false, err:'表格里没有读到内容（可能是空表，或只有公式没有值）'};
+      var xparts = packUnits(xu, '行');
+      return {ok:true, fmt:'xlsx', parts:xparts, text:xparts.map(function(p){ return p.label + '\n' + p.text; }).join('\n')};
+    }
+    if(/\.pptx$/.test(lower)){
+      var slideKeys = Object.keys(ix).filter(function(k){ return /^ppt\/slides\/slide\d+\.xml$/.test(k); })
+        .sort(function(a,b){ return (parseInt((/\d+/.exec(a)||[0,'0'])[0],10)) - (parseInt((/\d+/.exec(b)||[0,'0'])[0],10)); });
+      if(!slideKeys.length) return {ok:false, err:'这个 pptx 里没有找到幻灯片'};
+      var pu = [];
+      for(var j = 0; j < slideKeys.length; j++){
+        var sxml = await zipText(u8, ix, slideKeys[j]);
+        if(sxml == null) continue;
+        pu = pu.concat(pptxUnits(sxml, j + 1));
+      }
+      if(!pu.length) return {ok:false, err:'幻灯片里没有可提取的文字（纯图片版 PPT 需要走图片识别）'};
+      var pparts = packUnits(pu, '页');
+      return {ok:true, fmt:'pptx', parts:pparts, text:pparts.map(function(p){ return p.label + '\n' + p.text; }).join('\n')};
+    }
+  }catch(e){
+    return {ok:false, err:'解析失败：' + ((e && e.message) || e)};
+  }
+  return {ok:false, err:'认不出这是哪种 Office 文件'};
+}
+/* ---------- 按问题选段 ----------
+   没有嵌入模型、不联网：中文取 2-gram，英文数字按词，命中一个词算一分。
+   规则里两条是刻意的：
+     · 第 1 段**总是带上** —— 文档开头基本是标题/目录，模型没有它就不知道在读什么；
+     · 一个词都没命中时不装模作样「选相关的」，直接按原顺序从头给，
+       并在说明里写清「没匹配到，给的是开头」。 */
+function queryTerms(q){
+  var s = String(q || '').toLowerCase(), seen = {}, out = [];
+  var en = s.match(/[a-z0-9_]{2,}/g) || [];
+  for(var i = 0; i < en.length; i++) if(!seen[en[i]]){ seen[en[i]] = 1; out.push(en[i]); }
+  /* 中日韩统一表意文字的码点区间：写数字而不是 \u 转义 ——
+     项目有一条守卫禁止源码里出现可打印字符的转义写法（可读性）。 */
+  var han = '';
+  for(var c = 0; c < s.length; c++){
+    var cc = s.charCodeAt(c);
+    if(cc >= 0x4E00 && cc <= 0x9FFF) han += s[c];
+  }
+  for(var k = 0; k + 2 <= han.length && out.length < 60; k++){
+    var g = han.substr(k, 2);
+    if(!seen[g]){ seen[g] = 1; out.push(g); }
+  }
+  return out;
+}
+function pickParts(parts, q, budget){
+  if(!parts || parts.length < 2) return {parts:parts || [], all:true, matched:true};
+  var total = 0;
+  parts.forEach(function(p){ total += p.text.length + p.label.length + 2; });
+  if(total <= budget) return {parts:parts, all:true, matched:true};
+  var terms = queryTerms(q);
+  var scored = parts.map(function(p, i){
+    var hay = (p.label + '\n' + p.text).toLowerCase(), sc = 0;
+    for(var k = 0; k < terms.length; k++) if(hay.indexOf(terms[k]) >= 0) sc++;
+    return {i:i, p:p, sc:sc};
+  });
+  var hits = scored.filter(function(x){ return x.sc > 0; });
+  var chosen = [], used = 0;
+  function take(x){
+    var cost = x.p.text.length + x.p.label.length + 2;
+    if(used + cost > budget) return false;
+    used += cost; chosen.push(x); return true;
+  }
+  take(scored[0]);   // 第 1 段总是带上
+  if(!terms.length || !hits.length){
+    for(var i = 1; i < scored.length && used < budget * 0.9; i++) take(scored[i]);
+    chosen.sort(function(a,b){ return a.i - b.i; });
+    return {parts:chosen.map(function(x){ return x.p; }), all:false, matched:false};
+  }
+  hits.sort(function(a,b){ return b.sc - a.sc || a.i - b.i; });
+  for(var h = 0; h < hits.length; h++){ if(used >= budget * 0.98) break; take(hits[h]); }
+  chosen.sort(function(a,b){ return a.i - b.i; });
+  return {parts:chosen.map(function(x){ return x.p; }), all:false, matched:true};
+}
+function fmtKB(n){ return (n / 1024 >= 10 ? Math.round(n/1024) + 'k' : (Math.round(n/1024*10)/10) + 'k') + '字'; }
+function attachFmtLabel(a){
+  var f = (a.fmt || 'txt').toUpperCase();
+  var chars = (a.rawLen || (a.text || '').length);
+  var seg = a.parts && a.parts.length > 1 ? (' · ' + a.parts.length + ' 段') : '';
+  return f + seg + ' · ' + fmtKB(chars);
+}
 /* ---------- 附件系统 ----------
    三种类型，统一成「胶囊挂件」，发送时才拼进请求：
      1. 文本类 → 读成字符串，随消息发出（超过上限截断并说明）
@@ -14170,7 +14602,7 @@ function attachRow(){
        拿 a.pages（选文件时就写的预估数）会显示 0 页。 */
     var sub = a.kind === 'pdf'
       ? ('PDF · ' + ((a.dataUrls || []).length) + ' 页' + (a.truncated ? '（较长，只转了前几页）' : ''))
-      : (a.kind === 'image' ? '图片' : (Math.max(1, Math.round((a.text || '').length / 1024)) + ' KB 文本'
+      : (a.kind === 'image' ? '图片' : (attachFmtLabel(a)
           + (a.truncated ? '（已截断）' : '')));
     return '<div class="attach' + (a.busy ? ' busy' : '') + '" onclick="peekAttach(' + a.id + ')">'
       + '<div class="ai">' + icSvg(ic, 15) + '</div>'
@@ -14219,7 +14651,14 @@ function peekAttach(id){
   }else{
     var t = a.text || '';
     body = '<div class="filepeek">' + esc(t) + '</div>';
-    if(a.truncated){
+    /* 有段可分时如实说「发送时按问题选段」——
+       用户在这里看到全文，模型看到的却未必，这句话是唯一的解释。 */
+    if(a.parts && a.parts.length > 1 && (a.rawLen || t.length) > ATTACH_BUDGET){
+      body += '<div class="note2" style="margin-top:10px">这里是解析出的<b>全文</b>（'
+        + a.parts.length + ' 段 / 约 ' + fmtKB(a.rawLen || t.length) + '）。'
+        + '发送时只会带上与你这轮提问最相关的若干段，'
+        + '模型看到的不是全部 —— 想让它看后面，直接说「看第几段/哪一章」。</div>';
+    }else if(a.truncated){
       body += '<div class="note2" style="margin-top:10px">内容较长，'
         + '发给模型的是前 ' + FILE_TEXT_MAX + ' 字符。</div>';
     }
@@ -14236,15 +14675,33 @@ function peekAttach(id){
     + 'onclick="removeAttach(' + a.id + ');closeSheet()">移除</div></div>';
 }
 /* 发送时把附件拼成消息文本 + 多模态内容。
-   返回 {text, images[]}：text 进 turns，images 走 image_url。 */
-function attachPayload(){
-  var out = { text:'', images:[], names:[] };
+   q = 用户本轮的问题：长文件靠它选段（见 pickParts）。
+   返回 {text, images[], names[], notes[]}。 */
+function attachPayload(q){
+  var out = { text:'', images:[], names:[], notes:[] };
   if(!ATTACH.length) return out;
   var lines = [];
+  /* 多个附件时预算要分：一人独吞 12k 的话，两份文件就等于塞了 24k 进上下文 */
+  var budget = Math.max(2500, Math.floor(ATTACH_BUDGET / ATTACH.length));
   ATTACH.forEach(function(a){
     if(a.kind === 'text'){
-      lines.push('【附件：' + a.name + '（' + (a.truncated ? '已截断' : '全文') + '）】\n'
-        + (a.text || ''));
+      var total = a.rawLen || (a.text || '').length;
+      var seg = a.parts && a.parts.length > 1 ? ('共 ' + a.parts.length + ' 段、约 ' + fmtKB(total)) : '';
+      if(a.parts && a.parts.length > 1 && total > budget){
+        var pk = pickParts(a.parts, q, budget);
+        var body = pk.parts.map(function(p){ return '〔' + p.label + '〕\n' + p.text; }).join('\n\n');
+        var how = pk.matched
+          ? ('本次按你的问题带了其中最相关的 ' + pk.parts.length + ' 段')
+          : ('（没匹配到相关段落，本次带的是开头 ' + pk.parts.length + ' 段）');
+        lines.push('【附件：' + (a.fmt || 'txt').toUpperCase() + ' ' + a.name
+          + '（' + (seg ? seg + '，' : '') + how + '）】\n'
+          + '注意：下面不是文件全文，未列出的段落你看不到；需要时请让我说明想看哪一部分。\n\n' + body);
+        out.notes.push(a.name + '：' + pk.parts.length + '/' + a.parts.length + ' 段');
+      }else{
+        lines.push('【附件：' + (a.fmt || 'txt').toUpperCase() + ' ' + a.name
+          + '（' + (a.truncated ? '已截断' : '全文') + '，约 ' + fmtKB(total) + '）】\n'
+          + (a.text || ''));
+      }
     }else if(a.kind === 'image'){
       out.images.push(a.dataUrl);
       lines.push('【附件：图片 ' + a.name + '】');
@@ -14258,6 +14715,21 @@ function attachPayload(){
   out.names = ATTACH.map(function(a){ return a.name; });
   out.text = lines.join('\n\n');
   return out;
+}
+
+/* 气泡上那一行附件摘要（纯文本，renderMsgs 会再 esc 一遍）。
+   正文只进请求，不给用户回看 —— 用户要看内容点输入框上方那颗胶囊就有全文，
+   发完之后气泡里糊一整篇文档反而把自己打的字淹了。 */
+function attachBrief(){
+  if(!ATTACH.length) return '';
+  var parts = ATTACH.map(function(a){
+    if(a.kind === 'image') return a.name + '（图片）';
+    if(a.kind === 'pdf')
+      return a.name + '（PDF · ' + ((a.dataUrls || []).length) + ' 页'
+        + (a.truncated ? '，只转了前几页' : '') + '）';
+    return a.name + '（' + attachFmtLabel(a) + (a.truncated ? '，已截断' : '') + '）';
+  });
+  return '〔附件：' + parts.join('、') + '〕';
 }
 
 function onChatFile(f){
@@ -14274,6 +14746,14 @@ function onChatFile(f){
     pickPdfAttach(f);
     return;
   }
+  /* Office 三件套 → 本地解析成文字 */
+  if(OFFICE_EXT.test(lower)){ pickOfficeAttach(f); return; }
+  /* 97-2003 与 iWork：二进制格式，解不了就直说，别让用户以为是 app 坏了 */
+  if(LEGACY_EXT.test(lower)){
+    openUnsupportedFile(name, '这是 97-2003 的老二进制格式（或 iWork 格式），本机解不开。'
+      + '在电脑上用 Word/Excel/PPT「另存为」.docx / .xlsx / .pptx 再传一次就行。');
+    return;
+  }
   if(!(f.type && /text\//.test(f.type)) && !FILE_TEXT_EXT.test(lower)){
     openUnsupportedFile(name);
     return;
@@ -14282,18 +14762,71 @@ function onChatFile(f){
     openUnsupportedFile(name, '文件超过 4MB，模型一次读不完');
     return;
   }
-  readFileAs(f, function(d){
-    if(d == null || d === ''){
+  readFileSmart(f, function(d){
+    if(d == null || d.trim() === ''){
       openUnsupportedFile(name, '读不出内容，可能是空文件或编码不对');
       return;
     }
     /* 截断在**挂载时**做，并把 truncated 标记带到胶囊上 ——
-       用户在胶囊上就能看到「已截断」，不用等到模型答不出来才发现。 */
+       用户在胶囊上就能看到「已截断」，不用等到模型答不出来才发现。
+       ⚠️ 但同时把全文切成段（parts）：长文件发送时按问题选段，
+       所以「截断」只在**没带 parts** 的旧路径上才是最终结果。 */
     var trunc = d.length > FILE_TEXT_MAX;
-    addAttach({kind:'text', name:name, size:f.size,
-      text: trunc ? d.slice(0, FILE_TEXT_MAX) : d, truncated: trunc, rawLen: d.length});
-    toast(trunc ? '文件太长，只带了前面一部分' : '文件已加上');
+    addAttach({kind:'text', fmt:'txt', name:name, size:f.size,
+      text: trunc ? d.slice(0, FILE_TEXT_MAX) : d, truncated: trunc, rawLen: d.length,
+      parts: packUnits(textUnits(d), '段')});
+    toast(trunc ? '文件较长 · 提问时会自动带上相关的段落' : '文件已加上');
   });
+}
+/* Office 文件 → 读字节 → 本地解析。
+   胶囊先占位（busy 态），解析完再填内容：几百 KB 的 docx 解压要几十毫秒，
+   没有占位的话用户点了没反应，会以为没传上。 */
+function pickOfficeAttach(f){
+  var name = f.name || '文件';
+  var fmt = (name.split('.').pop() || '').toLowerCase();
+  if(f.size > OFFICE_MAX_BYTES){
+    openUnsupportedFile(name, '文件超过 30MB，解开会很慢'); return;
+  }
+  var ph = addAttach({kind:'text', fmt:fmt, name:name, size:f.size, busy:true, text:'', parts:[]});
+  toast('正在解析 ' + fmt.toUpperCase() + '…');
+  var fr = new FileReader();
+  fr.onload = function(){
+    var u8 = new Uint8Array(fr.result || 0);
+    parseOfficeFile(name, u8).then(function(r){
+      ph.busy = false;
+      if(!r.ok){
+        removeAttach(ph.id);
+        openUnsupportedFile(name, r.err || '没能从这里读出文字');
+        logIt('对话', '解析失败 ' + name + '：' + (r.err || '未知'));
+        return;
+      }
+      ph.fmt = r.fmt; ph.parts = r.parts; ph.text = r.text; ph.rawLen = r.text.length;
+      ph.truncated = false;
+      attachRow();
+      logIt('对话', '解析 ' + r.fmt.toUpperCase() + ' ' + name + ' · '
+        + r.parts.length + ' 段 · ' + r.text.length + ' 字');
+      toast(r.fmt.toUpperCase() + ' 已解析 · ' + r.parts.length + ' 段');
+    });
+  };
+  fr.onerror = function(){
+    ph.busy = false; removeAttach(ph.id);
+    openUnsupportedFile(name, '文件读取失败');
+  };
+  try{ fr.readAsArrayBuffer(f); }catch(e){
+    ph.busy = false; removeAttach(ph.id);
+    openUnsupportedFile(name, '文件读取失败');
+  }
+}
+/* 按 ArrayBuffer 读 + 编码嗅探。旧的 readFileAs 用 readAsText，
+   它只会按 UTF-8 解，GBK 的 txt 出来就是乱码 —— 那正是「上传没用」的一半原因。 */
+function readFileSmart(f, cb){
+  var fr = new FileReader();
+  fr.onload = function(){
+    try{ cb(decodeTextSmart(new Uint8Array(fr.result || 0))); }
+    catch(e){ cb(null); }
+  };
+  fr.onerror = function(){ cb(null); };
+  try{ fr.readAsArrayBuffer(f); }catch(e){ cb(null); }
 }
 /* PDF：走原生桥渲染页图 */
 function pickPdfAttach(f){
@@ -14359,11 +14892,11 @@ function openUnsupportedFile(name, why){
     + '<div class="muted" style="font-size:11.5px;margin-top:6px;line-height:1.8">'
     + '<b>' + esc(name) + '</b><br/>'
     + (why ? (esc(why) + '<br/>') : '')
-    + '现在支持：<b>PDF</b>（逐页转成图片交给视觉模型读）、<b>图片</b>、'
-    + '<b>文本类</b>（txt / md / 代码 / csv / json 等）。<br/>'
-    + 'Word、Excel、PPT 这些还不行 —— 它们是压缩包格式，'
-    + '要在手机上解开再抽文字，代价太大。'
-    + '临时办法：在电脑上打开它，复制正文粘进输入框，效果一样。</div>'
+    + '现在支持：<b>Word / Excel / PPT</b>（docx / xlsx / pptx，在手机上直接解包抽文字）、'
+    + '<b>PDF</b>（逐页转成图片交给视觉模型读）、<b>图片</b>、'
+    + '<b>文本类</b>（txt / md / 代码 / csv / json 等，GBK 也能读）。<br/>'
+    + '老格式的 .doc / .xls / .ppt 是二进制文档，本机解不开 —— '
+    + '在电脑上另存为 docx / xlsx / pptx 再传即可。</div>'
     + '<div class="btn primary" style="margin-top:16px" onclick="closeSheet()">知道了</div>';
 }
 
@@ -17797,7 +18330,8 @@ function islandToggleFold(force){
   save();
 }
 function islRow(k, icon, title, sub){
-  return '<div class="li" style="border-bottom:0">'
+  /* 这四条是同级的开关，和「记忆」那组一个形状 → 之间要有分隔线（最后一条由 :last-child 收掉） */
+  return '<div class="li">'
     + '<div class="ic" data-i="' + icon + '"></div>'
     + '<div class="tx"><b>' + title + '</b><small>' + sub + '</small></div>'
     + '<div class="switch' + (S.prefs[k] !== false ? ' on' : '') + '" onclick="islandToggle(\'' + k + '\')"></div>'
@@ -18206,7 +18740,21 @@ window.addEventListener('pagehide', function(){ try{ if(inkSaveTimer) inkFlushSa
       /* 主题二级页：三张主题卡 + 无级滑杆 + 背景图 */
       go('me'); renderProfile(); renderUiTheme(); openView('theme');
     }
+    else if(screen === 'ident' || screen === 'term'){
+      /* 「它的身份」（AI 名字 / 称呼 / 头像）与「学期与节假日」两屏：
+         用户报的两条缺分隔线都在这里，且都在 .screen 靠下的位置，必须滚过去才看得见 */
+      go('me'); renderProfile(); refreshAll();
+      var want = screen === 'ident' ? '它的身份' : '学期与节假日';
+      var hs = [].slice.call(document.querySelectorAll('.h2'));
+      var hh = hs.filter(function(x){ return x.textContent.indexOf(want) >= 0; })[0];
+      if(hh){
+        var sc = hh.closest('.screen') || document.querySelector('.screen');
+        sc.scrollTop = hh.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - 10;
+      }
+    }
     else if(screen === 'notes'){ openNotes(); }
+    /* 完整课表二级页：.sched-day 一天一条，是「二级页有没有糊」最直观的一屏 */
+    else if(screen === 'sched'){ go('home'); openView('schedule'); }
     setTimeout(apply, 30);
   }
   seed(); goScreen();
@@ -18225,7 +18773,7 @@ window.addEventListener('pagehide', function(){ try{ if(inkSaveTimer) inkFlushSa
   btn('皮肤', function(){ pro = !pro; apply(); });
   btn('玻璃', function(){ glass = glass === 'clear' ? 'frost' : 'clear'; apply(); });
   btn('描边', function(){ edge = !edge; apply(); });
-  ['home','chat','me','focus','sheet','look','theme','hist','notes'].forEach(function(s){
+  ['home','chat','me','focus','sheet','look','theme','hist','notes','sched'].forEach(function(s){
     btn(s, function(){ screen = s; goScreen(); });
   });
   document.body.appendChild(bar);

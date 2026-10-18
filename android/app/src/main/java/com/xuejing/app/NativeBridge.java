@@ -424,6 +424,58 @@ public class NativeBridge {
         act.shareImage(name, dataUrl);
     }
 
+    /* ============================================================
+       资料库（RAG）正文存储
+       ------------------------------------------------------------
+       为什么要走原生：页面是 file:///android_asset 加载的，
+       该源下 IndexedDB 不可用（open() 的两个回调都不触发），
+       而 localStorage 只有约 5MB —— 装不下几本课件，且写满时是静默失败。
+       详见 DocStore 的类注释。
+
+       四个方法都**异步**：读一份几 MB 的正文再回吐字符串，
+       同步做会卡住 WebView 的 JS 线程（和 PdfRenderer 那条一样的理由）。
+       统一回调 window.onDocStore(id, ok, payload, err)。
+       ============================================================ */
+
+    /**
+     * 写入一份文档的分段正文。
+     * @param body 各段用 U+001E（RS）连接后的纯文本
+     */
+    @JavascriptInterface
+    public void docSave(String id, String body) {
+        act.docSave(id, body);
+    }
+
+    /** 读取正文，回 window.onDocStore(id, ok, body, "") */
+    @JavascriptInterface
+    public void docLoad(String id) {
+        act.docLoad(id);
+    }
+
+    /** 删除一份文档 */
+    @JavascriptInterface
+    public void docDel(String id) {
+        act.docDel(id);
+    }
+
+    /** 清空整个资料库目录 */
+    @JavascriptInterface
+    public void docClear() {
+        act.docClear();
+    }
+
+    /** 资料库占用的字节数与份数：{"bytes":123,"files":3} */
+    @JavascriptInterface
+    public void docStat() {
+        act.docStat();
+    }
+
+    /** 打包整库（换机导出备份用）：每条「id TAB base64」，条间 0x01 */
+    @JavascriptInterface
+    public void docDump() {
+        act.docDump();
+    }
+
     static int parseInt(String s, int def) {
         try {
             return Integer.parseInt(String.valueOf(s).trim());

@@ -31,6 +31,25 @@
      · 切大页面「模糊慢半拍」：.page 的整页透明度淡入带着页内模糊一起长出来，
        皮肤里收掉；
      · 主题切换从开关改回两格滑块（UI Classic / UI Pro）。
+
+   v5.2：真机第四轮 ——「二级页面根本没有模糊」
+     · .plan（AI 行程规划）/ .stat（本周总结、统计格）/ .empty（今日课程空白页）/
+       .sched-day（完整课表一天一条）/ .actlist / .n-card + .note-body（笔记）
+       补上 backdrop-filter，分两档：整屏一张跟 .card（--blur），
+       重复出现跟 .course（--blur-soft）。
+     · 这批面原来只改了 border-color —— 「半透明 + 无模糊」就是透明塑料片，
+       是同一类问题的第三批受害者（第一批气泡/输入行、第二批 .segs/.focusstats 都在 v5.1 补过）。
+       而 v5.1 为了「和主页面同底」撤掉了手机端 .vpanel 的整块模糊，
+       二级页里就没有任何一层在糊，一设自定义背景图立刻露馅。
+     · .sched-day.today 走 :not()：「今天」靠品牌浅底表达，不许被玻璃洗掉。
+     · 第 12 节的无模糊兜底同步列进这七个类，缺一类就是字压在内容上。
+
+   v5.3：描边开关与分隔线分家
+     · 新增 --divider（行间分隔线），不再与 --glass-line（玻璃面描边）共用一个令牌；
+       关掉「高光描边」只收描边与上沿高光，列表的线要留着。
+     · 配套的结构性修法在应用侧：.li 的「标题 + 输入框」两行一组改用 .nob / .up 两个类，
+       最后一条由 .list>.li:last-child 自动去线 —— 原来靠行内 border:0 表达「这两行是一组」，
+       把该留的收尾线一起删了（用户报的两处：AI 对我的称呼、学期起始日）。
    ========================================================================== */
 
 /* ---------- 1. 令牌层 ---------- */
@@ -48,6 +67,11 @@ html.ui-pro{
   --ease:cubic-bezier(.22,.9,.24,1);
   --ease-spring:cubic-bezier(.34,1.36,.44,1);
   --glass-line:rgba(23,26,38,.07);
+  /* 分隔线 ≠ 描边：原来两者共用 --glass-line，于是关掉「高光描边」把列表行与行之间
+     那条线也一起抹掉了（真机 v0.3.1 用户报）。拆成两个令牌：
+       --glass-line  玻璃面自己那一圈描边（+ 上沿高光 --hair）→ 归描边开关管
+       --divider     行与行之间的分隔线 → 一直在，不随描边开关走 */
+  --divider:rgba(23,26,38,.11);
   --hair:rgba(255,255,255,.80);
   --lift:0 10px 30px rgba(23,26,38,.10);
   /* --card 在皮肤里被改成了半透明（全应用 48 处 background:var(--card) 一次变），
@@ -78,7 +102,12 @@ html.ui-pro{
 
 /* ===== 两档预设：通透 / 磨砂 =====
    通透（data-glass="clear"）：模糊 10px、底色薄 —— 底纹看得穿，最轻。
-   磨砂（data-glass="frost"）：模糊 46px、底色厚 —— 背景化成色块，最安静。
+   磨砂（data-glass="frost"）：底色厚、模糊中等 —— 背景化成色块，最安静。
+     ⚠️ 半径 46 → 18（2026-10-18）。真机上「切页后约一秒才出现模糊」，
+     常驻渲染也没治好 —— 慢的是 backdrop-filter 的**绘制成本**，不是纹理重建。
+     Chromium 在模糊算完之前会先拿「只有 background 颜色」的结果顶上，
+     那半秒多的空档就是它。模糊核按半径平方增长，46 → 18 差 6 倍。
+     磨砂的"厚"主要由 --card/--glass 的不透明度撑住，不靠半径。
    ⚠️ 下面四段令牌块要同步改：浅通透 / 浅磨砂 / 深通透 / 深磨砂。
       同权重靠顺序取胜，所以「深色」两段必须排在「浅色」两段之后，
       且深色磨砂那段要把深色通透被覆盖掉的项全部重写一遍。 */
@@ -92,17 +121,21 @@ html.ui-pro,html.ui-pro[data-glass="clear"]{
   --glass-strong:rgba(255,255,255,.46);
   --glass-sheet:rgba(255,255,255,.78);
   --scrim:.62;
+  --view-veil:rgba(255,255,255,.62);
+  --view-scrim:rgba(255,255,255,.30);
 }
 html.ui-pro[data-glass="frost"]{
-  --blur:blur(46px) saturate(200%) brightness(1.05);
-  --blur-md:blur(26px) saturate(185%) brightness(1.02);
-  --blur-soft:blur(14px) saturate(160%);
-  --mask-blur:blur(26px) saturate(150%);
+  --blur:blur(18px) saturate(190%) brightness(1.04);
+  --blur-md:blur(12px) saturate(175%) brightness(1.02);
+  --blur-soft:blur(7px) saturate(155%);
+  --mask-blur:blur(16px) saturate(150%);
   --card:rgba(255,255,255,.84);
   --glass:rgba(255,255,255,.56);
   --glass-strong:rgba(255,255,255,.72);
   --glass-sheet:rgba(255,255,255,.90);
   --scrim:.42;
+  --view-veil:rgba(255,255,255,.70);
+  --view-scrim:rgba(255,255,255,.36);
 }
 html.ui-pro[data-theme="dark"],
 html.ui-pro[data-theme="dark"][data-glass="clear"]{
@@ -110,6 +143,7 @@ html.ui-pro[data-theme="dark"][data-glass="clear"]{
      透明度给得比浅色高一点（黑玻璃透多了内容会糊成一片），
      但亮度抬上来，让模糊的边缘能被看见。 */
   --glass-line:rgba(255,255,255,.09);
+  --divider:rgba(255,255,255,.13);
   --hair:rgba(255,255,255,.16);
   --lift:0 12px 34px rgba(0,0,0,.46);
   --bloom-1:rgba(var(--brand-rgb),.46);
@@ -125,20 +159,26 @@ html.ui-pro[data-theme="dark"][data-glass="clear"]{
   --glass-strong:rgba(38,43,58,.48);
   --glass-sheet:rgba(40,45,61,.86);
   --scrim:.52;
+  --view-veil:rgba(16,18,26,.55);
+  --view-scrim:rgba(10,12,20,.42);
   --tab-pill:rgba(0,0,0,.34);
 }
 html.ui-pro[data-theme="dark"][data-glass="frost"]{
-  --blur:blur(46px) saturate(175%) brightness(1.16);
-  --blur-md:blur(26px) saturate(160%) brightness(1.10);
-  --blur-soft:blur(14px) saturate(150%);
-  --mask-blur:blur(26px) saturate(135%);
+  --blur:blur(18px) saturate(170%) brightness(1.14);
+  --blur-md:blur(12px) saturate(158%) brightness(1.08);
+  --blur-soft:blur(7px) saturate(148%);
+  --mask-blur:blur(16px) saturate(135%);
   --card:rgba(28,32,44,.86);
   --glass:rgba(30,34,46,.60);
   --glass-strong:rgba(38,43,58,.74);
   --glass-sheet:rgba(40,45,61,.93);
   --scrim:.34;
+  --view-veil:rgba(16,18,26,.66);
+  --view-scrim:rgba(10,12,20,.50);
 }
-/* 高光描边开关：关掉时把描边与顶部高光一起收掉，只剩材质本身 */
+/* 高光描边开关：只管「玻璃面那一圈描边 + 上沿那道亮边」。
+   ⚠️ 不许连带把 --divider（行与行之间的分隔线）也抹掉 —— 上一版这里清的是 --glass-line，
+      而 .li 的分隔线当时共用这个令牌，结果关掉描边等于把整个列表的线全删了。 */
 html.ui-pro[data-edge="off"]{
   --glass-line:transparent;
   --hair:transparent;
@@ -172,7 +212,7 @@ html.ui-pro .course{
   border-radius:var(--r-md);
   box-shadow:inset 0 1px 0 var(--hair);
 }
-html.ui-pro .li{border-bottom-color:var(--glass-line)}
+html.ui-pro .li{border-bottom-color:var(--divider)}
 html.ui-pro .li .ic{border-radius:var(--r-sm);background:var(--glass-strong)}
 /* 周条：一天一格，也要透。⚠️ 选中日是 .day.sel（品牌渐变 + 白字）、
    节假日是 .day.other（品牌浅底），这两格靠 background 表达状态，
@@ -188,11 +228,32 @@ html.ui-pro .sheet .list,html.ui-pro .sheet .card,
 html.ui-pro .picksheet .list,html.ui-pro .picksheet .card{border-radius:var(--r-in-sheet)}
 html.ui-pro .viewbody .list,html.ui-pro .viewbody .card{border-radius:var(--r-in-panel)}
 html.ui-pro .g-tile .gi{border-radius:var(--r-in-tile)}
-/* 其余以 --card 为底的面（专注页的 .segs/.focusstats、笔记工具条、空状态…）
-   由令牌本身变半透，这里只补圆角与描边色。 */
+/* 其余以 --card 为底的面：令牌把 --card 改成半透明只是「让它透」，
+   透而不糊 = 透明塑料片。真机 v0.3.0 报的「二级页面都没有模糊」就是这个：
+   .plan（AI 行程规划）/ .stat（本周总结、统计格）/ .empty（今日课程空白页）/
+   .sched-day（完整课表一天一条）/ .n-card + .note-body（笔记）/ .actlist（操作列表）
+   只在下面补了边框色，一条 backdrop-filter 都没挂；
+   而 v5.1 为了「和主页面同底」把手机端 .vpanel 的整块模糊撤掉了，
+   于是这些页里没有任何一层在糊 —— 一设自定义背景图就整个露馅。
+   分两档，和主页面同一套语言（成本照 .card / .course 的分工）：
+     · 整屏一张的面 → --blur（和 .card 同档）
+     · 一次出现几条的面 → --blur-soft（和 .course 同档，4px/14px）
+   ⚠️ .sched-day.today 用 background 表达「今天」，基础态必须 :not(.today) 让开，
+      否则皮肤这条同权重规则排在基础样式之后，会把今天洗成普通日（结构错误①）。
+   ⚠️ 仍然不许给这些面叠 background-image 高光（防闪第②条）。 */
 html.ui-pro .segs,html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .stat,
 html.ui-pro .empty,html.ui-pro .sched-day,html.ui-pro .n-card,html.ui-pro .note-body{
   border-color:var(--glass-line)}
+html.ui-pro .actlist,html.ui-pro .plan,
+html.ui-pro .empty,html.ui-pro .note-body{
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  box-shadow:inset 0 1px 0 var(--hair)}
+html.ui-pro .stat,html.ui-pro .n-card,
+html.ui-pro .sched-day:not(.today){
+  background:var(--glass);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft);
+  box-shadow:inset 0 1px 0 var(--hair)}
 html.ui-pro .segs,html.ui-pro .focusstats{border-radius:var(--r-md)}
 html.ui-pro .segs .s.on{border-radius:calc(var(--r-md) - 4px)}
 /* 专注页的两块面（模式条 / 今日统计）单独铺玻璃：
@@ -222,7 +283,8 @@ html.ui-pro .btn.primary{
   background:var(--brand);border:0;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 8px 22px rgba(var(--brand-rgb),.36)}
 html.ui-pro .btn.ghost{background:var(--glass);border:1px solid var(--glass-line);
-  box-shadow:inset 0 1px 0 var(--hair)}
+  box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
 html.ui-pro .badge{border-radius:999px;font-weight:750;letter-spacing:.2px}
 html.ui-pro .switch{transition:background var(--dur) var(--ease)}
 html.ui-pro .switch::after{transition:left var(--dur) var(--ease-spring);
@@ -291,11 +353,17 @@ html.ui-pro .tab.center .fab{background:var(--brand);border-radius:var(--r-md);
 /* ---------- 6. 弹层：方向感 + 弹簧 ----------
    遮罩别压太黑：sheet 自己是半透明白玻璃，底下越暗它就越灰
    （弹层采样的是「已被遮罩压暗」的背板）。磨砂感靠模糊，不靠压黑。 */
+/* 遮罩＝模糊，不是压暗（2026-10-18 用户要求）。
+   .32 压暗会把 sheet 自己的半透明白玻璃拖成一片灰；改成抹布玻璃之后，
+   背景在、只是糊掉，弹层靠「前后清晰度差」浮起来，而不是靠「前亮后暗」。
+   底色只留 .06 的雾：完全没有的话，sheet 边缘会与背景糊成一片，找不到边界。
+   老内核没有 backdrop-filter 时走文件末尾的 @supports 兜底（更深的那档）。 */
 html.ui-pro .mask,html.ui-pro .pickmask{
-  background:rgba(10,12,20,.28);
+  background:rgba(10,12,20,.06);
   -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
 html.ui-pro[data-theme="dark"] .mask,
-html.ui-pro[data-theme="dark"] .pickmask{background:rgba(0,0,0,.42)}
+html.ui-pro[data-theme="dark"] .pickmask{
+  background:rgba(0,0,0,.14)}
 html.ui-pro .sheet,html.ui-pro .picksheet{
   background:var(--glass-sheet);
   background-image:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 46%);
@@ -345,7 +413,48 @@ html.ui-pro .vpanel{background:var(--glass);
 html.ui-pro:not(.layout-tablet) .vpanel{
   background:transparent;border:0;border-radius:0;box-shadow:none;
   -webkit-backdrop-filter:none;backdrop-filter:none}
-html.ui-pro .viewhead{background:transparent;border-bottom-color:var(--glass-line)}
+/* ---------- 7b. 手机端二级页：底改成「透出模糊」而不是「铺一块同样的底」----------
+   2026-10-18。原来 .view 铺的是和 .phone 同一份 --base-bg（不透明），
+   结果打开二级页 = 主页面被整块盖掉，自定义背景在二级页里也只剩一层同色底。
+   现在：.view 只铺一层半透明纱（--view-veil），真正提供"背景"的是下面那层
+   .scrim —— 它本来就带 backdrop-filter，糊的是主页面 + 光晕/照片。
+   于是打开二级页 = 看见被糊掉的主页面，层次和 iOS 的 sheet 一致。
+
+   ⚠️ 为什么模糊放在 .scrim 而不挂在 .view 自己身上：
+   ① 全屏元素 + 内容滚动挂 backdrop-filter 是 WebView 上最典型的闪烁来源
+      （用户报过「狂闪」，第 7 节上方那条注释就是那时的结论）；
+   ② .view 自己要是挂了模糊，四大功能那个 clip-path 展开动画会把它提升成
+      独立合成层，它自己的 backdrop 也一起瞎 —— 等于换个地方复现同一个 bug。
+      .scrim 不在动画链上（实测它只随 opacity 平滑增强，没有失明）。
+
+   ⚠️ 顺带解决「四大功能打开时玻璃延迟」：见技术框架第七十八章。
+      展开动画期间页内玻璃仍然采空（实测 0~280ms std 22~35 = 完全没糊），
+      但它采空之后露出来的就是 scrim 糊过的背景 —— 和它正常时采到的对象是
+      同一个东西。实测同一块玻璃：工作 std=2.58 / 失明 std=2.79，差 8%，
+      人眼看不出来。这是「预渲染一份模糊顶替」的实现方式，不用真的去截图。
+
+   ⚠️ 只改手机端（:not(.layout-tablet)）：平板上二级页是居中那张卡，
+      .view 透明 + .vpanel 玻璃才是它的形态，铺纱会把整屏压白。
+
+   ⚠️ #view-focus **也在内**，但有一条前置条件（2026-10-19 二次修正）：
+   它走 openView('focus') 的专用分支，**必须同时
+   document.body.classList.add('view-open')** ——
+   否则 .scrim（真正提供模糊的那层）不会显示，纱下面透出的就是
+   **没糊过的主页面**，看着只有「半透明」没有「模糊」。
+   v0.3.28 就是这么翻的（铺了纱、没开 scrim），当时的错误修法是
+   把纱去掉换回不透明 —— 那等于承认「做不到模糊」。真正的漏点在 JS。
+   ⚠️ 反过来：#view-focus 同时带 .view class，但它的 background 由
+   ID 选择器（权重更高）定，所以这里必须显式连它一起写，不能只写 .view。 */
+html.ui-pro:not(.layout-tablet) .view,
+html.ui-pro:not(.layout-tablet) #view-focus{background:var(--view-veil)}
+/* 自定义背景也一样走模糊（统一） —— 照片底不再单独铺不透明的 --base-bg-photo */
+html.ui-pro.has-bg:not(.layout-tablet) .view,
+html.ui-pro.has-bg:not(.layout-tablet) #view-focus{background:var(--view-veil)}
+/* 模糊本体：scrim 的蒙版换成 --view-scrim，模糊半径跟遮罩同一档 */
+html.ui-pro:not(.layout-tablet) .scrim{
+  background:var(--view-scrim);
+  -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
+html.ui-pro .viewhead{background:transparent;border-bottom-color:var(--divider)}
 html.ui-pro .icon-btn{border-radius:var(--r-sm);background:var(--glass-strong);
   border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
   -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
@@ -357,8 +466,9 @@ html.ui-pro .icon-btn{border-radius:var(--r-sm);background:var(--glass-strong);
    去掉动画会「啪」一下消失；JS 那边也用 setTimeout 收尾，不监听 animationend。 */
 html.ui-pro #view-focus.anim-in{animation:fvInPro var(--dur) ease both}
 html.ui-pro #view-focus.anim-out{animation:fvOutPro var(--dur) ease both;pointer-events:none}
-@keyframes fvInPro{from{opacity:0}to{opacity:1}}
-@keyframes fvOutPro{from{opacity:1}to{opacity:0}}
+/* 专注页也走侧向：和别的二级页同一语言（2026-10-17） */
+@keyframes fvInPro{from{opacity:0;transform:translateX(64px)}to{opacity:1;transform:none}}
+@keyframes fvOutPro{from{opacity:1;transform:none}to{opacity:0;transform:translateX(64px)}}
 
 /* ---------- 8. 对话页 ----------
    输入行是「椭圆 + 三颗方块按钮」的组合：按钮要和输入框同高、同圆角节奏，
@@ -412,10 +522,15 @@ html.ui-pro .drawer{background:var(--glass-sheet);
   border-right:1px solid var(--glass-line);
   box-shadow:inset 1px 0 0 var(--hair),24px 0 60px rgba(0,0,0,.22)}
 html.ui-pro .drawer-scrim.show{
-  background:rgba(10,12,20,.28);
+  background:rgba(10,12,20,.06);
   -webkit-backdrop-filter:var(--mask-blur);backdrop-filter:var(--mask-blur)}
+/* 历史侧栏里的卡片：抽屉整块已经糊了一层，卡片自己也要是玻璃 ——
+   否则「抽屉是糊的、里面每条是塑料片」，和主页面同一类毛病。
+   用 --blur-soft：一次可能出现十几条，半径要跟 .course 一档。 */
 html.ui-pro .hist-card{background:var(--glass);border:1px solid var(--glass-line);
-  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair)}
+  border-radius:var(--r-md);box-shadow:inset 0 1px 0 var(--hair);
+  -webkit-backdrop-filter:var(--blur-soft);backdrop-filter:var(--blur-soft)}
+/* 选中/收藏态靠 background 表达 → 基础态让开（同第八节 .qsw 的坑） */
 html.ui-pro .hist-card.on{background:var(--glass-strong)}
 
 /* ---------- 10. 排版层级 ---------- */
@@ -428,16 +543,20 @@ html.ui-pro .fs,html.ui-pro .course .time,html.ui-pro .week .day b{font-variant-
    ⚠️ 这里**不再给内容面加入场动画**（旧版有 riseIn）：列表每次重渲染都会重放，
    真机上就是「刷一下闪一下」，和 backdrop-filter 重绘叠在一起更明显。
    要动效只保留按压缩放的反馈。 */
-html.ui-pro .li.tap:active,html.ui-pro .g-tile:active,html.ui-pro .course:active{
-  transform:scale(.988)}
+/* 按压缩放全部移除（2026-10-18）：缩放会让画在元素内的遮罩跟着缩，边缘必然露底色。 */
 html.ui-pro .li.tap,html.ui-pro .g-tile,html.ui-pro .course{
   transition:transform var(--dur-f) var(--ease),
     background var(--dur-f) var(--ease),border-color var(--dur-f)}
-/* 切三个大页面时「模糊要慢半拍才出现」的根因：基础样式
-   .page{animation:fade .22s ease} 是整页透明度从 0 起，
-   而透明度动画期间，页内每个 backdrop-filter 元素采到的**自己那层**也在淡入，
-   于是玻璃的「糊」是跟着透明度一起长出来的 —— 看着就是延迟。
-   皮肤里把这段淡入收掉：切页本来有底栏滑块在动，够指明「切到哪了」。 */
+/* 切三个大页面时「模糊要慢半拍才出现」的根因（2026-10-18 实测，已修）：
+   go() 给 .page 打的 transform 进场动画期间，Chromium 把 .page 提升成独立合成层，
+   页内每个 backdrop-filter 的 backdrop root 随之变成 .page 自己 ——
+   光晕画在 .phone 上、不在这个 root 里，玻璃采到的是空底，整段动画期间没有模糊。
+   修法在 go()：玻璃皮肤下不打这段动画（那里有实测数据）。
+   ⚠️ 同一症状这是**第二版根因**：第一版是整页 opacity 淡入（2026-10-17 已从基础层
+   删掉）。换了根因、症状一模一样，所以极易被当成「上次没修好」—— 以后再遇到，
+   先跑 tools/blur_time_probe.mjs 看模糊缺失的时长是不是正好等于某段动画的时长。
+   下面那条 animation:none 因此仍是防御性声明：以后谁把 CSS 动画加回 .page，
+   皮肤这边仍然是干净的。 */
 html.ui-pro .page{animation:none}
 
 /* ---------- 12. 系统不支持模糊时：退成实色，不塌版 ----------
@@ -450,8 +569,23 @@ html.ui-pro .page{animation:none}
   html.ui-pro .seg,html.ui-pro .segThumb,html.ui-pro .icon-btn,html.ui-pro .quickwrap .quick,
   html.ui-pro .qswrow .qsw,html.ui-pro #chatInput,html.ui-pro .msg .bubble,
   html.ui-pro .plusmenu,html.ui-pro .segs,html.ui-pro .focusstats,html.ui-pro .drawer,
-  html.ui-pro .view,html.ui-pro #view-focus{
+  html.ui-pro .view,
+  html.ui-pro:not(.layout-tablet) .view,
+  html.ui-pro .actlist,html.ui-pro .plan,html.ui-pro .empty,html.ui-pro .note-body,
+  html.ui-pro .stat,html.ui-pro .n-card,html.ui-pro .sched-day:not(.today),
+  html.ui-pro .hist-card,
+  /* 这批「凹下去的槽」和第 3 节的玻璃面一样吃令牌，兜底时也必须一起退回实色 ——
+     漏一类就是那类在没有模糊的浏览器上半透明地压在内容上。 */
+  html.ui-pro .think,html.ui-pro .filepeek,html.ui-pro .logbox,html.ui-pro .repbox,
+  html.ui-pro .lgstat,html.ui-pro .dc,html.ui-pro .stbtn,html.ui-pro .btn.ghost,
+  html.ui-pro .bubble .mdi,html.ui-pro .bubble .mdc,html.ui-pro .li .ic,
+  html.ui-pro .week .day:not(.sel):not(.other){
     background:var(--card-solid)}
+  /* 专注页兜底：半透明纱退掉，回到和三个主页面同一份不透明底。
+     不能跟着上面那组退成 --card-solid —— 那是「卡片」的颜色，
+     专注页不是一张卡片，是一整页。 */
+  html.ui-pro #view-focus{background:var(--base-bg)}
+  html.ui-pro.has-bg #view-focus{background:var(--base-bg-photo)}
   html.ui-pro .mask,html.ui-pro .pickmask{background:rgba(10,12,20,.55)}
   /* 上面那条靠「权重低的 .qsw / .quick」生效，但第八节把它们拆成了
      :not(.on) / :not(:active) 两条高权重规则 —— 兜底里必须按同样的权重再写一遍，
