@@ -70,6 +70,26 @@ public class MainActivity extends AppCompatActivity {
     private WebView web;
     private FrameLayout root;
 
+    /* ---------- 桥的来源校验（审计 H-2 / M-2 / M-5）----------
+       页面 → 原生是**全权限通道**：能发网络请求、读文件、清数据。
+       如果 WebView 被导航到外部页面（或注入的 iframe），
+       那个页面里的脚本也能调用 XueJingNative —— 等于把整机权限交出去。
+       所以每个桥方法进来先验「当前页面是不是我们自己的 asset」。
+       2026-10-24 之前这里完全没有校验。 */
+    static final String ASSET_URL = "file:///android_asset/index.html";
+
+    /** 当前 WebView 是否停在我们自己的页面上（任何异常一律判不安全） */
+    boolean isTrustedPage() {
+        try {
+            WebView w = web;
+            if (w == null) return false;
+            String u = w.getUrl();
+            return u != null && u.startsWith(ASSET_URL);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /* 页面同步过来的「最上层是什么」。返回手势拿它做同步判定，
        关键点在于：不能等 JS 异步回答再决定退不退，那样手势早已完成、应用已经退出了 */
     private volatile String layer = "root";
@@ -206,15 +226,41 @@ public class MainActivity extends AppCompatActivity {
         ws.setDisplayZoomControls(false);
         ws.setTextZoom(100);                // 不受系统字体缩放影响，避免布局被撑破
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ws.setSafeBrowsingEnabled(false);
+        /* 审计 L-1：原来这里显式关掉了 Safe Browsing。
+           关掉后 WebView 不再对恶意站点做本地拦截，而它恰恰能挡住
+           「用户点了搜索/资料里的诡异链接」这类场景。默认就是开启，显式关掉纯负收益。 */
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ws.setSafeBrowsingEnabled(true);
+        /* 纵深防御：不依赖「默认值在不同 ROM 上是否一致」，显式关掉用不到的能力。
+           我们是 file:///android_asset 单页应用，不需要访问任意文件/内容提供者，
+           也不需要页面自己弹窗（加号菜单等都是页内浮层）。 */
+        ws.setAllowFileAccess(false);
+        ws.setAllowContentAccess(false);
+        ws.setSavePassword(false);
+        ws.setJavaScriptCanOpenWindowsAutomatically(false);
+        try {
+            ws.setAllowFileAccessFromFileURLs(false);
+            ws.setAllowUniversalAccessFromFileURLs(false);
+        } catch (Throwable ignored) { }
 
         web.addJavascriptInterface(new NativeBridge(this), "XueJingNative");
 
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                // 单页应用，不允许跳到外部页面
-                return !String.valueOf(req.getUrl()).startsWith("file://");
+                /* 审计 M-3：原来是「只要不是 file:// 就全拦」——
+                   一方面外部 http(s) 链接点了毫无反应（用户以为死键），
+                   另一方面 file:// 下的**任意**路径都被放行，
+                   等于允许导航到 file:///sdcard/… 之类非本应用页面。
+                   改成正面白名单：只有自己的 index.html 留在 WebView 内，
+                   http(s) 交给系统浏览器，其余一律拦掉。 */
+                String u = String.valueOf(req.getUrl());
+                if (u.startsWith(ASSET_URL)) return false;
+                if (u.startsWith("http://") || u.startsWith("https://")) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u)));
+                    } catch (Throwable ignored) { }
+                }
+                return true;
             }
             @Override
             public void onPageFinished(android.webkit.WebView view, String url) {
@@ -250,8 +296,28 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
+                /* 审计 M-2：原来是「要什么给什么」。
+                   一旦页面被导航到外部站点（或桥被第三方脚本调用），
+                   对方可以直接申请摄像头 / 麦克风并拿到授权。
+                   现在只认可信来源，且只放行白名单内的资源。 */
                 runOnUiThread(() -> {
-                    try { request.grant(request.getResources()); } catch (Throwable ignored) { }
+                    try {
+                        String origin = String.valueOf(request.getOrigin());
+                        if (!origin.startsWith("file:///android_asset/")) {
+                            request.deny();
+                            return;
+                        }
+                        java.util.List<String> granted = new java.util.ArrayList<>();
+                        for (String r : request.getResources()) {
+                            /* 不需要摄像头 / 麦克风（拍照走系统相机 Intent，不走 WebRTC），
+                               所以只放行受保护媒体的播放。 */
+                            if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(r)) granted.add(r);
+                        }
+                        if (granted.isEmpty()) request.deny();
+                        else request.grant(granted.toArray(new String[0]));
+                    } catch (Throwable ignored) {
+                        try { request.deny(); } catch (Throwable ignored2) { }
+                    }
                 });
             }
         });
@@ -430,9 +496,12 @@ public class MainActivity extends AppCompatActivity {
                用户的话是「状态栏部分不沉浸了，割裂感很强」。
                改成把高度交给 CSS（--sb-inset），页面自己画到状态栏底下，
                自绘那条 .statusbar 只占位不显示。 */
-            /* 键盘收起时这一句必须是 0 —— keyboardPad() 对 imeBottomPx<=0 已返回 0，
-               这里再按 open 显式兜一层，避免残留值把底部重新垫起来。 */
-            v.setPadding(0, 0, 0, open ? keyboardPad() : 0);
+            /* ❌ 这里**不再**直接 setPadding（BUG-2 的根因）。
+               原来写的是 v.setPadding(0,0,0, open ? keyboardPad() : 0)，问题在时序：
+               这一刻窗口可能还没被 adjustResize 缩小 → keyboardPad() 算出
+               「系统没让位」→ 全额补一次键盘高度；随后 resize 又把窗口缩一次，
+               总可用高度就少了**两倍**键盘高度 —— 弹层与键盘之间空出一大块。
+               现在让位统一交给下面的布局监听（它在窗口尺寸确定之后才跑）。 */
             /* bars.bottom 是**物理像素**，而 WebView 里 1 CSS px = 1 dp；
                不换算就直接塞给 CSS，1080p 机型（density ≈ 2.75~3）会把「~16dp 的手势条」
                报成 48 CSS px，底栏就会长出 30 多 px 的额外高度。换成 dp 再交出去。 */
@@ -462,19 +531,26 @@ public class MainActivity extends AppCompatActivity {
             /* kbOpen 是「键盘真的在」的唯一真相：它只在 insets 回调里按
                ime.bottom > 0 更新。imeBottomPx 会在键盘收起后的那一两帧里过期 ——
                布局回调若跑在 insets 回调之前，用它就会算出「该补」的假结论。 */
-            if (!kbOpen) {
-                /* 键盘收起了：**必须把之前补上的 padding 收回去**。
-                   以前这里直接 return —— 键盘弹起时补的那段 padding 就永远留着：
-                   root 被垫高 → WebView 变矮 → .phone 跟着变矮 →
-                   贴底的弹层被整体顶上去、下面空出一条背景。
-                   （真机症状：「打开一次待办的输入框之后底部就莫名其妙抬高了一截」。） */
+            /* 自然高度 = 对外高度 − 我们自己补的 padding。
+               用它判断「系统让了多少」才不会把上一次的 padding 算进基准。
+               （直接用 getHeight() 是错的：它含 padding，判据几乎恒成立，
+                 等于没判 —— 那正是原来「空块回收不掉」的原因之一。） */
+            int hh = root.getHeight() - root.getPaddingBottom();
+
+            /* 判「键盘确实不在」用 imeBottomPx 而不是 kbOpen：
+               imeBottomPx 就是 insets 刚给的真实值，少一层状态、少一次抖动传播。 */
+            boolean imeGone = imeBottomPx <= 0;
+
+            /* 基准只在「确定没有键盘」时更新，且只在窗口没被压小时 ——
+               否则会把缩小后的高度记成基准，shrink 恒 0，于是全额补、抬两遍。 */
+            if (imeGone && hh > 0 && hh >= restHeightPx) restHeightPx = hh;
+
+            if (imeGone) {
+                /* 键盘收起了：**必须把之前补上的 padding 收回去**，
+                   否则 root 被垫高 → WebView 变矮 → 贴底弹层被顶上去、下面空一条。 */
                 if (root.getPaddingBottom() != 0) {
                     root.setPadding(0, root.getPaddingTop(), 0, 0);
                 }
-                /* 基准只在「确定没有键盘」时更新，而且只在窗口确实没被压小的前提下 ——
-                   否则会把缩小的高度当成基准。 */
-                int hh = root.getHeight();
-                if (hh > 0 && (restHeightPx <= 0 || hh >= restHeightPx)) restHeightPx = hh;
                 return;
             }
             int want = keyboardPad();
@@ -497,19 +573,27 @@ public class MainActivity extends AppCompatActivity {
      * 只在键盘开合时跑，不在主线程上常驻。
      */
     private void schedulePadReset() {
-        final Runnable[] tasks = new Runnable[2];
-        tasks[0] = () -> {
-            if (root == null) return;
-            /* 窗口已经恢复到「没键盘」的高度，就直接收干净 */
-            if (restHeightPx > 0 && root.getHeight() >= restHeightPx - 2) {
-                imeBottomPx = 0;
-                if (root.getPaddingBottom() != 0) {
+        /* 轮询 5 次而不是只查两次：部分 ROM（MIUI / EMUI）键盘收起后窗口恢复更慢，
+           120/400ms 两次都错过就再也不查了 —— padding 永久留着，底部一直空一块。
+
+           判据也用 imeBottomPx（insets 给的权威值）而不是「高度是否恢复」：
+           原来用 root.getHeight() >= restHeightPx - 2，但 root 此时**还带着 padding**，
+           getHeight() 是含 padding 的对外高度，本来就该等于 restHeightPx ——
+           这个条件几乎恒成立，反而说明不了任何问题。 */
+        final long[] delays = {120, 300, 600, 1000, 1600};
+        for (long d : delays) {
+            root.postDelayed(() -> {
+                if (root == null) return;
+                if (imeBottomPx == 0 && root.getPaddingBottom() != 0) {
                     root.setPadding(0, root.getPaddingTop(), 0, 0);
                 }
-            }
-        };
-        root.postDelayed(tasks[0], 120);
-        root.postDelayed(tasks[0], 400);
+                /* 自然高度恢复了，顺手把基准修对 */
+                int natural = root.getHeight() - root.getPaddingBottom();
+                if (imeBottomPx == 0 && natural > 0 && natural >= restHeightPx) {
+                    restHeightPx = natural;
+                }
+            }, d);
+        }
     }
 
     private int keyboardPad() {
@@ -517,13 +601,14 @@ public class MainActivity extends AppCompatActivity {
         int h = root.getHeight();
         /* 基准高度还没测到就先不补，等下一次布局回调再来 —— 宁可晚一帧，也不要多垫一段 */
         if (h <= 0 || restHeightPx <= 0) return 0;
-        /* ⚠️ 基准可能被写小过：adjustResize 已经把窗口缩小、但 IME inset 还没报上来的
-           那一两帧里，全局布局监听会以为"键盘收起了"，把**缩小后**的高度记成基准。
-           基准一旦变小，shrink 恒为 0，这里就会全额再补一次键盘高度（抬两遍），
-           而且键盘收起后那段 padding 会留下来 —— 就是「底部抬高了一截」。
-           自愈：当前高度比基准大时说明基准是旧的/错的，往上修。 */
-        if (restHeightPx < h) restHeightPx = h;
-        int shrink = Math.max(0, restHeightPx - h);
+
+        /* ⚠️ 用「自然高度」而不是对外高度：后者包含我们即将设置的 padding，
+           会把「上一次已经补过」误判成「系统已经让位」。
+           shrink = 系统已经帮忙让出多少；imeBottomPx − shrink 才是还需要我们补的。
+           adjustResize 正常工作的机型上 shrink ≈ imeBottomPx → 返回 0 → 不重复补。 */
+        int natural = h - root.getPaddingBottom();
+        if (restHeightPx < natural) restHeightPx = natural;
+        int shrink = Math.max(0, restHeightPx - natural);
         return Math.max(0, imeBottomPx - shrink);
     }
 

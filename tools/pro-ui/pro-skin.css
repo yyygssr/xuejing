@@ -85,6 +85,16 @@ html.ui-pro{
   --scrim:.62;
   /* 底栏选中滑块：中性深色，不用品牌色 —— 品牌色叠在照片上会糊成一坨 */
   --tab-pill:rgba(23,26,38,.14);
+  /* 胶囊的边缘光。三档拆开是照着「双光源」来的：
+     1 = 上方主光（最亮的一条线，眼睛认定"光从上面来"就靠它）
+     3 = 一圈 1px 内描边，模拟玻璃厚度
+     2 = 下方反射光（比主光弱，不能省 —— 省了就变"扁平色块"） */
+  --pill-hi-1:rgba(255,255,255,.42);
+  --pill-hi-2:rgba(255,255,255,.10);
+  --pill-hi-3:rgba(255,255,255,.18);
+  /* 顶部受光。纯 inset 细线只能给「一圈描边」，给不了「光从上方来」的方向感 ——
+     原版的双光源是有方向的，这里用一条贴着上沿的径向渐变补那口气。 */
+  --pill-glow:rgba(255,255,255,.34);
   /* 页面底色做成**可复用的令牌**：主页面（.phone）和二级页（.view / #view-focus）
      必须用同一份，否则「专注页就是和其他三个不一样」——
      二级页原来铺的是一层灰纱，四段光晕被挡在下面，整页观感就比别人闷。
@@ -162,6 +172,12 @@ html.ui-pro[data-theme="dark"][data-glass="clear"]{
   --view-veil:rgba(16,18,26,.55);
   --view-scrim:rgba(10,12,20,.42);
   --tab-pill:rgba(0,0,0,.34);
+  /* 深色下白光是"点亮"而不是"过曝"：主光降到 .16，再高就成了白边贴纸 */
+  --pill-hi-1:rgba(255,255,255,.16);
+  --pill-hi-2:rgba(255,255,255,.04);
+  --pill-hi-3:rgba(255,255,255,.07);
+  /* 深色下顶部光要弱：胶囊本身是 rgba(0,0,0,.34)，白光过强会边缘发灰、像蒙了层雾 */
+  --pill-glow:rgba(255,255,255,.11);
 }
 html.ui-pro[data-theme="dark"][data-glass="frost"]{
   --blur:blur(18px) saturate(170%) brightness(1.14);
@@ -198,7 +214,7 @@ html.ui-pro.has-bg .phone,html.ui-pro.app-mode.has-bg .phone{background:var(--ba
    ⚠️ 这里**不再叠 background-image 高光**：背景图 + backdrop-filter + 圆角裁剪
       三者叠加时，WebView 会把整块丢掉或反复重绘（真机：磁贴里的字没了、界面闪）。
       顶部那道高光交给下面的 inset box-shadow，效果一样但没有额外图层。 */
-html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile{
+html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile,html.ui-pro .me-card,html.ui-pro .mis-card,html.ui-pro .rv-card,html.ui-pro .cd-strip{
   background:var(--glass);
   -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
   border:1px solid var(--glass-line);
@@ -307,11 +323,41 @@ html.ui-pro .f,html.ui-pro input.f,html.ui-pro textarea.f{
    以前把 absolute 的 dock 也套到 grid 第 1 列上，两种定位打架 → 底栏变成上下滚动。 */
 html.ui-pro:not(.layout-tablet) .tabbar,
 html.ui-pro.app-mode:not(.layout-tablet) .tabbar{
-  position:absolute;left:12px;right:12px;bottom:calc(12px + var(--nav-inset,0px));
-  height:68px;margin:0;padding:0;background:var(--glass-strong);
+  /* ★ 横向：不再铺满屏幕，改成**居中的定宽条**。
+     原来 left:12px;right:12px 是「贴着两边撑满」，在 430 宽的屏上就是 406px 宽、
+     三个格子各 135px —— 每个格子比图标大六倍，看着像一块横板，没有「精致」可言。
+     现在宽度 = 「3 个舒适格宽 + 两侧内边距」，屏幕更宽时它**居中留白、不再跟着变宽**，
+     这才像一个控件，而不是一根粘在底部的横杠。
+     84px 一格：430 屏整条 278px、左右各留 76px。试过 92（左右各 69），
+     那个留白读不出来，看着还是「刚好没铺满」。
+     再窄会挤：「专注与学习」这类四字标签在 84px 下刚好不换行，78 是下限。
+     用 min() 让窄屏自动退让 —— 320 宽时退到 100%-24px，不会溢出。 */
+  --tab-cell:84px;
+  /* 这三个值必须互相咬合，所以放在一起、并让下面用 calc 派生：
+       --pill-h  : 胶囊高 52
+       --pill-r  : 胶囊圆角 = 高/2 = 26（真正的 pill）
+       --pill-gap: 胶囊上下留白 = (68 − 1×2 − 52) / 2 = 7
+     --pill-in 直接取 --pill-gap：侧边留白必须等于上下留白，缝才均匀。
+     外框圆角 = --pill-r + --pill-gap（同心）。
+     ⚠️ 改任何一个都要重算这四个等式，别只改一个。 */
+  --pill-h:52px;
+  --pill-r:26px;
+  --pill-gap:7px;
+  --pill-in:var(--pill-gap);
+  position:absolute;left:50%;right:auto;
+  transform:translateX(-50%);
+  /* 宽度 = 3 个舒适格 + 两侧内边距 + 1px 边框 ×2，凑成整数免得半像素发虚。
+     min() 的第二档兜住窄屏（320 宽时退到 100%-24px，不至于溢出）。 */
+  width:min(calc(var(--tab-cell) * 3 + var(--pill-in) * 2 + 2px), calc(100% - 24px));
+  bottom:calc(12px + var(--nav-inset,0px));
+  /* 高度**保持 68**：上一版把「横向占地」误读成高度、压到 56，方向错了。
+     用户要的是「窄」，不是「扁」—— 扁了反而更挤（图标贴边、文字贴底）。 */
+  height:68px;margin:0;padding:0 var(--pill-in);background:var(--glass-strong);
   background-image:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 46%);
   -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-  border:1px solid var(--glass-line);border-radius:var(--r-xl);
+  /* 33 = 胶囊圆角 26 + 竖向留白 7（见上面①②）。写成 calc 是为了以后改高度/胶囊
+     尺寸时自动跟着算，不用再手调一个魔数。 */
+  border:1px solid var(--glass-line);border-radius:calc(var(--pill-r) + var(--pill-gap));
   box-shadow:inset 0 1px 0 var(--hair),0 16px 40px rgba(23,26,38,.24);
   z-index:26}
 html.ui-pro:not(.layout-tablet) .tabbar::before,
@@ -324,28 +370,193 @@ html.ui-pro.app-mode:not(.layout-tablet) .screen{padding-bottom:96px}
 html.ui-pro.kb-open:not(.layout-tablet) .screen,
 html.ui-pro.app-mode.kb-open:not(.layout-tablet) .screen{padding-bottom:0}
 /* 选中滑块：只有图标变色「认不出在哪一页」太弱。用 .tabbar 的 ::after（不新增 DOM），
-   位置由 go() 写的 --tab-i 决定；三格等宽 → translateX(idx * 100%) 就是滑到第 idx 格。 */
+   位置由 go() 写的 --tab-i 决定；三格等宽 → translateX(idx * 100%) 就是滑到第 idx 格。
+
+   液态化的三个决定（参考 LiquidTab 的 AGSL 参数语义，实现全部重写）：
+   ① **横向拉伸由速度驱动**，不是由位置驱动。位置只决定"在哪"，速度才决定"像不像液体"。
+      --pill-sx 由底栏拖动那段 JS 按「格/毫秒」写进来；松手后回到 1，靠同一条
+      transition 和 translateX 一起收 —— 于是"一边滑到位一边收细"，这正是果冻感。
+   ② **边缘三段光**（--pill-hi-1/2/3）。原版是 AGSL 里 dot(n,lightDir)^2 的双光源；
+      CSS 里最接近的等价物是三条 inset 细线，而不是一圈均匀描边 —— 均匀描边会让它
+      看起来像"贴纸"，有主次才会像"有厚度的玻璃"。
+   ③ **左右余量**（--pill-in）。它同时是 dock 的 padding 和胶囊的 left，
+      两个角色共用一个值 —— 分成两个数就会错位，拖动时胶囊中心偏。 */
 html.ui-pro:not(.layout-tablet) .tabbar::after{
-  content:"";position:absolute;left:6px;top:50%;width:calc((100% - 12px)/3);height:52px;
-  margin-top:-26px;border-radius:var(--r-lg);
+  /* 左右各留 --pill-in（= dock 的 padding = --pill-gap），所以胶囊正好落在
+     「去掉内边距」的区域里，而且**四边留白都是 7px** —— 这是缝看起来均匀的关键。
+     两者共用一个变量：dock 的 padding 和胶囊的 left 必须严格相等，
+     分开写就会错 1~2px，拖动时胶囊中心偏、吸附位置也跟着偏。 */
+  content:"";position:absolute;left:var(--pill-in,7px);top:50%;
+  width:calc((100% - var(--pill-in,7px)*2)/3);height:var(--pill-h,52px);
+  margin-top:calc(var(--pill-h,52px) / -2);
+  border-radius:var(--pill-r,26px);
   background:var(--tab-pill);
-  transform:translateX(calc(var(--tab-i,0) * 100%));
-  transition:transform var(--dur-s) var(--ease-spring);pointer-events:none;z-index:-1}
+  background-image:radial-gradient(130% 78% at 50% -18%,
+    var(--pill-glow,rgba(255,255,255,.24)), transparent 58%);
+  box-shadow:inset 0 1px 0 var(--pill-hi-1),
+             inset 0 -1px 0 var(--pill-hi-2),
+             inset 0 0 0 1px var(--pill-hi-3);
+  transform:translateX(calc(var(--tab-i,0) * 100%)) scaleX(var(--pill-sx,1));
+  transform-origin:50% 50%;
+  transition:transform var(--pill-dur,300ms) var(--ease-spring);
+  pointer-events:none;z-index:-1}
+/* 拖动中由 JS 每帧改写 --pill-sx / --tab-i，过渡必须关掉（否则会"追着手指抖"）。
+   同时升一次合成层：胶囊窄但每帧变形，掉帧最先在这里出现。 */
+html.ui-pro:not(.layout-tablet) .tabbar.drag::after{will-change:transform}
 html.ui-pro:not(.layout-tablet) .tab.on{color:var(--brand)}
 /* 平板侧栏各格高度不等，等分 translate 不成立 → 退回「当前格铺底色」。 */
+/* ---------- 5b. 平板：侧栏也改成「悬浮栏」----------
+   原来的 Pro 平板是一条 96px 宽的直角边栏，贴着屏幕边缘、只有一条 1px 分隔线；
+   而内容区是漂浮的玻璃卡片。两种语言放一起就是「割裂」——
+   侧栏像系统原生控件，内容像 App 自己的。
+
+   改成：侧栏与内容区一样是**悬浮的圆角玻璃条**，左右各留 14px。
+   但由于它要占满高度（导航在顶或底、小组件在另一头），
+   不能整体内缩成一个短条（那样上下留不下足够的空间给小组件），
+   所以做成「上 14 / 下 14、宽 84」的竖条，圆角 28 —— 和内容卡片的 --r-lg 同族。
+
+   ★ 关键：把 grid 的列宽也让出来。原 grid-template-columns 是 `96px minmax(0,1fr)`，
+   侧栏一旦左右内缩，那 96px 里就有 28px 是空白，内容区会跟着缩、看起来"错位"。 */
+html.ui-pro.layout-tablet .phone,
+html.ui-pro.app-mode.layout-tablet .phone{
+  grid-template-columns:104px minmax(0,1fr)}
+html.ui-pro.layout-tablet .phone.nav-right,
+html.ui-pro.app-mode.layout-tablet .phone.nav-right{
+  grid-template-columns:minmax(0,1fr) 104px}
 html.ui-pro.layout-tablet .tabbar,
 html.ui-pro.app-mode.layout-tablet .tabbar{
-  background:var(--glass);
+  /* 从「贴边直角」变成「悬浮圆角条」。
+     ⚠️ 高度改成 **由内容撑**（height:auto + align-self），不再是撑满整列 ——
+     否则它和 .sidewig 在同一个 grid 单元里会叠在一起（实测两者 rect 完全一致）。
+     这样导航条只占自己那几个按钮的高度，剩下的空间才留给组件。 */
+  align-self:start;
+  height:auto;max-height:100%;
+  margin:14px 0 14px 14px;padding:10px 8px;
+  border:1px solid var(--glass-line);border-radius:var(--r-lg);
+  background:var(--glass-strong);
   -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
-  border-top:0;border-right:1px solid var(--glass-line);
-  box-shadow:inset 1px 0 0 var(--hair)}
+  box-shadow:inset 0 1px 0 var(--hair),0 12px 32px rgba(23,26,38,.18);
+  gap:4px;z-index:26}
+/* 贴底时 align-self:end，组件自动回到顶部 —— 这一对必须同时生效才算「同一侧两端」 */
+html.ui-pro.layout-tablet .tabbar.nav-end,
+html.ui-pro.app-mode.layout-tablet .tabbar.nav-end{align-self:end}
+html.ui-pro.layout-tablet .tabbar.nav-center,
+html.ui-pro.app-mode.layout-tablet .tabbar.nav-center{align-self:center}
 html.ui-pro.layout-tablet .phone.nav-right .tabbar,
 html.ui-pro.app-mode.layout-tablet .phone.nav-right .tabbar{
-  border-right:0;border-left:1px solid var(--glass-line);
-  box-shadow:inset -1px 0 0 var(--hair)}
-html.ui-pro.layout-tablet .tab.on{border-radius:var(--r-md);background:rgba(var(--brand-rgb),.14)}
+  margin:14px 14px 14px 0;
+  border-left:1px solid var(--glass-line);border-right:1px solid var(--glass-line)}
+html.ui-pro.layout-tablet .tab,
+html.ui-pro.app-mode.layout-tablet .tab{
+  padding:11px 0 9px;border-radius:calc(var(--r-lg) - 10px)}
+/* 选中态用和手机胶囊同族的"中性深色块"，而不是品牌色淡底 ——
+   品牌色在侧栏里一整块竖着，比横着的胶囊抢眼得多。 */
+html.ui-pro.layout-tablet .tab.on,
+html.ui-pro.app-mode.layout-tablet .tab.on{
+  background:var(--tab-pill);
+  box-shadow:inset 0 1px 0 var(--pill-hi-1),inset 0 0 0 1px var(--pill-hi-3)}
+html.ui-pro.layout-tablet .tab.on svg,
+html.ui-pro.app-mode.layout-tablet .tab.on svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.10))}
+
+/* ---------- 5c. 平板：侧边小组件（只读）----------
+   规则（用户定的）：**和三页导航同一侧，但不抢位置** ——
+   导航栏占一端（顶/中/底），小组件就占另一端空出来的地方。
+   导航在顶 → 组件贴底；导航在底 → 组件贴顶；导航居中 → 组件贴底（留更多空间）。
+   三页导航是**椭圆**（胶囊），组件是**圆角方形**，形状上就能区分「能点 / 只看」。
+
+   ⚠️ 两者在 grid 里是**同一列同一行**，一开始都用 align-self:stretch 结果完全重叠
+   （实测两者 rect 都是 14,14,90,792）。必须让它们在**同一列里上下分**：
+   导航条用 align-self 定到一端，组件用「剩下的那段」——
+   靠 grid 的 `grid-template-rows` 不行（只有一个 row），
+   所以把 .tabbar 和 .sidewig 都改成 align-self:start/end，
+   并且给它们各自一个 max-height（高度由内容决定，不再是整列）。 */
+html.ui-pro .sidewig{
+  grid-column:1;grid-row:2;
+  display:none;                 /* 只有 Pro + 平板且开关打开时才显示 */
+  flex-direction:column;gap:8px;
+  min-height:0;
+  pointer-events:none;          /* ★ 只读：不接收任何点击，连滚动也不给 */
+  user-select:none;
+  align-self:end;               /* 默认贴底（导航条在顶时） */
+  margin:0 0 14px 14px;
+  position:relative;z-index:5}
+html.ui-pro.layout-tablet .phone.nav-right .sidewig{
+  grid-column:2;margin:0 14px 14px 0}
+html.ui-pro.layout-tablet.navw-on .sidewig,
+html.ui-pro.app-mode.layout-tablet.navw-on .sidewig{display:flex}
+/* 一块组件。侧边宽度只有 90px（去掉 padding 后 ~70），
+   所以数字和单位必须**竖排**：横排"95分钟"在 70px 里会挤成两行字。
+   padding 也从 11/9 收到 10/7 —— 90px 里每一像素都紧张。
+
+   ⚠️ 必须写死 min-height：.sidewig 是 flex column，且它自己的高度受
+   父级（grid 行，max-height:100%）约束。flex 子项默认 flex-shrink:1，
+   在"空间不够"时会被压到只剩 padding（实测 26×26，字全被裁掉）。
+   flex:none + min-height 两个都要，缺一个都还会塌。 */
+html.ui-pro .sidewig .sw{
+  flex:0 0 auto;
+  min-height:62px;min-width:0;width:100%;
+  box-sizing:border-box;
+  background:var(--glass-strong);
+  -webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);
+  border:1px solid var(--glass-line);
+  border-radius:var(--r-lg);   /* 圆角方形，不是胶囊 */
+  box-shadow:inset 0 1px 0 var(--hair),0 10px 26px rgba(23,26,38,.14);
+  padding:8px 6px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:1px;text-align:center;overflow:hidden}
+/* 标签强制单行：换行会吃掉 62px 的高度、把数字挤出去。
+   四字标签（未完待办 / 最近考试）在 78px 内容宽里刚好放得下 ——
+   再长的文案请改短，不要靠缩字号。 */
+html.ui-pro .sidewig .sw .k{font-size:9px;font-weight:650;color:var(--sub);
+  letter-spacing:0;line-height:1.25;white-space:nowrap;max-width:100%}
+html.ui-pro .sidewig .sw .v{font-size:19px;font-weight:750;color:var(--text);line-height:1.1}
+html.ui-pro .sidewig .sw .u{font-size:9px;color:var(--sub);font-weight:600;line-height:1.2}
+/* 标题最多两行，超出裁掉 —— 90px 宽塞不下完整课程名，截断比缩小字号可读 */
+html.ui-pro .sidewig .sw .t{font-size:10px;font-weight:650;color:var(--text);
+  line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-all}
+html.ui-pro .sidewig .sw.hero .v{font-size:22px;color:var(--brand)}
+html.ui-pro .sidewig .sw.hero .k{color:var(--brand)}
+/* 强调块：下一个 DDL 这种"最重要的一条"用品牌色描边，其余用普通玻璃 */
+html.ui-pro .sidewig .sw.hero{
+  background:linear-gradient(160deg,rgba(var(--brand-rgb),.16),rgba(var(--brand-rgb),.05));
+  border-color:rgba(var(--brand-rgb),.34)}
+/* 条形进度（数据模型里给了 bar 才画，目前没用到，留着给以后的"目标完成度"） */
+html.ui-pro .sidewig .sw .bar{width:100%;height:4px;border-radius:9px;
+  background:rgba(var(--brand-rgb),.16);overflow:hidden;margin-top:3px}
+html.ui-pro .sidewig .sw .bar i{display:block;height:100%;border-radius:9px;
+  background:var(--brand)}
+/* 导航条贴底时，组件让到顶部（两端对调）—— JS 里给 .sidewig 加 sw-top 类 */
+html.ui-pro .sidewig.sw-top{align-self:start;margin:14px 0 0 14px}
+html.ui-pro.layout-tablet .phone.nav-right .sidewig.sw-top{margin:14px 14px 0 0}
+/* 导航条居中时，组件仍贴底：上下都能留白，视觉最稳 */
+
+/* ★ 高度不够时的兜底。
+   .tabbar 与 .sidewig 都在 grid-row:2 的**同一个单元格**里，各占一端靠 align-self。
+   单元格高度 = 屏幕高度减去状态栏，一旦「导航 210 + 组件 202 + 上下边距 28」
+   超过它，两端就各自溢出、从中间互相压进来（实测手机 700px 高时重叠 30px；
+   真机的小窗口 / 横屏也会遇到）。
+
+   这里不改成 flex 容器（会牵动 Classic 和手机布局），
+   而是**各自限高 + 内部裁切**：两块都最多占半个单元格，
+   放不下就在自己框里裁，不会压到对方身上。 */
+html.ui-pro.layout-tablet .tabbar,
+html.ui-pro.app-mode.layout-tablet .tabbar{overflow-y:auto;overflow-x:hidden}
+html.ui-pro .sidewig{overflow:hidden}
+/* ⚠️ 这里**不要**用 max-height:calc(50% - N)：
+   百分比是相对**父级 .phone**（≈820px）算的，不是相对 grid 行，
+   算出来 388px 远大于实际可用高度，等于没限 —— 也就挡不住重叠。
+   真正的约束放在 JS 里：renderSideWidgets() 按「可用高度 − 导航实测高度」
+   算一个像素值写到 --sw-maxh，这里直接用它。 */
+html.ui-pro .sidewig{max-height:var(--sw-maxh, none)}
+html.ui-pro.layout-tablet .tabbar,
+html.ui-pro.app-mode.layout-tablet .tabbar{max-height:var(--nav-maxh, none)}
 html.ui-pro .tab{transition:color var(--dur-f) var(--ease),transform var(--dur-f) var(--ease-spring),
   background var(--dur-f) var(--ease)}
+/* 底栏高度恢复 68 之后，图标与字号回到原档。
+   （上一轮为了配合被压扁的 56px 一起缩到 20/10，现在没有理由再压 ——
+   格子变窄是横向的事，跟图标大小无关。） */
+html.ui-pro:not(.layout-tablet) .tab{padding-top:8px;gap:3px;font-size:10.5px}
+html.ui-pro:not(.layout-tablet) .tab svg{width:22px;height:22px}
 html.ui-pro:not(.layout-tablet) .tab.on{transform:translateY(-1px)}
 html.ui-pro .tab.center .fab{background:var(--brand);border-radius:var(--r-md);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 10px 24px rgba(var(--brand-rgb),.44)}
@@ -479,6 +690,41 @@ html.ui-pro #view-focus.anim-out{animation:fvOutPro var(--dur) ease both;pointer
    气泡一次可能出现几十条，用 --blur-soft（4px）控制成本；
    输入行只有一条，用 --blur-md。 */
 html.ui-pro .composer{background:transparent;border-top:0}
+/* ---------- 平板 Pro：输入行也浮起来 ----------
+   平板的通用样式把 .composer 做成了「border + 圆角 + 卡片底」的一个大方块
+   （780×66，radius 20），里面再套一个胶囊输入框 —— 于是屏幕上出现**两层框**：
+   外面那个方框是"容器"，里面那个才是真正的输入框。手机上 .composer 是透明通栏，
+   所以只有平板才会看到这个方框（用户指的"外面还有方框"就是它）。
+
+   Pro 的语汇是"所有东西都是悬浮玻璃"，所以这里把外层容器**整个去掉**，
+   只留三样东西各自悬浮：加号按钮、输入胶囊、发送按钮。
+   把它们排成一行（.composer 本来就是 flex），间距 8 —— 看上去就是一个整体。
+   Classic 平板保持原样（它有方块底，是它的语汇）。 */
+html.ui-pro.layout-tablet #page-chat .composer{
+  background:transparent;border:0;box-shadow:none;border-radius:0;
+  padding:0;margin:14px auto 6px;max-width:780px;width:calc(100% - 56px);
+  gap:8px;align-items:center}
+/* 三个子件统一高度 48、统一圆角节奏（胶囊用 999、方块用 --r-md）。
+   不统一的话，圆角不一致会显得"拼起来的"。 */
+html.ui-pro.layout-tablet #page-chat .composer .icon-btn{
+  width:48px;height:48px;border-radius:var(--r-md);flex:none;
+  background:var(--glass-strong);border:1px solid var(--glass-line);
+  box-shadow:inset 0 1px 0 var(--hair),0 8px 22px rgba(23,26,38,.14)}
+html.ui-pro.layout-tablet #chatInput{
+  /* 单行态要看着像胶囊：高 48、圆角 24 = 半高。
+     多行时 autoGrowInput() 会写到 132，圆角固定 24 在长高后依然是"圆角矩形"，
+     不会像 999 那样被裁成两侧半圆、文字贴弧线。
+     min-height 提到 48：基础样式的 38 是手机尺寸，平板上会显得扁。
+     但 JS 的 autoGrowInput() 会写**内联 height**，内联会压过这里的 min-height ——
+     所以真正的下限在 JS 里按场景给（见 inputMinH()），这里只是兜底。 */
+  min-height:48px;border-radius:24px;padding:11px 20px;
+  background:var(--glass-strong);border:1px solid var(--glass-line);
+  box-shadow:inset 0 1px 0 var(--hair),0 8px 22px rgba(23,26,38,.14);
+  -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md);
+  line-height:1.5;box-sizing:border-box}
+/* 输入框右侧的「全屏编辑」图标贴在胶囊内沿，跟着胶囊的高度走 */
+html.ui-pro.layout-tablet .fwrap > .f{padding-right:40px}
+html.ui-pro.layout-tablet .fwrap .fin{top:auto;bottom:50%;transform:translateY(50%)}
 html.ui-pro #chatInput{border-radius:var(--r-md);background:var(--glass-strong);
   border:1px solid var(--glass-line);box-shadow:inset 0 1px 0 var(--hair);
   -webkit-backdrop-filter:var(--blur-md);backdrop-filter:var(--blur-md)}
@@ -563,7 +809,7 @@ html.ui-pro .page{animation:none}
    ⚠️ 这里不许退回 var(--card) —— 皮肤里 --card 本身就是半透明的，
    没有模糊又半透明 = 字压在内容上。必须用实色那份 --card-solid。 */
 @supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
-  html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile,html.ui-pro .course,
+  html.ui-pro .card,html.ui-pro .list,html.ui-pro .g-tile,html.ui-pro .me-card,html.ui-pro .mis-card,html.ui-pro .rv-card,html.ui-pro .cd-strip,html.ui-pro .course,
   html.ui-pro .sheet,html.ui-pro .picksheet,html.ui-pro .vpanel,html.ui-pro .tabbar,
   html.ui-pro .toast,html.ui-pro .alertcard,html.ui-pro .focusbar,html.ui-pro .aibar,
   html.ui-pro .seg,html.ui-pro .segThumb,html.ui-pro .icon-btn,html.ui-pro .quickwrap .quick,

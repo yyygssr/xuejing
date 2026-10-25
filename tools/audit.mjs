@@ -478,6 +478,103 @@ if (isl.problems.length) {
   console.log('\n[通过] 灵动岛两端对账一致');
 }
 
+/* ============================================================
+   4) SECURITY —— 审计 P0 的结构性守卫（2026-10-24）
+   ------------------------------------------------------------
+   这些不是"某处写法对不对"，而是**"这个口子不该再被打开"**。
+   页面功能断言（domtest）验的是行为，这里验的是源码里不该出现的东西：
+   一旦有人为了省事又写回 eval、或漏了桥的来源校验，这里立刻报。
+   ============================================================ */
+function checkSecurity() {
+  const srcPage = stripComments(HTML);
+  const problems = [];
+  const rows = [];
+
+  /* ① 页面里不许有 eval / new Function ——
+        原来的历史会话菜单把 id 拼进 JS 源码字符串再 eval，
+        id 来自备份文件，等于「备份内容 → 任意代码执行」。 */
+  /* ⚠️ 正则要认「(0, eval)(...)」这种间接调用 —— eval 后面紧跟的是 ")" 不是 "("。
+     第一版写成 /\beval\s*\(/ 时，漏掉的正是审计点名的那一处写法
+     （项目里原来就是 (0, eval)(String(it.run))），等于守卫形同虚设。
+     所以这里只要出现独立的 eval 标识符就报，比匹配调用形状更可靠。 */
+  const evalHits = [...srcPage.matchAll(/\beval\b|\bnew\s+Function\b/g)];
+  rows.push(['页面无 eval / new Function', evalHits.length === 0,
+             evalHits.length ? (evalHits.length + ' 处') : '0 处']);
+  evalHits.forEach(m => problems.push('发现 eval/Function（第 '
+    + (srcPage.slice(0, m.index).split(/\n/).length) + ' 行）'));
+
+  /* ② 备份必须默认剥离密钥：stripSecrets 与 SECRET_KEYS 都得在，
+        且 buildBackup 里要有"非 includeSecrets 才剥离"的分支。 */
+  const hasStrip = /function\s+stripSecrets\s*\(/.test(srcPage);
+  const hasSecretKeys = /var\s+SECRET_KEYS\s*=/.test(srcPage);
+  const guardBranch = /if\s*\(\s*!includeSecrets\s*&&\s*SECRET_KEYS\.indexOf/.test(srcPage);
+  rows.push(['备份默认剥离密钥', hasStrip && hasSecretKeys && guardBranch]);
+  if (!hasStrip) problems.push('缺少 stripSecrets()');
+  if (!hasSecretKeys) problems.push('缺少 SECRET_KEYS 清单');
+  if (!guardBranch) problems.push('buildBackup 没有「默认剥离」分支');
+
+  /* ③ 笔记 HTML 必须走白名单净化：渲染与保存两侧都要出现 sanitizeNoteHtml。
+        只要求"出现过"是最低门槛 —— 真正的行为由 domtest 的 XSS 断言兜。 */
+  const sanitizeCalls = (srcPage.match(/sanitizeNoteHtml\s*\(/g) || []).length;
+  /* 门槛定 4：笔记的渲染侧至少 2 处（详情预览、全屏编辑器）+ 保存侧 7 处 + 分享卡。
+     只要低于 4 就说明有人把某个写入点换回了直接 innerHTML。 */
+  rows.push(['笔记净化被使用（渲染+保存两侧）', sanitizeCalls >= 4, sanitizeCalls + ' 处']);
+  if (sanitizeCalls < 4) problems.push('sanitizeNoteHtml 调用次数偏少（' + sanitizeCalls
+    + '），渲染与保存两侧都要用');
+
+  /* ④ 原生桥：每个 @JavascriptInterface 方法体必须调 trusted()。
+        注：用"方法声明后 300 字符内是否出现 trusted()"做粗筛，
+        比跨行正则稳（Java 的方法体缩进/换行写法不统一）。 */
+  const bridge = (JAVA['NativeBridge.java'] || '');
+  const decls = [...bridge.matchAll(/@JavascriptInterface\s*[\s\S]{0,120}?public\s+\w+\s+(\w+)\s*\(/g)];
+  const unguarded = decls.filter(m => {
+    const after = bridge.slice(m.index, m.index + 600);
+    return !/trusted\s*\(\s*\)/.test(after);
+  }).map(m => m[1]);
+  rows.push(['桥方法都有 trusted()（' + decls.length + ' 个）', unguarded.length === 0]);
+  if (unguarded.length) problems.push('未加来源校验：' + unguarded.slice(0, 6).join(', '));
+
+  /* ⑤ WebView 能力收紧：SafeBrowsing 不许被关掉，且必须关文件/内容访问。 */
+  const act = (JAVA['MainActivity.java'] || '');
+  const safeBrowsingOff = /setSafeBrowsingEnabled\s*\(\s*false\s*\)/.test(act);
+  const fileAccessOff = /setAllowFileAccess\s*\(\s*false\s*\)/.test(act);
+  const contentAccessOff = /setAllowContentAccess\s*\(\s*false\s*\)/.test(act);
+  rows.push(['WebView 能力收紧', !safeBrowsingOff && fileAccessOff && contentAccessOff]);
+  if (safeBrowsingOff) problems.push('setSafeBrowsingEnabled(false) 又被写回来了');
+  if (!fileAccessOff) problems.push('缺少 setAllowFileAccess(false)');
+  if (!contentAccessOff) problems.push('缺少 setAllowContentAccess(false)');
+
+  /* 原本还想统计「内联 onclick 里拼变量」的数量，但这个指标在源码层面测不准：
+     真实写法是 'onclick="f(\'' + id + '\')"' —— 属性值本身是被拼出来的字符串，
+     正则看到的是一段带引号的 JS 源码，不是完整的 HTML 属性，所以恒为 0。
+     与其打印一个永远"通过"的假指标（等于给人错误的安全感），不如不报。
+     这类注入由 domtest 的行为断言兜（4 条 XSS 用例）。
+
+     真正的结构性保证来自上面的三条：不许 eval、净化必须被使用、桥必须验来源。 */
+
+  return { rows, problems, decls: decls.length };
+}
+
+/* ============================================================
+   4) SECURITY 安全边界（审计 P0）
+   ============================================================ */
+const sec = checkSecurity();
+line('4) SECURITY 安全边界（审计 P0）');
+for (const [name, val, shown0] of sec.rows) {
+  /* 判定与显示必须同一个来源：第一版对非 boolean 值一律显示 "ok"，
+     于是「页面无 eval」明明扫到 1 处、控制台却写着 ok —— 误导比不报更糟。 */
+  const ok = (val === true);
+  const shown = shown0 !== undefined ? shown0 : (ok ? 'ok' : '!!');
+  console.log(`  ${ok ? '  ok ' : '  !! '}${name.padEnd(28)} ${shown}`);
+}
+if (sec.problems.length) {
+  failed++;
+  console.log('\n[违规]');
+  for (const p of sec.problems) console.log('  · ' + p);
+} else {
+  console.log('\n[通过] 安全边界守卫全部满足');
+}
+
 console.log('\n' + (failed ? `[审计未通过] ${failed} 项检查有问题` : '[审计通过] 全部一致'));
 process.exit(failed ? 1 : 0);
 }

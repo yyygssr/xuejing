@@ -21,15 +21,30 @@ public class NativeBridge {
         this.act = activity;
     }
 
+    /* ---------- 来源校验（审计 H-2）----------
+       这个类是整个 WebView 的**全权限出口**：发网络请求、读写文件、清空数据、
+       读日历、起前台服务。WebView 里的 JS 只要能被注入（存储型 XSS、
+       被导航到外部页、iframe），就能调到这里的任意方法。
+
+       浏览器不会告诉我们「这次调用来自哪个页面」，唯一的判据是
+       **当前 WebView 停在哪个 URL**。所以我们自己的页面之外一律拒绝。
+       每个 @JavascriptInterface 方法体第一行都必须调它 ——
+       tools/audit.mjs 里有守卫会检查这一点，漏一个就报。 */
+    private boolean trusted() {
+        return act != null && act.isTrustedPage();
+    }
+
     /** 页面每次导航都同步一次「还有没有可返回的层」；返回手势靠它做同步判定 */
     @JavascriptInterface
     public void setBackLayer(String layer) {
+    if (!trusted()) return;
         act.onBackLayer(layer);
     }
 
     /** 设置项（JSON），用于重排上课提醒 */
     @JavascriptInterface
     public void setPrefs(String json) {
+    if (!trusted()) return;
         act.prefsJson = json;
         ReminderScheduler.reschedule(act, act.scheduleJson, json);
     }
@@ -37,6 +52,7 @@ public class NativeBridge {
     /** 课表（JSON），用于安排上课 / 下课提醒 */
     @JavascriptInterface
     public void setSchedule(String json) {
+    if (!trusted()) return;
         act.scheduleJson = json;
         ReminderScheduler.reschedule(act, json, act.prefsJson);
     }
@@ -52,6 +68,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void startFocus(String label, String secs, String opts) {
+    if (!trusted()) return;
         String courseId = "", mode = "work", dir = "down";
         try {
             if (opts != null && !opts.trim().isEmpty()) {
@@ -67,29 +84,34 @@ public class NativeBridge {
 
     @JavascriptInterface
     public void pauseFocus() {
+    if (!trusted()) return;
         FocusService.pause(act);
     }
 
     /** 从暂停恢复 */
     @JavascriptInterface
     public void resumeFocus() {
+    if (!trusted()) return;
         FocusService.resume(act);
     }
 
     /** 延长当前这一轮（秒）：结束时刻一起往后推，否则通知上的倒计时不会变 */
     @JavascriptInterface
     public void extendFocus(String secs) {
+    if (!trusted()) return;
         FocusStore.extend(act, NativeBridge.parseInt(secs, 0));
     }
 
     @JavascriptInterface
     public void stopFocus() {
+    if (!trusted()) return;
         FocusService.stop(act);
     }
 
     /** 结束但不记账（提醒卡上的「结束不记录」） */
     @JavascriptInterface
     public void discardFocus() {
+    if (!trusted()) return;
         FocusService.discard(act);
     }
 
@@ -104,6 +126,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public String focusState() {
+    if (!trusted()) return "";
         return FocusStore.stateJson(act);
     }
 
@@ -113,27 +136,32 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void focusAck(String idsJson) {
+    if (!trusted()) return;
         FocusStore.ack(act, idsJson);
     }
 
     @JavascriptInterface
     public void testNotify() {
+    if (!trusted()) return;
         Notify.test(act);
     }
 
     @JavascriptInterface
     public void requestNotifPermission() {
+    if (!trusted()) return;
         act.askNotificationPermission();
     }
 
     @JavascriptInterface
     public void setDarkMode(String dark) {
+    if (!trusted()) return;
         act.applyDarkMode("1".equals(dark));
     }
 
     /** 是否启用厂商「上岛」extras（小米焦点 / OPPO 实况窗标记） */
     @JavascriptInterface
     public void setIslandOn(String on) {
+    if (!trusted()) return;
         act.setIslandEnabled("1".equals(on));
     }
 
@@ -144,18 +172,21 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void setIslandPrefs(String json) {
+    if (!trusted()) return;
         Island.setPrefs(json);
     }
 
     /** 关掉灵动岛总开关时，把还挂在岛上的几条都收下来 */
     @JavascriptInterface
     public void hideIslands() {
+    if (!trusted()) return;
         Island.hideAll(act);
     }
 
     /** 机型名，便于页面展示「上岛」在当前设备上的支持情况 */
     @JavascriptInterface
     public String vendorName() {
+    if (!trusted()) return "";
         return Notify.vendorName();
     }
 
@@ -166,6 +197,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public String islandState() {
+    if (!trusted()) return "";
         return Island.state(act);
     }
 
@@ -176,6 +208,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public String deviceInfo() {
+    if (!trusted()) return "";
         StringBuilder sb = new StringBuilder();
         sb.append("{\"model\":").append(MainActivity.jsString(
                         String.valueOf(android.os.Build.MANUFACTURER) + " "
@@ -204,6 +237,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void pdfPreview(final String b64, final int maxPages) {
+    if (!trusted()) return;
         if (!PdfPreview.supported()) {
             sendPdfResult(new PdfPreview.Result(null, false,
                     "这台设备的系统版本太老（Android 5.0 以下），做不了 PDF 转图"));
@@ -229,6 +263,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public String exactAlarmState() {
+    if (!trusted()) return "";
         return "{\"sdk\":" + android.os.Build.VERSION.SDK_INT
                 + ",\"canExact\":" + ReminderScheduler.canExact(act) + "}";
     }
@@ -251,6 +286,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public int ttsInit() {
+    if (!trusted()) return 0;
         final Tts t = Tts.get(act);
         t.init(new Tts.InitCB() {
             @Override
@@ -271,35 +307,41 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public String ttsEngines() {
+    if (!trusted()) return "";
         return Tts.visibleEnginesJson(act);
     }
 
     /** 朗读。返回空串 = 已提交；返回非空 = 失败原因（直接显示给用户，别再吞掉）。 */
     @JavascriptInterface
     public String ttsSpeak(String text, String voiceId, float rate, float pitch) {
+    if (!trusted()) return "";
         return Tts.get(act).speak(text, voiceId, rate, pitch);
     }
 
     @JavascriptInterface
     public void ttsStop() {
+    if (!trusted()) return;
         Tts.get(act).stop();
     }
 
     /** 音色列表 JSON 数组（引擎未就绪时是空数组） */
     @JavascriptInterface
     public String ttsVoices() {
+    if (!trusted()) return "";
         return Tts.get(act).voicesJson();
     }
 
     /** 跳到系统「闹钟和提醒」授权页（Android 12/12L 必须用户手动开） */
     @JavascriptInterface
     public void requestExactAlarm() {
+    if (!trusted()) return;
         act.openExactAlarmSettings();
     }
 
     /** 跳到本应用的系统设置页（厂商自启动 / 后台省电策略都在这一页附近） */
     @JavascriptInterface
     public void openAppSettings() {
+    if (!trusted()) return;
         act.openAppSettings();
     }
 
@@ -310,6 +352,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void fetchModels(String url, String key) {
+    if (!trusted()) return;
         act.fetchModels(url, key);
     }
 
@@ -320,6 +363,7 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void fetchHolidays(String start, String end) {
+    if (!trusted()) return;
         act.fetchHolidays(start, end);
     }
 
@@ -329,12 +373,14 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void aiPost(String url, String apiKey, String bodyJson, String jobId) {
+    if (!trusted()) return;
         act.aiPost(url, apiKey, bodyJson, jobId);
     }
 
     /** 旧签名（页面没带 id 时）：等价于 jobId="" —— 结果按「当前任务」处理 */
     @JavascriptInterface
     public void aiPost(String url, String apiKey, String bodyJson) {
+    if (!trusted()) return;
         act.aiPost(url, apiKey, bodyJson, "");
     }
 
@@ -345,11 +391,13 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void aiPostStream(String url, String apiKey, String bodyJson, String jobId) {
+    if (!trusted()) return;
         act.aiPostStream(url, apiKey, bodyJson, jobId);
     }
 
     @JavascriptInterface
     public void aiPostStream(String url, String apiKey, String bodyJson) {
+    if (!trusted()) return;
         act.aiPostStream(url, apiKey, bodyJson, "");
     }
 
@@ -358,36 +406,42 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void httpGet(String id, String url, String referer) {
+    if (!trusted()) return;
         act.httpGet(id == null ? "" : id, url, referer);
     }
 
     /** 上课专注期间尝试静音 / 恢复（1=静音 0=恢复） */
     @JavascriptInterface
     public void setClassMute(String on) {
+    if (!trusted()) return;
         act.setClassMute("1".equals(on));
     }
 
     /** 刷新桌面小组件（下一节课 / 待办 / 专注） */
     @JavascriptInterface
     public void updateWidgets(String json) {
+    if (!trusted()) return;
         act.updateWidgets(json);
     }
 
     /** 模型 TTS：POST 后把音频写到 cache，回吐 file:// 路径 */
     @JavascriptInterface
     public void aiTts(String url, String apiKey, String bodyJson) {
+    if (!trusted()) return;
         act.aiTts(url, apiKey, bodyJson);
     }
 
     /** 复制文本到系统剪贴板（日志面板的「复制全部」用） */
     @JavascriptInterface
     public void copyText(String text) {
+    if (!trusted()) return;
         act.copyText(text);
     }
 
     /** 用系统浏览器打开 http(s) 链接（对话里 Markdown 链接用）。返回是否成功。 */
     @JavascriptInterface
     public boolean openUrl(String url) {
+    if (!trusted()) return false;
         return act.openUrl(url);
     }
 
@@ -397,30 +451,35 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void saveBackup(String name, String text) {
+    if (!trusted()) return;
         act.saveBackup(name, text);
     }
 
     /** 导出纯文本（笔记的「导出为文字」）：与备份同一条路，MIME 换成 text/plain */
     @JavascriptInterface
     public void saveText(String name, String text) {
+    if (!trusted()) return;
         act.saveText(name, text);
     }
 
     /** 导出图片（笔记的「导出为图片」）：页面传 dataURL，原生剥前缀解码后写盘 */
     @JavascriptInterface
     public void saveImage(String name, String dataUrl) {
+    if (!trusted()) return;
         act.saveImage(name, dataUrl);
     }
 
     /** 系统分享纯文本 */
     @JavascriptInterface
     public void shareText(String text) {
+    if (!trusted()) return;
         act.shareText(text);
     }
 
     /** 系统分享图片（写进 cache/share，再经 FileProvider 交给分享面板） */
     @JavascriptInterface
     public void shareImage(String name, String dataUrl) {
+    if (!trusted()) return;
         act.shareImage(name, dataUrl);
     }
 
@@ -443,36 +502,42 @@ public class NativeBridge {
      */
     @JavascriptInterface
     public void docSave(String id, String body) {
+    if (!trusted()) return;
         act.docSave(id, body);
     }
 
     /** 读取正文，回 window.onDocStore(id, ok, body, "") */
     @JavascriptInterface
     public void docLoad(String id) {
+    if (!trusted()) return;
         act.docLoad(id);
     }
 
     /** 删除一份文档 */
     @JavascriptInterface
     public void docDel(String id) {
+    if (!trusted()) return;
         act.docDel(id);
     }
 
     /** 清空整个资料库目录 */
     @JavascriptInterface
     public void docClear() {
+    if (!trusted()) return;
         act.docClear();
     }
 
     /** 资料库占用的字节数与份数：{"bytes":123,"files":3} */
     @JavascriptInterface
     public void docStat() {
+    if (!trusted()) return;
         act.docStat();
     }
 
     /** 打包整库（换机导出备份用）：每条「id TAB base64」，条间 0x01 */
     @JavascriptInterface
     public void docDump() {
+    if (!trusted()) return;
         act.docDump();
     }
 

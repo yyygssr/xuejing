@@ -44,7 +44,10 @@ const ASSERTS = String.raw`
       sys: S.sysHolidays, hol: S.holidays, off: S.holidayOff,
       ranges: S.holidayRanges, flat: S.__holFlat, err: S.holLastErr,
       prefs: S.prefs, courses: S.courses, roles: S.roles, models: S.models,
-      pm: S.providerModels, ml: S.modelList, pr: S.priceRules, u: S.aiUsage
+      pm: S.providerModels, ml: S.modelList, pr: S.priceRules, u: S.aiUsage,
+      /* 2026-10-22：这几项是新增功能的数据。不加进快照，测试之间会互相污染 ——
+         比如「错题本」用例清空 S.mistakes，后面的用例就少了一份真实样本。 */
+      days: S.days, todos: S.todos, exams: S.exams, mistakes: S.mistakes
     }));
   }
   function restoreState(x){
@@ -55,6 +58,8 @@ const ASSERTS = String.raw`
     if(x.pm) S.providerModels = x.pm; if(x.ml) S.modelList = x.ml;
     if(x.pr) S.priceRules = x.pr; else S.priceRules = {};
     if(x.u) S.aiUsage = x.u;
+    if(x.days) S.days = x.days; if(x.todos) S.todos = x.todos;
+    if(x.exams) S.exams = x.exams; if(x.mistakes) S.mistakes = x.mistakes;
   }
 
   var phone = document.getElementById('phone');
@@ -479,7 +484,10 @@ const ASSERTS = String.raw`
          两条路都留着：万一以后又换回内联属性，这条守卫照样能扫。 */
       var its = menu.__menuItems || [];
       its.forEach(function(it){
-        var src = (it && it.run) || '';
+        /* 2026-10-24 审计修复：菜单项从「run 源码字符串」改成「act 函数引用」，
+           所以这里要读函数本身（String(fn) 拿到源码）再扫函数名。
+           两条路都留：run 是历史写法，act 是现在的写法。 */
+        var src = (it && it.run) || (it && typeof it.act === 'function' ? String(it.act) : '');
         var re = /([A-Za-z_$][\w$]*)\s*\(/g, m2;
         while((m2 = re.exec(src))){
           if(m2[1] !== 'if' && m2[1] !== 'function') names.push(m2[1]);
@@ -972,15 +980,19 @@ const ASSERTS = String.raw`
       closeFullInput();
       var closed = !pg.classList.contains('fsinput');
       var survived = inp.value === '小框里原有的字';
-      var hNow = parseInt(inp.style.height, 10) || 0;
-      var sane = hNow >= INPUT_MIN_H && hNow <= INPUT_MAX_H + 2;
+      /* ⚠️ 判据要看**实际渲染高度**，不是 style.height。
+         2026-10-24 起空态不再写内联 height（改由 CSS 撑，否则会把
+         手机 Pro 档的 44px 钉成 38、两侧按钮突出来）。
+         继续读 style.height 的话，空态是空串 → 0px → 假失败。 */
+      var hNowRender = Math.round(inp.getBoundingClientRect().height);
+      var sane = hNowRender >= 30 && hNowRender <= INPUT_MAX_H + 40;
       inp.value = new Array(20).join('很长很长很长很长很长很长很长的文字');
       autoGrowInput(inp);
-      var grew = parseInt(inp.style.height, 10) > INPUT_MIN_H;
+      var grew = Math.round(inp.getBoundingClientRect().height) > hNowRender;
       return { ok: opened && oneBox && sameNode && carried && closed && survived && sane && grew,
         info: '全屏态=' + opened + ' 只有一个输入框=' + oneBox + ' 同一个节点=' + sameNode
           + ' 内容带过去=' + carried + ' 收起=' + closed + ' 收起后内容还在=' + survived
-          + ' 高度合理=' + sane + '(' + hNow + 'px) 超长变高=' + grew };
+          + ' 高度合理=' + sane + '(' + hNowRender + 'px) 超长变高=' + grew };
     } finally {
       /* 必须收干净：脏状态会让后面量布局的用例全部错位。
          ⚠️ 光收不够 —— closeFullInput 会启动一段 FLIP 动画，而这里全是同步代码，
@@ -1295,23 +1307,31 @@ const ASSERTS = String.raw`
         + ' 锚失效能判出=' + gone };
   });
 
-  T('我的页：分成四组，且组标题的层级高于小节标题', function(){
-    /* 这一条锁的是「设置页别又长成一锅粥」。
-       第一版把组标题写成 12.5px，而全局 .h2 是 15px —— 组标题反而更小，
-       两级长得一模一样，等于白加一层（截图才看出来）。所以这里直接比字号。 */
+  T('我的页：只剩四个大类入口，类内设置都在二级页，且字段一个不少', function(){
+    /* 2026-10-19 重构：这一页从 320 行设置项收成「四类入口」。
+       这一条锁两件事，缺一不可：
+         ① 入口必须齐（小径/我/专注与学习/数据），且都真能打开对应的二级页；
+         ② 原来那几十个字段 id 一个都不能丢 —— 它们被 renderProfile() 与
+            各处的 oninput 直接 getElementById，少一个就是**静默失效**
+            （不报错、只是改了没反应）。所以按 id 逐个查，而不是信任搬移。 */
     var keepTab = (document.querySelector('.page.active') || {}).id;
     go('me');
     var me = document.getElementById('page-me');
     if(!me) return { ok:false, info:'我的页缺失' };
-    var groups = [].map.call(me.querySelectorAll('.mgroup b'), function(e){ return e.textContent.trim(); });
+    var cards = [].slice.call(me.querySelectorAll('.me-card'));
     var want = ['小径', '我', '专注与学习', '数据'];
-    var namesOk = groups.length === want.length
-      && groups.every(function(g, i){ return g === want[i]; });
-    var gb = me.querySelector('.mgroup b'), hb = me.querySelector('.h2');
-    var gs = gb ? parseFloat(getComputedStyle(gb).fontSize) : 0;
-    var hs = hb ? parseFloat(getComputedStyle(hb).fontSize) : 0;
-    var hierarchy = gs > hs;
-    /* 重排是「搬位置」，但手写 HTML 有漏项的风险 —— 关键入口逐个点一遍 */
+    var titles = cards.map(function(e){
+      var b = e.querySelector('b'); return b ? b.textContent.trim() : '';
+    });
+    var namesOk = titles.length === want.length
+      && titles.every(function(g, i){ return g === want[i]; });
+    /* 每张卡都得是能点的，且点下去目标页真的存在 */
+    var openOk = cards.length > 0 && cards.every(function(e){
+      var m = /openView\('([a-z]+)'\)/.exec(e.getAttribute('onclick') || '');
+      return !!(m && document.getElementById('view-' + m[1]));
+    });
+    /* 这一页不许再留设置项（除头像卡）：.li / .h2 出现在这里就说明有人又往回堆了 */
+    var leaked = me.querySelectorAll('.li, .h2, .list').length;
     var ids = ['myAvatar', 'myName', 'mySub', 'nickInput', 'aiNameInput', 'callInput',
                'callEcho', 'avatarHint', 'swMemOn', 'swMemAuto', 'memBadge', 'memCount',
                'aiEntry', 'skillBadge', 'skillCountHint', 'themeSeg', 'accentList',
@@ -1320,19 +1340,230 @@ const ASSERTS = String.raw`
                'islandBadge', 'vTermStart', 'termStartInput', 'swHoliday', 'holidayCountHint',
                'h2TabletNav', 'tabletNavList', 'restoreFile'];
     var lost = ids.filter(function(x){ return !document.getElementById(x); });
-    /* 不能有游离的小节：每个 .h2 都得在某个组标题之后 */
-    var orphan = 0, seen = false;
-    [].forEach.call(me.querySelectorAll('.col > *'), function(k){
-      if(!k.classList) return;
-      if(k.classList.contains('mgroup')) seen = true;
-      else if(k.classList.contains('h2') && !seen) orphan++;
-    });
     if(keepTab && keepTab !== 'page-me') go(keepTab.replace('page-', ''));
-    return { ok: namesOk && hierarchy && !lost.length && orphan === 0,
-      info: '分组=' + groups.join('/') + ' 顺序对=' + namesOk
-        + ' 组标题' + gs + 'px > 小节' + hs + 'px =' + hierarchy
-        + ' 丢的入口=' + (lost.join(',') || '无')
-        + ' 游离小节=' + orphan };
+    return { ok: namesOk && openOk && leaked === 0 && !lost.length,
+      info: '入口=' + titles.join('/') + ' 顺序对=' + namesOk
+        + ' 都能打开=' + openOk + ' 本页残留设置项=' + leaked
+        + ' 丢的字段=' + (lost.join(',') || '无') };
+  });
+
+  /* ============================================================
+     2026-10-22 · 第一梯队三项：学习看板 / 倒计时 / 错题本
+     ------------------------------------------------------------
+     这三项都不依赖网络（AI 拆解除外），所以可以在这里把数据全跑一遍。
+     重点是**算对**：看板的连续天数、倒计时的天数、SM-2 的间隔，
+     这三处错了界面照样好看，只有数字是错的 —— 最需要断言。
+     ============================================================ */
+  T('学习看板：数字卡/热力图/柱图/各科节数都按真实数据算出来', function(){
+    var snap = snapState();
+    try{
+      /* 造 30 天数据：今天和昨天有专注、前天为 0 —— 连续天数应是 2（不是 3） */
+      S.days = {};
+      var dk = function(k){ var d = new Date(); d.setDate(d.getDate() + k); return dayKey(d); };
+      /* ⚠️ k 为负才是过去：+1 是明天。第一版写成 +1 当「昨天」，
+         于是连续天数只能数到今天自己（1），断言把正确的代码判成了错。 */
+      S.days[dk(0)] = { min: 30, pomo: 1 };
+      S.days[dk(-1)] = { min: 50, pomo: 2 };
+      S.days[dk(-2)] = { min: 0, pomo: 0 };
+      S.days[dk(-3)] = { min: 20, pomo: 1 };
+      S.courses = {0:[{t:'08:00',n:'高数',loc:'A',c:0}],1:[{t:'08:00',n:'高数',loc:'A',c:0}],
+                   2:[{t:'10:00',n:'物理',loc:'B',c:1}],3:[],4:[],5:[],6:[]};
+      S.todos = [{id:'a',t:'一',done:true},{id:'b',t:'二',done:false}];
+      save();
+      go('me'); openView('stats');
+      var b = document.getElementById('statsBody');
+      var cells = b.querySelectorAll('.heat i').length;
+      var bars = b.querySelectorAll('.bars .b').length;
+      var subj = [].slice.call(b.querySelectorAll('.sbar .n')).map(function(e){ return e.textContent; });
+      var txt = b.textContent.replace(/\s+/g, ' ');
+      closeView('stats');
+      /* 140 = 20 周 × 7 天；14 = 近 14 天柱子 */
+      var shape = cells === 140 && bars === 14;
+      var streak = statsStreak() === 2;
+      var subjOk = subj.indexOf('高数') >= 0 && subj.indexOf('物理') >= 0;
+      var rate = /待办完成率\s*50\s*%/.test(txt);
+      return { ok: shape && streak && subjOk && rate,
+        info: '热力格=' + cells + ' 柱=' + bars + ' 连续=' + statsStreak()
+          + ' 科目=' + subj.join('/') + ' 完成率50%=' + rate };
+    } finally { restoreState(snap); }
+  });
+
+  T('倒计时：未来在前过去在后、今日页有条、AI 工具能增删', function(){
+    var snap = snapState();
+    try{
+      S.exams = []; S.todos = [];
+      var dk = function(k){ var d = new Date(); d.setDate(d.getDate() + k); return dayKey(d); };
+      /* 用 AI 工具的同一入口写入，顺带验证工具可用 */
+      var r1 = runOneTool('addExam', { name: '高数期末', date: dk(10), kind: 'exam' });
+      var r2 = runOneTool('addExam', { name: '物理报告', date: dk(2), kind: 'ddl' });
+      var r3 = runOneTool('addExam', { name: '上周补考', date: dk(-3), kind: 'exam' });
+      var names = examSorted().map(function(x){ return x.e.name; });
+      /* 排序：两天后的最前，然后十天，最后是过去的那条 */
+      var orderOk = names[0] === '物理报告' && names[1] === '高数期末' && names[2] === '上周补考';
+      var daysOk = examDays(dk(2)) === 2 && examDays(dk(-3)) === -3;
+      renderCountStrip();
+      var strip = document.getElementById('countStrip');
+      var stripTxt = strip.textContent.replace(/\s+/g, ' ');
+      var inStrip = /物理报告/.test(stripTxt) && /2 天/.test(stripTxt);
+      /* 今天页条只显示未来，不该出现已过去的那条 */
+      var noPast = stripTxt.indexOf('上周补考') < 0;
+      var listTxt = runOneTool('listExam', {}) || '';
+      var del = runOneTool('delExam', { name: '物理报告' }) || '';
+      var afterDel = examSorted().length;
+      return { ok: orderOk && daysOk && inStrip && noPast && /2 天后/.test(listTxt)
+          && /已删除/.test(del) && afterDel === 2,
+        info: '排序=' + names.join(' > ') + ' 天数=' + daysOk + ' 今日页有=' + inStrip
+          + ' 不显示过去=' + noPast + ' 工具删除=' + (afterDel === 2) };
+    } finally { restoreState(snap); }
+  });
+
+  T('错题本：新建即到期、复习评级推进间隔、连对归档', function(){
+    var snap = snapState();
+    try{
+      S.mistakes = [];
+      /* 走真实的保存入口，而不是直接 push —— 这样 due 的初始化也被测到 */
+      openSheet('mistakeform');
+      document.getElementById('misSubjIn').value = '高等数学';
+      document.getElementById('misQIn').value = '求 lim (sin x - x)/x³';
+      document.getElementById('misReasonIn').value = '用了等价无穷小';
+      mistakeSaveForm();
+      var m = S.mistakes[0];
+      var dueToday = !!m && m.due === todayKey();
+      var inQueue = misDueFor(S.mistakes).length === 1;
+      startReview();
+      var qLen = __rvQueue.length;
+      /* 「会了」：第一次给 1 天 */
+      reviewRate(5);
+      var after1 = S.mistakes[0];
+      var r1 = after1.iv === 1 && after1.reps === 1 && after1.due === misDateAfter(1);
+      /* ★ 必须再评一次「会了」：第一次本来就是 1 天，
+         只验第一步的话，「间隔永远 1 天」这种错也能通过（实测过）。
+         第二次应跳到 3 天 —— 这一步才是 SM-2 真正在工作。 */
+      __rvQueue = [after1]; __rvIdx = 0; reviewRate(5);
+      var r2 = after1.iv === 3 && after1.reps === 2;
+      /* 连对到 5 次应归档 */
+      for(var i = 0; i < 4; i++){ if(!after1.arch){ __rvQueue = [after1]; __rvIdx = 0; reviewRate(5); } }
+      var archived = !!S.mistakes[0].arch;
+      /* 「忘了」回到明天 */
+      var m2 = { id: 'x', q: 'q', due: todayKey(), iv: 9, ef: 2.5, reps: 2, arch: false };
+      S.mistakes.push(m2);
+      __rvQueue = [m2]; __rvIdx = 0;
+      reviewRate(1);
+      var forgot = m2.iv === 1 && m2.reps === 0;
+      closeView('review'); closeSheet();
+      return { ok: dueToday && inQueue && qLen >= 1 && r1 && r2 && archived && forgot,
+        info: '新建即到期=' + dueToday + ' 进队列=' + inQueue + ' 首评1天=' + r1
+          + ' 二次3天=' + r2 + ' 连对归档=' + archived + ' 忘了回1天=' + forgot };
+    } finally { restoreState(snap); }
+  });
+
+  T('错题本 AI 工具：增 / 查 / 改 / 删 都能落到数据上', function(){
+    var snap = snapState();
+    try{
+      S.mistakes = [];
+      var r1 = runOneTool('addMistake', { q: '求 lim (sin x - x)/x^3', subj: '高等数学', point: '洛必达' });
+      var id = S.mistakes[0] && S.mistakes[0].id;
+      var list1 = runOneTool('listMistake', {}) || '';
+      var r2 = runOneTool('editMistake', { id: id, reason: '等价无穷小用错', steps: '展开到三阶' });
+      var m = S.mistakes[0] || {};
+      var dueList = runOneTool('listMistake', { due: 'true' }) || '';
+      /* ★ 还要看**有没有落盘**：只查内存的话，「忘记 save()」这种错抓不到 ——
+         用户改完看着是对的，一重启就没了（实测注入 save 缺失时内存断言照样绿）。 */
+      var disk = {};
+      try{ disk = JSON.parse(localStorage.getItem(KEY) || '{}'); }catch(e){}
+      var persisted = (disk.mistakes || []).some(function(x){
+        return x.id === id && x.reason === '等价无穷小用错' && x.steps === '展开到三阶';
+      });
+      var r3 = runOneTool('delMistake', { q: 'sin x' });
+      return { ok: /已加进/.test(r1) && !!id && /洛必达/.test(list1)
+          && /已更新/.test(r2) && m.reason === '等价无穷小用错' && m.steps === '展开到三阶'
+          && /今天该复习/.test(dueList) && persisted && /已删除/.test(r3) && S.mistakes.length === 0,
+        info: '新增=' + /已加进/.test(r1) + ' 列出=' + /洛必达/.test(list1)
+          + ' 修改=' + (m.reason === '等价无穷小用错') + ' 已落盘=' + persisted
+          + ' 到期列表=' + /今天该复习/.test(dueList) + ' 删除=' + (S.mistakes.length === 0) };
+    } finally { restoreState(snap); }
+  });
+
+  await TA('错题拍照录入：识图结果预填表单、确认后才入库、失败有出路', async function(){
+    var snap = snapState();
+    var origVision = aiVision, origKey = hasKey, origReady = aiReady, origSv = solveHasVision;
+    try{
+      S.mistakes = [];
+      aiVision = function(role, prompt, img, cb){
+        window.__misOcrPrompt = prompt;
+        /* 故意让返回值套一层 json 围栏：模型经常这么干
+           （注释与字符串里都不能出现反引号，String.raw 模板会被截断） */
+        setTimeout(function(){
+          var fence = String.fromCharCode(96, 96, 96);
+          cb(true, fence + 'json\n{"subj":"大学物理","point":"动量守恒","q":"两球对心碰撞，求碰后速度"}\n' + fence);
+        }, 10);
+      };
+      hasKey = function(){ return true; };
+      aiReady = function(){ return true; };
+      solveHasVision = function(){ return true; };
+      mistakeOcrRun('data:image/png;base64,AAAA');
+      await sleep(120);
+      var formOpen = window.__sheetKind === 'mistakeform';
+      var subj = (document.getElementById('misSubjIn') || {}).value || '';
+      var q = (document.getElementById('misQIn') || {}).value || '';
+      var savedBefore = S.mistakes.length;      /* 关键：还没保存时不该入库 */
+      var promptOk = /不要编造数字|绝对不要编造/.test(window.__misOcrPrompt || '');
+      mistakeSaveForm();
+      var savedOk = S.mistakes.length === 1 && S.mistakes[0].due === todayKey();
+      /* 失败分支：按钮要真的能进手动表单，不能只改文案 */
+      aiVision = function(role, prompt, img, cb){ setTimeout(function(){ cb(false, '网络超时'); }, 10); };
+      closeSheet();
+      openSheet('mistakeocr', { img: '' });
+      mistakeOcrRun('data:image/png;base64,AAAA');
+      await sleep(120);
+      var hint = (document.getElementById('misOcrStatus') || {}).textContent || '';
+      var ghost = document.querySelector('#sheet .btn.ghost');
+      var btnOk = !!ghost && /手动填写/.test(ghost.textContent)
+        && /mistakeAddPrompt/.test(ghost.getAttribute('onclick') || '');
+      closeSheet();
+      return { ok: formOpen && subj === '大学物理' && /碰撞/.test(q) && savedBefore === 0
+          && savedOk && promptOk && /识别失败/.test(hint) && btnOk,
+        info: '预填=' + (subj + '/' + q.slice(0, 8)) + ' 未保存不入库=' + (savedBefore === 0)
+          + ' 保存后到期=' + savedOk + ' 提示词防编造=' + promptOk
+          + ' 失败提示=' + /识别失败/.test(hint) + ' 失败有出路=' + btnOk };
+    } finally {
+      aiVision = origVision; hasKey = origKey; aiReady = origReady; solveHasVision = origSv;
+      closeSheet();
+      restoreState(snap);
+    }
+  });
+
+  /* ⚠️ 用 TA + await：这条要等退场动画收尾，同步 T 会读到动画中间态
+     （而且 T 不认 Promise 返回值，写错就是静默失败）。 */
+  await TA('我的页：四个大类页各自能返回上一层（不是一路掉回标签页）', async function(){
+    /* 二级页同时只有一层是 show，所以「从哪来」必须显式记。
+       实际路径：我的 → 小径 → 技能 → 返回 → 应回到小径（不是我的）。
+       不测这条的话，从子页返回会「跳两级」，用户会觉得点错了。 */
+    var keepTab = (document.querySelector('.page.active') || {}).id;
+    go('me');
+    /* 先清干净：别的断言可能留了一个开着的二级页（实测这里残留过 view-memory），
+       不清的话"最后有没有残留"这一判据会被它污染成假失败。 */
+    document.querySelectorAll('.view.show').forEach(function(o){ o.classList.remove('show'); });
+    document.body.classList.remove('view-open');
+    openView('xj');
+    var okXj = document.getElementById('view-xj').classList.contains('show');
+    openView('skills');
+    var okSk = document.getElementById('view-skills').classList.contains('show');
+    var xjHidden = !document.getElementById('view-xj').classList.contains('show');
+    closeView('skills');
+    var backToXj = document.getElementById('view-xj').classList.contains('show');
+    closeView('xj');
+    /* 退场动画 320ms，收尾后才真正摘干净 —— 同步读会读到"还在播"的中间态，
+       所以这里等一下再判（不是放宽标准，是不测动画中间态）。 */
+    await new Promise(function(res){ setTimeout(res, 420); });
+    var left = [].slice.call(document.querySelectorAll('.view.show')).map(function(e){ return e.id; });
+    var noView = left.length === 0;
+    var scrimOff = !document.body.classList.contains('view-open');
+    if(keepTab && keepTab !== 'page-me') go(keepTab.replace('page-', ''));
+    return { ok: okXj && okSk && xjHidden && backToXj && noView && scrimOff,
+      info: '小径打开=' + okXj + ' 技能打开=' + okSk + ' 父页已收=' + xjHidden
+        + ' 返回回到小径=' + backToXj + ' 再返回残留=' + (left.join(',') || '无')
+        + ' scrim已收=' + scrimOff };
   });
 
   T('AI 配置：密钥能显示出来，且看一眼不改动它的值', function(){
@@ -1372,6 +1603,32 @@ const ASSERTS = String.raw`
         + ' 点了能显示=' + shown + ' 按钮高亮=' + onState
         + ' 值没被改=' + kept + ' 能切回隐藏=' + backHidden
         + ' 复制有反馈=' + said + ' 两处真实入口都接了=' + wiredReal };
+  });
+
+  T('二级页顶栏：标题在整页水平居中（不管有没有右上角按钮）', function(){
+    /* 用户没提，是截图看出来的：新加的四个类页有几页没有右上角按钮，
+       而 .viewhead 是 space-between —— 两块时标题被顶到最右边。
+       这类「只有部分页面才歪」的问题，肉眼看当前页很难发现，
+       所以按「有按钮 / 无按钮」两类各取样本量一次。 */
+    var keep = (document.querySelector('.page.active') || {}).id;
+    function centerGap(id){
+      var v = document.getElementById('view-' + id);
+      if(!v) return { ok:false, why:'页不存在' };
+      var wasShown = v.classList.contains('show');
+      if(!wasShown){ go('home'); openView(id); }
+      var b = v.querySelector('.viewhead > b');
+      var head = v.querySelector('.viewhead');
+      if(!b || !head) return { ok:false, why:'无标题' };
+      var gr = head.getBoundingClientRect(), br = b.getBoundingClientRect();
+      var gap = Math.abs((br.left + br.right) / 2 - (gr.left + gr.right) / 2);
+      if(!wasShown) closeView(id);
+      return { ok: gap <= 8, gap: Math.round(gap) };
+    }
+    var noBtn = centerGap('study');     /* 无右上角按钮 */
+    var withBtn = centerGap('memory');  /* 有右上角「+」 */
+    if(keep && keep !== 'page-me') go(keep.replace('page-', ''));
+    return { ok: noBtn.ok && withBtn.ok,
+      info: '无按钮页偏移=' + noBtn.gap + 'px · 有按钮页偏移=' + withBtn.gap + 'px（各应 ≤8px）' };
   });
 
   T('对话：开关在输入栏上方、附件在下方，胶囊上下留白相等', function(){
@@ -1693,14 +1950,21 @@ const ASSERTS = String.raw`
     return { ok: missing.length === 0 && gone,
       info: '缺=' + (missing.join(',') || '无') + ' · 旧三段式入口已清除=' + gone };
   });
-  T('节假日入口在「我的」页，不在完整课表页', function(){
-    go('me'); renderProfile();
-    var me = document.getElementById('page-me');
-    var inMe = me && /节假日模式/.test(me.textContent) && /节假日设置/.test(me.textContent);
+  T('节假日入口在「专注与学习」页，不在完整课表页', function(){
+    /* 2026-10-19：节假日原先在「我的」页里，重构后随「学期与节假日」整节
+       搬进「专注与学习」。判据改为在那一页里找，仍然不许出现在完整课表页
+       —— 后者是「看课表」，不该长出改设置的东西。 */
+    go('me');
+    var xj = document.getElementById('view-study');
+    var inStudy = xj && /节假日模式/.test(xj.textContent) && /节假日设置/.test(xj.textContent);
+    var mePage = document.getElementById('page-me');
+    var notOnMe = mePage && !/节假日模式/.test(mePage.textContent);
     openSchedule();
     var sched = document.getElementById('view-schedule');
     var inSched = sched && /节假日模式/.test(sched.textContent);
-    return { ok: !!inMe && !inSched, info: '我的=' + !!inMe + ' 课表页仍有=' + !!inSched };
+    closeView('schedule');
+    return { ok: !!inStudy && !!notOnMe && !inSched,
+      info: '专注与学习页=' + !!inStudy + ' 我的页已移走=' + !!notOnMe + ' 课表页仍有=' + !!inSched };
   });
 
   // ---------- 2026-10-01 修复 / 新增 ----------
@@ -2463,14 +2727,790 @@ const ASSERTS = String.raw`
     await at('home');
     go(prev.replace('page-', ''));
     S.uiTheme = keep; applyLook();
-    var shown = h.w > 20;
-    /* 一格 = 滑块自身宽度（translateX 用百分比），所以第二档 ≈ 2× 第一档间距 */
-    var moved = Math.abs(h.x) < 1 && c.x > 100 && m2.x > c.x + 100;
+    var shown = h.w > 40;
+    /* 一格 = 滑块自身宽度（translateX 用百分比）。
+       ⚠️ 别写死像素阈值：2026-10-23 dock 从「铺满 406px」收成「居中 292px」，
+       一格从 135 变 92，写死 100 的那版就假失败了。这里按实测格宽推导：
+       第二档 ≈ 2 格、第三档 ≈ 1 格，允许 2px 误差（百分比 translate 会有小数）。 */
+    var cell = h.w;
+    var moved = Math.abs(h.x) < 1 && Math.abs(c.x - cell) <= 2 && Math.abs(m2.x - cell * 2) <= 2;
     return {
       ok: shown && moved && h.i === '0' && c.i === '1' && m2.i === '2',
       info: '滑块宽=' + h.w.toFixed(0) + ' · 位移 ' + h.x + '→' + c.x + '→' + m2.x
-        + ' · --tab-i ' + h.i + '/' + c.i + '/' + m2.i + ' · raw=' + m2.raw
+        + '（每格应 ' + cell.toFixed(0) + '） · --tab-i ' + h.i + '/' + c.i + '/' + m2.i
     };
+  });
+
+  /* 2026-10-23：底栏收窄（Pro dock 68→56、经典 74→66）+ 胶囊液化。
+     这条锁三个「改尺寸时最容易悄悄坏」的点：
+     ① 胶囊矮了之后不能压住文字 —— 44px 对 20px 图标 + 10px 字是能包住的；
+     ② **左右余量必须比拉伸量大** —— 满拉伸每边扩 (宽 × 0.20 / 2)，
+        原来 10px 余量实测溢出 4px，顶出 dock 的圆角外面；
+     ③ --pill-in 必须真的定义在 .tabbar 上。只写 var(--pill-in,10px) 这种 fallback
+        的话，JS 的 getComputedStyle 读到空串 → 回落 6 → 拖动换算和渲染差 4px。 */
+  /* 2026-10-23 用户反馈三条：
+     ① 外圈圆角不够圆润 ② 侧边到胶囊的距离和上下不一致 —— 其实是同一件事：
+     外框和胶囊不是同心圆弧，缝就不是等宽的。判据不是"圆角看起来多少度"，
+     而是**四边留白相等 + 外框圆角 = 胶囊圆角 + 留白**（同心条件）。
+     ③ Classic 档也要能设背景图，且不该再显示玻璃档那套标识。 */
+  /* 2026-10-23：平板端重构。
+     用户三条要求：
+     ① UI Pro 的平板也改成「悬浮侧栏」（Classic 保持原样）；
+     ② 侧边加**只读**小组件栏，与导航同侧但占另一端（导航是椭圆、组件是圆角方形）；
+     ③ 「平板布局」设置从「专注与学习」挪到「外观」，并把左/右与顶/中/底改成滑块。
+     这条锁几何关系，不锁像素值 —— 换机型不用改。 */
+  T('侧边小组件可自定义：勾了就一定显示（没数据也只是 0，不消失）', function(){
+    var keep = S.sideWidgets, keepDays = S.days, keepExams = S.exams, keepTodos = S.todos;
+    var root = document.documentElement;
+    var keepCls = root.className, keepTheme = S.uiTheme;
+    try{
+      /* ⚠️ 必须先变成「平板 + Pro」：navw-on 只在那种状态下才加，
+         否则 #sidewig 根本不渲染，测出来永远是 0 块（第一版就这么假失败）。 */
+      root.classList.add('layout-tablet');
+      setUiTheme('pro');
+      /* ① 全部清空数据 —— 这是用户实测"只显示一个"的现场。
+         勾了 3 个就必须出 3 块（值可以是 0 / —），不能因为没数据就整块消失。
+         否则用户会以为功能坏了。 */
+      S.days = {}; S.exams = []; S.todos = []; S.mistakes = [];
+      S.sideWidgets = ['exam', 'focus', 'todo'];
+      renderSideWidgets();
+      var box = document.getElementById('sidewig');
+      var n1 = box.children.length;
+
+      /* ② 七项全开 → 必须 7 块，且顺序按候选表（不是勾选顺序） */
+      S.sideWidgets = ['pomo','streak','exam','focus','todo','review','week'];
+      renderSideWidgets();
+      var n2 = box.children.length;
+      var order = [].slice.call(box.querySelectorAll('.k')).map(function(e){ return e.textContent; });
+      var orderOk = order[0] === '最近截止' && order[6] === '今日番茄';
+
+      /* ③ 不认识的 id 要过滤掉（版本回退 / 手改存档） */
+      S.sideWidgets = ['exam', 'nope', 'zzz'];
+      var picked = sideWidgetPick();
+      var filtered = picked.length === 1 && picked[0] === 'exam';
+
+      /* ④ 选择器芯片的选中态要跟数据一致 */
+      S.sideWidgets = ['focus', 'review'];
+      renderSideWidgetPicker();
+      var chips = document.querySelectorAll('#sidePickList .swpick');
+      var onChips = document.querySelectorAll('#sidePickList .swpick.on').length;
+      var pickSync = chips.length === SIDE_WIDGETS.length && onChips === 2;
+
+      return {
+        ok: n1 === 3 && n2 === 7 && orderOk && filtered && pickSync,
+        info: '空数据 3 项 → 出 ' + n1 + ' 块 · 全开 7 块=' + n2
+          + ' 顺序对=' + orderOk + ' · 脏 id 过滤=' + filtered
+          + ' · 芯片 ' + chips.length + ' 个/选中 ' + onChips
+      };
+    } finally {
+      S.sideWidgets = keep; S.days = keepDays; S.exams = keepExams; S.todos = keepTodos;
+      root.className = keepCls; S.uiTheme = keepTheme;
+      try{ applyLook(); renderSideWidgets(); }catch(e){}
+    }
+  });
+
+  T('平板 Pro 输入行是悬浮的：外层容器无边框、无底色、无圆角', function(){
+    var root = document.documentElement;
+    var keep = { cls: root.className, theme: S.uiTheme };
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    var c = document.querySelector('#page-chat .composer');
+    var inp = document.getElementById('chatInput');
+    if(!c || !inp) return { ok:false, info:'缺 composer / chatInput' };
+    try{
+      root.classList.add('layout-tablet');
+      setUiTheme('pro');
+      go('chat');
+      var cs = getComputedStyle(c);
+      /* 外层容器必须是"看不见的"——用户报的"外面还有方框"就是它有 border + 底色。 */
+      var outerGone = parseFloat(cs.borderTopWidth) === 0
+        && parseFloat(cs.borderTopLeftRadius) === 0
+        && (cs.backgroundColor === 'rgba(0, 0, 0, 0)' || cs.backgroundColor === 'transparent')
+        && (cs.boxShadow === 'none' || cs.boxShadow === '');
+      var ics = getComputedStyle(inp);
+      var inputPill = parseFloat(ics.borderTopLeftRadius) > 0
+        && parseFloat(ics.borderTopWidth) > 0;
+      var innerH = Math.round(inp.getBoundingClientRect().height);
+      /* Classic 平板必须**保持原来的方块**（它有边框和底色），不能被这次改动带走 */
+      setUiTheme('classic');
+      var ccs = getComputedStyle(c);
+      var classicKept = parseFloat(ccs.borderTopWidth) > 0
+        && parseFloat(ccs.borderTopLeftRadius) > 0;
+      return {
+        ok: outerGone && inputPill && classicKept,
+        info: 'Pro 外层无框=' + outerGone + '（border ' + cs.borderTopWidth
+          + ' / radius ' + cs.borderTopLeftRadius + '）· 输入胶囊=' + inputPill
+          + '（radius ' + ics.borderTopLeftRadius + ' 高 ' + innerH + '）· Classic 保留方块=' + classicKept
+      };
+    } finally {
+      root.className = keep.cls;
+      S.uiTheme = keep.theme; applyLook();
+      try{ go(prev.replace('page-', '')); }catch(e){}
+    }
+  });
+
+  /* ===== BUGFIX-01：全屏遮罩残留 与 键盘弹层空块（2026-10-25）=====
+     这两个是独立的功能 bug，与安全审计无关。断言按 audit/BUGFIX-01 第 3 节写。 */
+
+  await TA('BUG-1：取消裁图后，迟到的 onload 不该重新打开遮罩', async function(){
+    /* 这是 BUG-1 的**根因**复现：t0 选图 → t1 用户取消 → t2 解码完成才 onload。
+       修复前 onload 是无条件 add('show')，#cropMask（z-95）就永久盖住整页。 */
+    var m = document.getElementById('cropMask');
+    var img = document.getElementById('cropImg');
+    var keep = CROP;
+    try{
+      openCropper({ src:'data:image/png;base64,iVBORw0KGgo=', onApply:function(){} });
+      var cb = img.onload;          /* 抓住这一代的回调 */
+      closeCropper();               /* 用户点了取消 */
+      if(cb) cb.call(img);          /* 解码这时才完成 */
+
+      /* ★ 必须在**同一帧**读：晚一步的话，healStuckLayers 的兜底会把残留清掉，
+         于是「令牌没生效」也会 PASS —— 那正是假通过。
+         这里要验的是「回调**本身**有没有把遮罩打开」，不是「最终有没有被兜住」。 */
+      var shownSync = m.classList.contains('show');
+
+      await sleep(80);
+      var shownAfter = m.classList.contains('show');
+      return { ok: !shownSync && !shownAfter,
+               info: '回调瞬间=' + shownSync + ' 80ms后=' + shownAfter + ' CROP=' + !!CROP };
+    } finally {
+      CROP = keep; m.classList.remove('show');
+    }
+  });
+
+  T('BUG-1：残留的裁图遮罩能被自愈清掉', function(){
+    var m = document.getElementById('cropMask');
+    var keep = CROP;
+    try{
+      CROP = null;                  /* 业务状态是「没在裁」 */
+      m.classList.add('show');      /* 但 DOM 还开着 = 脏 */
+      healStuckLayers();
+      var still = m.classList.contains('show');
+      return { ok: !still, info: 'stillShown=' + still };
+    } finally { CROP = keep; }
+  });
+
+  T('BUG-1：所有全屏层隐藏时都不吃指针事件', function(){
+    /* 结构性保证：即使将来某条异步路径又写回 display，
+       只要 .show 不在，就不该挡住点击。 */
+    var bad = [];
+    ['cropMask','mask','pickMask','noteFull','inkFull','onboard'].forEach(function(id){
+      var el = document.getElementById(id);
+      if(!el) return;
+      if(el.classList.contains('show')) return;      /* 开着的时候本来就该吃事件 */
+      var cs = getComputedStyle(el);
+      if(cs.display !== 'none' && cs.pointerEvents !== 'none') bad.push(id + ':' + cs.pointerEvents);
+    });
+    return { ok: bad.length === 0, info: bad.join(' | ') || '全部安全' };
+  });
+
+  await TA('BUG-1：注入残留后，二级页中心点必须命中页面自己', async function(){
+    /* 用户描述「内容看得见、点任何东西都没反应」—— 这条直接量「点到的是谁」。 */
+    var views = ['todos','notes','schedule','skills'];
+    var bad = [];
+    var keep = CROP;
+    for(var i = 0; i < views.length; i++){
+      var id = views[i];
+      CROP = null;
+      document.getElementById('cropMask').classList.add('show');   /* 人为制造残留 */
+      openView(id);
+      await sleep(420);
+      var v = document.getElementById('view-' + id);
+      var hit = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      var ok = !!(v && hit && v.contains(hit));
+      if(!ok) bad.push(id + '→' + (hit ? (hit.id || String(hit.className).slice(0, 14)) : 'null'));
+      closeView(id);
+      await sleep(320);
+    }
+    CROP = keep;
+    return { ok: bad.length === 0, info: '被挡=' + (bad.join(',') || '无') };
+  });
+
+  T('BUG-1：返回键认得裁图层（先关裁图，不误关下面的二级页）', function(){
+    var m = document.getElementById('cropMask');
+    var keep = CROP;
+    try{
+      openView('theme');
+      CROP = { aspect:null };
+      m.classList.add('show');
+      var layer = currentLayer();
+      var handled = androidBack();
+      var cropGone = !m.classList.contains('show');
+      /* 二级页必须还在：否则用户按一次返回会连跳两层 */
+      var viewStill = (document.getElementById('view-theme') || {}).classList.contains('show');
+      return { ok: layer === 'crop' && handled === true && cropGone && viewStill,
+               info: 'layer=' + layer + ' 裁图已关=' + cropGone + ' 页还在=' + !!viewStill };
+    } finally {
+      CROP = keep; m.classList.remove('show');
+      try{ closeView('theme'); }catch(e){}
+    }
+  });
+
+  await TA('BUG-2：键盘收起后 --vh 必须回到整屏（resetVH 硬复位）', async function(){
+    var full = Math.round(window.innerHeight);
+    var keepMax = _vhMax, keepFirst = _vhFirst;
+    try{
+      /* 模拟键盘态：--vh 被写成小值，且基准记住了整屏 */
+      document.documentElement.classList.add('kb-open');
+      document.documentElement.style.setProperty('--vh', (full - 300) + 'px');
+      _vhMax = full;
+      /* 模拟收起 */
+      document.documentElement.classList.remove('kb-open');
+      resetVH();
+      await sleep(120);
+      var vh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--vh'));
+      return { ok: Math.abs(vh - full) <= 2, info: 'vh=' + vh + ' innerHeight=' + full };
+    } finally {
+      _vhMax = keepMax; _vhFirst = keepFirst;
+      document.documentElement.classList.remove('kb-open');
+    }
+  });
+
+  T('BUG-2：kb-need-pad 只在「容器没跟着缩」时才让位', function(){
+    /* 这条守的是那个很容易做错的地方：
+       正常 adjustResize 机型上 #phone 已经缩了，再让一次就是抬两遍。 */
+    var root = document.documentElement;
+    var keepCls = root.className;
+    var m = document.getElementById('mask');
+    try{
+      root.classList.remove('kb-need-pad');
+      var before = getComputedStyle(m).bottom;
+      root.classList.add('kb-need-pad');
+      root.style.setProperty('--kb-height', '300px');
+      var after = getComputedStyle(m).bottom;
+      /* 没标记时 bottom 应为 0（正常铺满）；有标记才抬 300 */
+      var ok = (parseFloat(before) === 0) && (Math.round(parseFloat(after)) === 300);
+      return { ok: ok, info: '无标记bottom=' + before + ' 有标记bottom=' + after };
+    } finally {
+      root.className = keepCls;
+      root.style.removeProperty('--kb-height');
+    }
+  });
+
+  /* ===== 审计 P0 安全断言（2026-10-24）=====
+     审计报告的结论是：这 4 条 XSS「代码路径一直存在，只是没人验证」。
+     所以回归断言比修复本身更值钱 —— 它们能防止以后有人又把内容拼回 innerHTML。
+     每条都是「注入恶意内容 → 断言它没执行」。 */
+  await TA('安全：笔记正文不执行脚本', async function(){
+    var keep = S.notes;
+    window.__xss1 = 0;
+    try{
+      S.notes = [{ id:'t1', title:'t', mode:'text', at:Date.now(),
+        body:'<img src=x onerror="window.__xss1=1"><b>ok</b>' }];
+      noteOpen('t1');
+      await sleep(400);
+      /* 除了「没执行」，还要确认净化没有把内容整个丢掉（<b> 应该还在） */
+      var body = (S.notes[0] || {}).body || '';
+      var keptBold = document.getElementById('notePreview')
+        ? /<b>/.test(document.getElementById('notePreview').innerHTML) : true;
+      return { ok: window.__xss1 === 0 && keptBold,
+               info: 'executed=' + window.__xss1 + ' 粗体保留=' + keptBold };
+    } finally { S.notes = keep; }
+  });
+
+  await TA('安全：笔记列表的 id 与 inkPng 不注入', async function(){
+    var keep = S.notes;
+    window.__xss2 = 0;
+    try{
+      S.notes = [{ id:"n');window.__xss2=1;//", title:'t', mode:'ink', at:Date.now(),
+        body:'x', inkPng:'x" onerror="window.__xss2=2' }];
+      /* 上一条断言 noteOpen() 过，笔记页可能还停在「编辑某篇」的内部态，
+         直接 openView('notes') 不会重画列表。先退回列表层再进。 */
+      try{ noteBackAction(); }catch(e){}
+      try{ noteBack(); }catch(e){}
+      openView('notes');
+      try{ renderNotes(); }catch(e){}
+      await sleep(450);
+      /* id 应被 safeId 拒掉并重建，不能带着引号进 DOM */
+      var card = document.querySelector('#noteGrid .n-card');
+      var attr = card ? (card.getAttribute('data-note') || '') : '';
+      /* ⚠️ 判据必须要求「卡片真的存在」。第一版把「取不到卡片」写成 'NO_CARD'，
+         而那个字符串正好符合正则 —— 于是「卡片压根没渲染」也会 PASS。
+         这是假通过，必须堵掉：先要求 card 非空。
+         （另注：这个文件里的注释不许出现反引号，会把模板字符串当场截断。） */
+      /* 额外要求「data-note 非空」：空 id 会让卡片点不动，
+         那是另一个坑（拒掉坏 id 之后必须重建，不能留空）。 */
+      var clean = !!card && !!attr && /^[A-Za-z0-9_-]+$/.test(attr);
+      var gridH = (document.getElementById('noteGrid') || {}).innerHTML || '';
+      return { ok: window.__xss2 === 0 && clean,
+               info: 'executed=' + window.__xss2 + ' 卡片=' + !!card
+                 + ' data-note=' + JSON.stringify(attr)
+                 + ' grid=' + JSON.stringify(gridH.slice(0, 60)) };
+    } finally { S.notes = keep; try{ closeView('notes'); }catch(e){} }
+  });
+
+  await TA('安全：聊天历史不执行脚本', async function(){
+    var keepH = S.chatHistory, keepMsgs = msgs;
+    window.__xss3 = 0;
+    try{
+      S.chatHistory = [{ id:'c1', title:'t', when:'', ts:Date.now(), fav:false, archived:false,
+        msgs:[{ r:'ai', t:'<img src=x onerror="window.__xss3=1">', src:[] }] }];
+      loadChatSession('c1');
+      await sleep(400);
+      return { ok: window.__xss3 === 0, info: 'executed=' + window.__xss3 };
+    } finally { S.chatHistory = keepH; msgs = keepMsgs; }
+  });
+
+  await TA('安全：历史菜单不再用 eval 执行字符串', async function(){
+    var keepH = S.chatHistory;
+    window.__xss4 = 0;
+    try{
+      S.chatHistory = [{ id:"x');window.__xss4=1;//", title:'t', when:'', ts:Date.now(),
+        msgs:[{r:'ai',t:'hi',src:[]}], fav:false, archived:false }];
+      histActions(S.chatHistory[0].id, { x:10, y:10 });
+      await sleep(200);
+      var row = [].slice.call(document.querySelectorAll('#msgMenu .actrow'))
+        .filter(function(e){ return /收藏/.test(e.textContent); })[0];
+      if(row){ row.click(); await sleep(250); }
+      return { ok: window.__xss4 === 0, info: 'executed=' + window.__xss4 + ' 菜单行=' + !!row };
+    } finally { S.chatHistory = keepH; try{ closeMsgMenu(); }catch(e){} }
+  });
+
+  T('安全：markdown 渲染器仍然转义尖括号（对照组）', function(){
+    /* 这条守的是「chatMsgHtml 走 sanitize 之后，正常 markdown 不该被打坏」的边界：
+       bare text 里的 <img> 必须变成 &lt;img&gt;，而不是真的标签。 */
+    var h = renderAiText('<img src=x onerror=1>');
+    return { ok: h.indexOf('<img') < 0 && h.indexOf('&lt;img') >= 0, info: h.slice(0, 70) };
+  });
+
+  T('安全：恢复备份拒绝非法 schema，且整包拒绝', function(){
+    function mk(data){ return { app:'学径', kind:'xuejing-backup', group:'study', version:1, data:data }; }
+    var bad = validateRestore(mk({ courses:'not-an-object' }));
+    var badTodos = validateRestore(mk({ todos:'nope' }));
+    var badAvatar = validateRestore(mk({ avatar:'data:image/svg+xml,<svg onload=1>' }));
+    var empty = validateRestore(mk({}));
+    var good = validateRestore(mk({ nick:'小明', notes:[{ id:'n1', body:'<b>x</b>', title:'t' }] }));
+    return {
+      /* 「整包拒绝」= 返回 ok:false（调用方据此不做任何写入） */
+      ok: bad.ok === false && badTodos.ok === false && badAvatar.ok === false
+        && empty.ok === false && good.ok === true,
+      info: '课表字符串=' + bad.ok + ' 待办字符串=' + badTodos.ok
+        + ' SVG头像=' + badAvatar.ok + ' 空包=' + empty.ok + ' 正常包=' + good.ok
+    };
+  });
+
+  T('安全：备份默认不含 API Key', function(){
+    var keepKey = S.apiKey, keepAcc = S.providerAcc, keepMemo = S.keyMemo;
+    try{
+      S.apiKey = 'sk-AUDIT-SECRET-1';
+      S.providerAcc = { deepseek: { key:'sk-AUDIT-SECRET-2', baseUrl:'https://api.deepseek.com' } };
+      S.keyMemo = { deepseek: 'sk-AUDIT-SECRET-3' };
+      var ai = buildBackup('ai', false);
+      var full = buildBackup('full', false);
+      var withKey = buildBackup('ai', true);
+      var leak = function(s){ return s.indexOf('sk-AUDIT-SECRET') >= 0; };
+      var coverChannelsEscape = leak(ai) || leak(full);
+      return {
+        ok: !coverChannelsEscape && leak(withKey) && /\.deepseek\.com/.test(ai),
+        info: '默认ai泄漏=' + leak(ai) + ' 默认full泄漏=' + leak(full)
+          + ' 显式导出含密钥=' + leak(withKey) + ' 渠道地址保留=' + /\.deepseek\.com/.test(ai)
+      };
+    } finally { S.apiKey = keepKey; S.providerAcc = keepAcc; S.keyMemo = keepMemo; }
+  });
+
+  T('顶栏按钮：所有二级页的返回/新建都是同一尺寸，且图标统一', function(){
+    /* 用户报「待办页上方的返回和新建按钮一个扁了一个图标不居中」。
+       根因有两条，都是「只调了一半」：
+         ① .viewhead > .icon-btn:first-child 只写了 width:30px，高度还是 34 —— 返回键变扁；
+            而右侧用 min-width:30px，宽度其实仍是 34 —— 两个键尺寸不同。
+         ② 图标是字符 ‹ 和 ＋：‹ 排版宽 5.52px 且字形靠左、＋ 是全角（16px 而 ASCII + 只有 11.87），
+            字号一样但视觉大小差很多，flex 居中居的是字符盒 → 看着偏左。
+       现在统一 30×30，图标改用同一套 SVG（伪元素 + mask）。
+       这条要覆盖**所有**顶栏，因为笔记页有 3 个按钮、错题/课表页有 2 个 ——
+       只写 :last-child 时第三个及以后仍是 34（实测就是这么漏的）。 */
+    var bad = [], heads = 0;
+    document.querySelectorAll('.view .viewhead').forEach(function(h){
+      var btns = [].slice.call(h.querySelectorAll('.icon-btn'));
+      if(btns.length < 2) return;
+      heads++;
+      var dims = btns.map(function(b){
+        var r = b.getBoundingClientRect();
+        return Math.round(r.width) + 'x' + Math.round(r.height);
+      });
+      var allSame = dims.every(function(d){ return d === dims[0]; });
+      /* 字符图标的按钮必须真的被伪元素接管（font-size:0 + 有 mask-image） */
+      var iconOk = btns.every(function(b){
+        if(b.classList.contains('has-svg')) return true;   /* 自带 svg，不归这条管 */
+        var s = getComputedStyle(b, '::before');
+        var mi = s.maskImage || s.webkitMaskImage || 'none';
+        return parseFloat(getComputedStyle(b).fontSize) === 0
+          && /url\(/.test(mi);
+      });
+      if(!allSame || !iconOk){
+        bad.push(h.closest('.view').id + ':' + dims.join('/')
+          + (allSame ? '' : ' 尺寸不一') + (iconOk ? '' : ' 图标未接管'));
+      }
+    });
+    return {
+      ok: heads > 0 && bad.length === 0,
+      info: '检查 ' + heads + ' 个顶栏 · 不合格 ' + bad.length
+        + (bad.length ? '：' + bad.slice(0, 4).join(' | ') : '')
+    };
+  });
+
+  await TA('点击自愈：五种残留层注入后，二级页内容仍然可点', async function(){
+    /* 用户反复报「三个主页进二级页之后，里面再开的弹窗点不动」。
+       我在无头环境跑了几十轮组合没能稳定复现 —— 它是竞态。
+       所以守护方式不是"复现那一次"，而是**注入残留、断言能自愈**：
+       这五种残留各自都足以让整页点不动（关掉 healStuckLayers 时全部 ok=false）。
+       注意：这条测的是防护本身，不是某个具体 bug 的成因。 */
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    var results = [];
+    try{
+      var injects = [
+        ['mask',        function(){ var m=document.getElementById('mask'); m.classList.add('show'); m.style.opacity='1'; }],
+        ['pickMask',    function(){ document.getElementById('pickMask').classList.add('show'); }],
+        ['sheet 悬空',  function(){ document.getElementById('mask').classList.remove('show');
+                                     document.getElementById('sheet').style.transform='translateY(30%)'; }],
+        ['双 view',     function(){ document.getElementById('view-ai').classList.add('show'); }],
+        ['抽屉 scrim',  function(){ document.getElementById('histScrim').classList.add('show'); }]
+      ];
+      /* 每个场景之间必须留足时间：进页有 220ms 淡入 + 位置过渡，
+         不等就量 getBoundingClientRect 会拿到过渡中的旧位置 ——
+         那样测出来的 false 是量早了，不是防护失效。 */
+      for(var i = 0; i < injects.length; i++){
+        var pair = injects[i];
+        pair[1]();
+        openView('theme');
+        await sleep(320);
+        var v = document.querySelector('.view.show');
+        /* 只挑**内容区**里的可点元素：页头的返回按钮在桌面模式下
+           可能被顶栏压住（.viewhead 是固定高），拿它当判据会假失败。 */
+        var el = v && v.querySelector('.viewbody .segI, .viewbody .li[onclick], .viewbody .li.tap, .viewbody .switch');
+        var ok = false;
+        if(el){
+          var r = el.getBoundingClientRect();
+          var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          ok = !!(hit && (hit === el || el.contains(hit) || hit.contains(el)));
+        }
+        var rr = el ? el.getBoundingClientRect() : null;
+        var hh = rr ? document.elementFromPoint(rr.left + rr.width/2, rr.top + rr.height/2) : null;
+        results.push(pair[0] + '=' + ok);
+        closeView('theme');
+        await sleep(480);
+      }
+      var allOk = results.every(function(s){ return /=(true)$/.test(s); });
+      return { ok: allOk, info: results.join(' · ') };
+    } finally {
+      S.uiTheme = keep; applyLook();
+      try{ healStuckLayers(); }catch(e){}
+      try{ go(prev.replace('page-', '')); }catch(e){}
+    }
+  });
+
+  T('平板布局设置在外观页（不在专注与学习），且都是滑块不是几个 badge', function(){
+    var inTheme = !!document.querySelector('#view-theme #tabletNavList');
+    var inStudy = !!document.querySelector('#view-study #tabletNavList');
+    /* 三组都必须是 .seg（有滑块），不是一堆 .badge ——
+       badge 没有选中态，用户点了看不出当前选的是哪个。 */
+    var segs = ['navSideSeg','navAlignSeg','navWidgetSeg'].map(function(id){
+      return !!document.getElementById(id);
+    });
+    var thumbs = ['navSideThumb','navAlignThumb','navWidgetThumb'].map(function(id){
+      return !!document.getElementById(id);
+    });
+    /* 旧的 badge 做法不该残留（会和新滑块重复出现两套入口） */
+    var oldBadges = document.querySelectorAll('#tabletNavList .badge').length;
+    return {
+      ok: inTheme && !inStudy && segs.every(Boolean) && thumbs.every(Boolean)
+        && oldBadges === 0,
+      info: '在外观页=' + inTheme + ' 仍在专注页=' + inStudy
+        + ' 三组滑块=' + segs.join('/') + ' 滑块头=' + thumbs.join('/')
+        + ' 残留旧 badge=' + oldBadges
+    };
+  });
+
+  await TA('平板：Pro 悬浮侧栏与导航分居两端，组件只读且不重叠', async function(){
+    var root = document.documentElement;
+    var keep = { cls: root.className, theme: S.uiTheme };
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    var bar = document.querySelector('.tabbar');
+    var wig = document.getElementById('sidewig');
+    if(!bar || !wig) return { ok:false, info:'缺 .tabbar 或 #sidewig' };
+    try{
+      /* 自测跑在手机视口，平板布局不会自己生效 —— 手动打类。
+         （真机由 JS 的布局判定打，这里只验"已是平板"之后的几何）
+         ⚠️ 还必须把**视口高度撑到平板尺寸**：.tabbar 与 #sidewig 在同一个 grid
+         单元里各占一端，行高不够时两端会互相压进来（实测手机 700px 高时
+         导航 210 + 组件 202 放不下，重叠 30px）。这不是布局错，是视口错。
+         所以给 #phone 一个平板高度再量，量完恢复。 */
+      root.classList.add('layout-tablet');
+      var phoneEl = document.getElementById('phone');
+      var keepPhoneH = phoneEl ? phoneEl.style.height : '';
+      if(phoneEl) phoneEl.style.height = '1180px';
+      setUiTheme('pro');
+      setNavSide('left');
+      /* 组件要靠 navw-on 才会 display:flex，显式打开一次，
+         免得受前面用例留下的 localStorage 影响（顺序耦合） */
+      setNavWidgets(true);
+      await sleep(260);
+      var cs = getComputedStyle(bar);
+      var floating = parseFloat(cs.marginTop) > 0
+        && parseFloat(cs.marginLeft) > 0
+        && parseFloat(cs.borderTopLeftRadius) >= 20;
+      /* 演示：
+         · wig 的 display 必须是 flex，pointer-events 必须 none（只读）
+         · 三者不能重叠：tabbar 与 sidewig 上下分开 */
+      var pe = getComputedStyle(wig).pointerEvents;
+      var shown = getComputedStyle(wig).display === 'flex';
+      var clickable = [].slice.call(wig.querySelectorAll('*')).some(function(el){
+        return el.hasAttribute('onclick') || el.tagName === 'A' || el.tagName === 'BUTTON';
+      });
+
+      function rects(){
+        var a = bar.getBoundingClientRect(), b = wig.getBoundingClientRect();
+        return { a: a, b: b,
+          overlap: !(a.bottom <= b.top + 1 || b.bottom <= a.top + 1) };
+      }
+      var topR = rects();
+      var dbg = 'tab[' + Math.round(topR.a.top) + ',' + Math.round(topR.a.bottom) + '] '
+        + 'wig[' + Math.round(topR.b.top) + ',' + Math.round(topR.b.bottom) + ']'
+        + ' alignSelfTab=' + getComputedStyle(bar).alignSelf
+        + ' alignSelfWig=' + getComputedStyle(wig).alignSelf
+        + ' cards=' + wig.children.length;
+      /* 导航贴底 → 组件必须跑到它上面 */
+      setNavAlign('bottom');
+      await sleep(220);
+      var botR = rects();
+      var swapped = botR.b.top < topR.a.top + 1;
+
+      /* Classic 档：侧栏回到"贴边整列"，组件整块不显示 */
+      setNavAlign('top');
+      await sleep(120);
+      setUiTheme('classic');
+      await sleep(220);
+      var cMargin = parseFloat(getComputedStyle(bar).marginTop);
+      var classicFlat = Math.abs(cMargin) < 1
+        && getComputedStyle(wig).display === 'none';
+
+      setUiTheme('pro');
+      await sleep(150);
+      return {
+        ok: floating && shown && pe === 'none' && !clickable
+          && !topR.overlap && !botR.overlap && swapped && classicFlat,
+        info: 'Pro 悬浮=' + floating + '（margin ' + cs.marginTop + '/圆角 '
+          + cs.borderTopLeftRadius + '）· 组件显示=' + shown + ' 只读=' + (pe === 'none')
+          + ' 无点击元素=' + !clickable
+          + ' · 顶对齐时重叠=' + topR.overlap + ' 底对齐时重叠=' + botR.overlap
+          + ' 两端对调=' + swapped + ' · Classic 回到贴边=' + classicFlat
+          + ' · ' + dbg
+      };
+    } finally {
+      if(phoneEl) phoneEl.style.height = keepPhoneH;
+      root.className = keep.cls;
+      S.uiTheme = keep.theme; applyLook();
+      try{ go(prev.replace('page-', '')); }catch(e){}
+    }
+  });
+
+  await TA('底栏：外框与胶囊同心（四边留白相等 + 圆角 = 胶囊圆角 + 留白）', async function(){
+    var bar = document.querySelector('.tabbar');
+    if(!bar) return { ok:false, info:'找不到 .tabbar' };
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    try{
+      S.uiTheme = 'pro'; applyLook();
+      await sleep(150);
+      var cs = getComputedStyle(bar);
+      var af = getComputedStyle(bar, '::after');
+      var bw = parseFloat(cs.borderLeftWidth) || 0;
+      var padL = parseFloat(cs.paddingLeft) || 0;
+      var padT = parseFloat(cs.paddingTop) || 0;
+      var pillH = parseFloat(af.height);
+      var dockH = bar.getBoundingClientRect().height;
+      /* 上留白 = 内容框高度 − 胶囊高，再 / 2（胶囊是 top:50% + margin-top 居中的）。
+         ⚠️ 这里只能算到「内容框内」的留白，不含 border；所以侧留白也只能取 padding，
+         不能加 border —— 两边口径必须一致（第一版一边加边框一边没加，差 1px 假失败）。 */
+      var contentH = dockH - bw * 2 - padT * 2;
+      var topGap = (contentH - pillH) / 2;
+      /* 侧留白 = padding（胶囊的 left 取的是同一个值；border 是外框自己的线，不算缝） */
+      var sideGap = padL;
+      var rOuter = parseFloat(cs.borderTopLeftRadius);
+      var rPill = parseFloat(af.borderTopLeftRadius);
+      var gapsMatch = Math.abs(sideGap - topGap) <= 0.6;
+      var concentric = Math.abs(rOuter - (rPill + topGap)) <= 0.6;
+      /* 胶囊要是真 pill：圆角 = 半高 */
+      var isPill = Math.abs(rPill - pillH / 2) <= 0.6;
+      return {
+        ok: gapsMatch && concentric && isPill,
+        info: '侧留白 ' + sideGap.toFixed(1) + 'px / 上留白 ' + topGap.toFixed(1)
+          + 'px（应相等）· 外框圆角 ' + rOuter + ' = 胶囊 ' + rPill + ' + 留白 '
+          + topGap.toFixed(1) + '（同心=' + concentric + '）· 胶囊圆角=半高=' + isPill
+      };
+    } finally {
+      S.uiTheme = keep; applyLook();
+      go(prev.replace('page-', ''));
+    }
+  });
+
+  await TA('主题页：Classic 档能设背景图，且不显示玻璃档那套标识', async function(){
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    function vis(id){
+      var e = document.getElementById(id);
+      if(!e) return null;
+      return getComputedStyle(e).display !== 'none' && e.offsetParent !== null;
+    }
+    try{
+      setUiTheme('classic');
+      openView('theme');
+      await sleep(240);
+      /* 玻璃档的那一套（列表 / 标题 / 描边 / 说明段）都该收起来 ——
+         只收列表不收标题会留一个空分组，只收标题不收说明会讲一个不存在的功能。 */
+      var classic = {
+        glassH2: vis('glassH2'), glassLi: vis('glassLi'),
+        edgeLi: vis('edgeLi'), note: vis('uiProNote'), bgLi: vis('bgLi')
+      };
+      var classicOk = classic.bgLi === true
+        && classic.glassH2 === false && classic.glassLi === false
+        && classic.edgeLi === false && classic.note === false;
+      /* 背景图在 CLASSIC 下必须真的生效（不是只显示入口）：
+         基础样式里有 html.has-bg .phone 那一份，跟上皮肤的两份是两条独立链路。 */
+      var bgWas = S.bgImage;
+      S.bgImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+      applyLook();
+      await sleep(80);
+      var phone = document.getElementById('phone');
+      var bgImg = getComputedStyle(phone).backgroundImage || '';
+      var classicBgWorks = document.documentElement.classList.contains('has-bg')
+        && /url\(/.test(bgImg);
+      S.bgImage = bgWas; applyLook();
+      await sleep(60);
+      closeView('theme');
+      /* closeView 有 320ms 退场 + 父页返回，紧接着 openView 会被「同一时刻只允许
+         一层」那条规则吃掉（新页开了、旧页还在退），读到的还是上一轮的状态。
+         等它彻底收干净再开 —— 实测不等时 Pro 段全 false。 */
+      await sleep(460);
+
+      /* ⚠️ **直接写 S.uiTheme 不会更新显隐**：显隐写在 renderUiTheme() 里，
+         而真机上走的是 setUiTheme()（它内部 applyLook + renderUiTheme 一起调）。
+         测试里只调 applyLook 会得到"类对了、设置项没刷新"的中间态 ——
+         第一版就是这样误判成显隐逻辑坏了。要么调 setUiTheme，要么两个都调。 */
+      setUiTheme('pro');
+      await sleep(120);
+      openView('theme');
+      await sleep(260);
+      var proVals = {
+        glassH2: vis('glassH2'), glassLi: vis('glassLi'),
+        edgeLi: vis('edgeLi'), note: vis('uiProNote'), bgLi: vis('bgLi')
+      };
+      var proOk = proVals.glassH2 === true && proVals.glassLi === true
+        && proVals.edgeLi === true && proVals.note === true && proVals.bgLi === true;
+      closeView('theme');
+      return {
+        ok: classicOk && classicBgWorks && proOk,
+        info: 'Classic: 背景图入口=' + classic.bgLi + ' 玻璃标题/列表/描边/说明='
+          + [classic.glassH2, classic.glassLi, classic.edgeLi, classic.note].join('/')
+          + ' 背景图真的生效=' + classicBgWorks
+          + ' · Pro: ' + ['标题','列表','描边','说明','背景图'].map(function(k,i){
+              return k + '=' + proVals[['glassH2','glassLi','edgeLi','note','bgLi'][i]];
+            }).join(' ')
+      };
+    } finally {
+      S.uiTheme = keep; applyLook();
+      try{ closeView('theme'); }catch(e){}
+      go(prev.replace('page-', ''));
+    }
+  });
+
+  await TA('底栏：尺寸收紧，胶囊拉伸时不顶出 dock', async function(){
+    var bar = document.querySelector('.tabbar');
+    if(!bar) return { ok:false, info:'找不到 .tabbar' };
+    var keep = S.uiTheme;
+    var prev = (document.querySelector('.page.active') || {}).id || 'page-home';
+    try{
+      S.uiTheme = 'pro'; applyLook();
+      await sleep(150);
+      var r = bar.getBoundingClientRect();
+      var af = getComputedStyle(bar, '::after');
+      var pillH = parseFloat(af.height);
+      var pillW = parseFloat(af.width);
+      var padIn = parseFloat(getComputedStyle(bar).getPropertyValue('--pill-in'));
+      var radius = parseFloat(af.borderTopLeftRadius);
+      var proH = Math.round(r.height);
+      /* ② 不溢出只能靠**真的走一遍手势**来验 —— 上限是 JS 按「余量 ÷ 胶囊宽」算的，
+         断言在外面重算一遍公式等于什么都没测。这里派发 pointer 事件模拟一次快速
+         拖动，每帧读 transform 矩阵，把胶囊实际左右边界换算出来。
+         ⚠️ 屏幕越宽胶囊越宽，同样的比例扩得越多，所以必须按实际几何量，
+         不能用一个固定像素数（写死 0.20 的那版在宽视口下会溢出 9px）。 */
+      var rect = bar.getBoundingClientRect();
+      var cy = rect.top + rect.height / 2;
+      function pev(type, x){
+        return new PointerEvent(type, {
+          bubbles:true, cancelable:true, clientX:x, clientY:cy,
+          pointerId:1, pointerType:'touch', button:0, buttons:1
+        });
+      }
+      var x0 = rect.left + 30;
+      var over = 0, maxSxSeen = 1;
+      function probe(){
+        var af2 = getComputedStyle(bar, '::after');
+        var mm = /matrix\(([^)]*)\)/.exec(af2.transform);
+        var arr = mm ? mm[1].split(',').map(parseFloat) : [1, 0, 0, 1, 0, 0];
+        var sx = arr[0], tx = arr[4];
+        var pw2 = parseFloat(af2.width), pl = parseFloat(af2.left);
+        if(sx > maxSxSeen) maxSxSeen = sx;
+        /* 拉伸以自身中心为轴 → 左右各扩 pw2*(sx-1)/2 */
+        var half = pw2 * sx / 2;
+        var l = pl + tx + pw2 / 2 - half;
+        var rr = pl + tx + pw2 / 2 + half;
+        over = Math.max(over, -l, rr - rect.width);
+      }
+      try{
+        bar.dispatchEvent(pev('pointerdown', x0));
+        /* ⚠️ 必须**扫到两端**：中段离左右边太远，怎么拉都不会越界 ——
+           危险区在 idx≈0 和 idx≈2，那里胶囊中心贴着 dock 内边距。
+           只在中段游走的版本测出来恒为 0，等于什么都没验（第一版就是这样）。 */
+        for(var k = 1; k <= 12; k++){
+          bar.dispatchEvent(pev('pointermove', x0 + (rect.right - x0) * (k / 12)));
+          probe();
+        }
+        for(var k2 = 1; k2 <= 12; k2++){
+          bar.dispatchEvent(pev('pointermove', rect.right - (rect.right - x0) * (k2 / 12)));
+          probe();
+        }
+        bar.dispatchEvent(pev('pointerup', x0));
+      }catch(e){ over = 999; }
+      await sleep(80);
+      bar.style.setProperty('--pill-sx', '1');
+      S.uiTheme = 'classic'; applyLook();
+      await sleep(150);
+      var classicH = Math.round(bar.getBoundingClientRect().height);
+      /* 横向是这一轮的重点：dock 不能再「铺满」，必须比屏宽窄出可见的留白。
+         用「dock 宽 / 屏宽」判定，不写死像素 —— 换机型也不用改。
+         0.86 这个上限的意思是至少留 14% 的边（左右各 7%）。 */
+      var ratio = r.width / window.innerWidth;
+      /* 「不铺满」的判据是**左右都有可量到的留白**，不是占比区间：
+         dock 现在是定宽（3×92 + 2×8 + 2），宽屏上占比自然很小 ——
+         写成「不得小于 45%」会把定宽在宽屏下的正确行为判成错（实测 39% 时误报）。 */
+      var sideGap = (window.innerWidth - r.width) / 2;
+      var narrow = sideGap >= 20;
+      /* 三格要等分且格宽够放「22px 图标 + 四字标签」，太窄会挤 */
+      var cellW = (r.width - padIn * 2) / 3;
+      var cellOk = cellW >= 76;
+      return {
+        ok: proH >= 62 && proH <= 74
+          && classicH >= 70 && classicH <= 82
+          && pillH >= 46 && pillH <= 56
+          && Math.abs(radius - pillH / 2) <= 1
+          && isFinite(padIn) && padIn >= 6
+          && narrow && cellOk
+          && over <= 0.5
+          /* 只查「不越界」是不够的：把拉伸整段删掉也满足不越界。
+             峰值必须真的起来（>1.05），这条才抓得住「液体感被改没了」。 */
+          && maxSxSeen >= 1.05,
+        info: 'dock ' + Math.round(r.width) + '×' + proH + 'px（占屏 '
+          + (ratio * 100).toFixed(0) + '%，左右各留 ' + sideGap.toFixed(0)
+          + 'px）· 格宽 ' + cellW.toFixed(0)
+          + 'px · 经典 ' + classicH + 'px · 胶囊 ' + pillH + 'px/圆角 ' + radius
+          + ' · 余量 ' + padIn + 'px · 拖动峰值 sx=' + maxSxSeen.toFixed(2)
+          + ' · 越界 ' + over.toFixed(1) + 'px'
+      };
+    } finally {
+      bar.style.setProperty('--pill-sx', '1');
+      S.uiTheme = keep; applyLook();
+      go(prev.replace('page-', ''));
+    }
   });
 
   /* 加号菜单里「换个模型」点了没反应：applyModelPick 结尾会 openSheet('modelroles')，
@@ -2735,7 +3775,7 @@ const ASSERTS = String.raw`
       }
       return '';
     }
-    var want = { '联网搜索': 'globe', '侧栏按钮对齐': 'align', '灵动岛上岛': 'dynamic',
+    var want = { '联网搜索': 'globe', '导航栏位置': 'align', '灵动岛上岛': 'dynamic',
                  '管理技能': 'puzzle', '管理记忆': 'chip', '节假日模式': 'holiday',
                  '让 AI 记住我': 'chip', '备份学习数据': 'database', '特别鸣谢': 'heart',
                  '服务商与模型': 'sparkle',   /* 这个本来就该是 AI 星标，别换错 */
@@ -2827,10 +3867,13 @@ const ASSERTS = String.raw`
   T('字号：四档切换真的改变正文计算字号（图标/间距不动）', function(){
     var snapFs = S.fontScale;
     var root = document.documentElement;
-    var body = document.getElementById('page-me');
+    /* 样本页从「我的」换成「专注与学习」：前者重构后只剩入口卡（没有 .li），
+       而这一条要量的正是列表行的正文。搬动后要跟着走，别让断言指向空地儿。 */
+    var host = 'view-study';
+    var body = document.getElementById(host);
     // 取一个用 --fs-body 的元素做样本：列表主标题
-    var probe = document.querySelector('#page-me .li .tx b');
-    if(!body || !probe) return { ok:false, info:'找不到 #page-me 或 .li .tx b 样本' };
+    var probe = document.querySelector('#' + host + ' .li .tx b');
+    if(!body || !probe) return { ok:false, info:'找不到 #' + host + ' 或 .li .tx b 样本' };
 
     function measure(at){
       S.fontScale = at; applyLook();
@@ -2838,7 +3881,7 @@ const ASSERTS = String.raw`
         body: parseFloat(getComputedStyle(probe).fontSize) || 0,
         htmlAttr: root.dataset.fs || '',
         // 图标/间距的对照：拿一个不参与字号的尺寸（列表图标容器宽）
-        icon: parseFloat(getComputedStyle(document.querySelector('#page-me .li .ic')).width) || 0
+        icon: parseFloat(getComputedStyle(document.querySelector('#' + host + ' .li .ic')).width) || 0
       };
     }
     try{
@@ -4099,7 +5142,10 @@ const ASSERTS = String.raw`
       setUiPro(false);
       var offClass = !document.documentElement.classList.contains('ui-pro');
       var offRadius = radius();
-      var rowsHidden = ['glassLi','edgeLi','bgLi'].every(function(id){
+      /* 玻璃档 / 描边必须在 Classic 下收起。
+         ⚠️ bgLi（背景图）**不在此列**：它是全局外观，Classic 也支持
+         （2026-10-23 用户明确要求经典档也能设图）。它有自己的一条断言。 */
+      var rowsHidden = ['glassLi','edgeLi','glassH2','uiProNote'].every(function(id){
         var el = document.getElementById(id);
         return el && getComputedStyle(el).display === 'none';
       });
@@ -4467,16 +5513,21 @@ const ASSERTS = String.raw`
       var out = [], seen = [];
       /* 经典档先扫一遍：这一条不该只在皮肤下成立 */
       setUiPro(false);
-      ['home', 'chat', 'me'].forEach(function(p){ hideViews(); go(p); out = out.concat(scan('classic:' + p, seen)); });
+      /* 我的页的列表已经拆进四个类页（2026-10-19），这里跟着扫二级页。
+         用 show 让它有布局（.view 不 show 时整块不可见，量出来全是 0）。 */
+      ['home', 'chat'].forEach(function(p){ hideViews(); go(p); out = out.concat(scan('classic:' + p, seen)); });
+      ['xj', 'me', 'study', 'data'].forEach(function(v){
+        hideViews(); go('home'); openView(v); out = out.concat(scan('classic:' + v, seen));
+      });
       ['schedule', 'notes', 'todos', 'focus', 'theme', 'about', 'aihub', 'ai', 'skills']
         .forEach(function(v){ hideViews(); go('home'); openView(v); out = out.concat(scan('classic:' + v, seen)); });
       /* Pro + 描边关：分隔线必须还在，高光必须没了 */
       setUiPro(true); setUiEdge(false);
-      hideViews(); go('me');
-      out = out.concat(scan('pro-edgeoff:me', seen));
+      hideViews(); go('home'); openView('xj');
+      out = out.concat(scan('pro-edgeoff:xj', seen));
       /* 取一条「描边开着时有线」的正常行做对照，别拿故意没线的行去量 */
       setUiEdge(true);
-      var rows = [].slice.call(document.querySelectorAll('#page-me .list .li')).filter(function(e){
+      var rows = [].slice.call(document.querySelectorAll('#view-xj .list .li')).filter(function(e){
         var n = e.nextElementSibling; while(n && !n.classList.contains('li')) n = n.nextElementSibling;
         return !!n && lineOf(e).vis;
       });
@@ -4494,7 +5545,7 @@ const ASSERTS = String.raw`
       /* 用户点名的两处 */
       hideViews(); go('home'); openView('ai');
       var callLine = lineBefore('AI 对我的称呼');
-      hideViews(); go('me');
+      hideViews(); go('home'); openView('study');
       var termLine = lineBefore('学期起始日');
       hideViews(); go('home');
       return { ok: !out.length && dividerAlive && dividerOn && hairChanged
@@ -5003,9 +6054,16 @@ const ASSERTS = String.raw`
       r.classList.add('kb-open');
       var classicRoom = parseFloat(getComputedStyle(sc).paddingBottom);
       r.classList.remove('kb-open');
+      /* 判据不写死数字：要测的是「留白够不够底栏用」，不是「是不是 96」。
+         dock 高度与它自身的下边距一起量，改尺寸时这条断言不用跟着改
+         （2026-10-23 底栏从 68 收到 56，写死 90 的那版就假失败了）。 */
+      var bar = document.querySelector('.tabbar');
+      var barH = bar ? bar.getBoundingClientRect().height : 0;
+      var need = barH + 8;
       return {
-        ok: dockRoom >= 90 && kbRoom === 0 && classicRoom < 20,
-        info: 'Pro 有底栏时 ' + dockRoom + 'px · 键盘弹起 ' + kbRoom + 'px · 经典档 ' + classicRoom + 'px'
+        ok: dockRoom >= need && kbRoom === 0 && classicRoom < 20,
+        info: 'Pro 有底栏时 ' + dockRoom + 'px（dock ' + Math.round(barH) + 'px + 8 起算）'
+          + ' · 键盘弹起 ' + kbRoom + 'px · 经典档 ' + classicRoom + 'px'
       };
     } finally {
       r.classList.remove('kb-open');
@@ -5048,14 +6106,16 @@ const ASSERTS = String.raw`
   /* 2026-10-18：我的页按压只要缩放，不要任何遮罩（用户明确要求）。
      单行卡缩整卡（.li-zoom），多行卡缩那一行（.press-on）；两者都不许挂 .li-press，
      也不许有 .press-on 的 brightness（那也是遮罩的一种）。 */
-  T('按压：我的页只缩不放遮罩，别处遮罩仍在', function(){
+  T('按压：设置类页只缩不放遮罩，别处遮罩仍在', function(){
+    /* 2026-10-19 我的页重构：列表从 #page-me 搬到了四个类页里。
+       规则本身没变（单行卡缩整卡、多行卡缩那一行、都不上遮罩），
+       只是取样点跟着搬 —— 否则这条会「因为找不到卡片」而假失败。 */
     var act = document.querySelector('.page.active');
     var keepTab = act ? act.id : 'page-home';
-    go('me');
-    var lists = [].slice.call(document.querySelectorAll('#page-me .list'));
+    var lists = [].slice.call(document.querySelectorAll('#view-xj .list, #view-study .list'));
     var one = lists.filter(function(l){ return l.querySelectorAll('.li.tap').length === 1; })[0];
     var many = lists.filter(function(l){ return l.querySelectorAll('.li.tap').length > 1; })[0];
-    if(!one || !many) return { ok:false, info:'我的页没找到单行/多行卡片' };
+    if(!one || !many) return { ok:false, info:'设置类页没找到单行/多行卡片（找到 ' + lists.length + ' 张卡）' };
     function down(li, pid){
       var r = li.getBoundingClientRect();
       li.dispatchEvent(new PointerEvent('pointerdown', { bubbles:true, cancelable:true,
@@ -5286,6 +6346,13 @@ const ASSERTS = String.raw`
       go('home');
       openView('schedule');
       await sleep(420);
+      /* ⚠️ 桌面预览里 syncInsets() 会用 env(safe-area-inset-top) 把 --sb-inset 冲回 0，
+         而浏览器里那个值恒为 0。它在闭包里（赋一个同名函数只是新建了全局，
+         绑在 resize 上的还是原来那个 —— 实测无效），所以不靠打桩：
+         **测量前再写一次**。这条测的是「CSS 是否尊重 --sb-inset」，
+         不是「原生值会不会被别的监听器覆盖」，后者在真机上走的是 isApp 分支。 */
+      window.__setInsets(sb, 16);
+      await sleep(30);
       var v = document.getElementById('view-schedule');
       var vr = v.getBoundingClientRect();
       var cs = getComputedStyle(v);
@@ -5301,7 +6368,13 @@ const ASSERTS = String.raw`
       var radZero = parseFloat(cs.borderTopLeftRadius) === 0;
       closeView('schedule');
       await sleep(600);
-      /* ⑤ 全屏层自己让位 */
+      /* ⑤ 全屏层自己让位。
+         ⚠️ 关页之后还要再写一次：closeView 会触发 syncBack 等一串收尾，
+         其中任何一处跑到 syncInsets() 都会把 --sb-inset 冲回 0（桌面预览下 env() 恒为 0）。
+         实测这就是本条的 flaky 来源 —— 连跑四次里第一次报「全屏层让位=0px/0px」，
+         而顶栏那几项都是对的（它们在上面那次重写之后就读了）。 */
+      window.__setInsets(sb, 16);
+      await sleep(30);
       var nf = getComputedStyle(document.getElementById('noteFull'));
       var ik = getComputedStyle(document.getElementById('inkFull'));
       var fixedClears = parseFloat(nf.paddingTop) === sb && parseFloat(ik.paddingTop) === sb;
@@ -6652,6 +7725,13 @@ try {
     const pat = new RegExp('(?:^|[^A-Za-z0-9_$.])' + 'T' + '(?:A)?\\s*\\(', 'g');
     const countT = s => ((strip(s).match(pat) || []).length);
     const inN = countT(inside), outN = countT(outside);
+    /* ⚠️ 关于「模板体里不能出现反引号」：2026-10-22 一天踩了三次
+       （注释里写 markdown 围栏、代码块围栏、注释里引用函数名）。
+       曾想加一条守卫在这里数反引号，**实测无效**：反引号一出现，
+       String.raw 模板当场截断，整个文件解析失败 —— 守卫根本跑不到。
+       所以这条只能靠写的时候注意：**断言体（含注释）里一律不要写反引号**，
+       需要围栏就用 String.fromCharCode(96) 拼。坏处是它会以 SyntaxError 的
+       形式当场炸出来（响亮但难看），不会静默。 */
     /* 模板外一个 T/TA 都不该有。
        ⚠️ 这条守卫只覆盖「T( / TA( 写到了模板外」这一类 ——
        也就是本轮真踩的那一类（插到了 return JSON.stringify(R) 之后）。
