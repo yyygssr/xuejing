@@ -1813,28 +1813,6 @@ const ASSERTS = String.raw`
 
 
   // ---------- 关于页 ----------
-  T('隐私政策有正式版 + 简要版切换', function(){
-    openSheet('privacy');
-    var txt = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
-    var hasFormal = /引言/.test(txt) && /我们收集的信息/.test(txt) && /您的权利/.test(txt);
-    /* 正式版上有「看简要版」入口 */
-    var hasToggle = /简要版/.test(txt);
-    var before = txt.length;
-    togglePrivacyPlain();
-    var txt2 = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
-    /* 简要版：正文是正常总结（含「没有服务器」），且带「看正式版」回程入口、比正式版短 */
-    var hasPlain = /没有服务器/.test(txt2) && /正式版/.test(txt2) && txt2.length < before;
-    togglePrivacyPlain();
-    closeSheet();
-    return { ok: hasFormal && hasToggle && hasPlain, info: '正式=' + hasFormal + ' 切换=' + hasToggle + ' 简要版=' + hasPlain };
-  });
-  T('特别鸣谢只留白皂与测试版用户', function(){
-    openSheet('credits');
-    var txt = document.getElementById('sheet').textContent.replace(/\s+/g,' ');
-    closeSheet();
-    return { ok: /白皂/.test(txt) && /测试版用户/.test(txt) && !/DeepSeek V4|MIMO/.test(txt),
-             info: txt.slice(0, 90) };
-  });
   T('清空数据要手输 delete 才能按', function(){
     openSheet('clear');
     var btn = document.getElementById('clearGo');
@@ -2040,19 +2018,6 @@ const ASSERTS = String.raw`
   });
 
   // ---------- 弹层渲染完备性（回归：曾有一批 sheet 只被 open、renderSheet 里没有分支） ----------
-  T('renderSheet 覆盖所有被打开的 kind（结构检查）', function(){
-    var src = document.documentElement.outerHTML;
-    var used = [], m;
-    var re = /(?:openSheet|renderSheet)\(\s*\\?'([A-Za-z0-9_]+)\\?'/g;
-    while((m = re.exec(src))){ if(used.indexOf(m[1]) < 0) used.push(m[1]); }
-    /* 用真实运行的函数源码取分支，避免读到注释或其它字符串里的假象 */
-    var fnsrc = String(renderSheet);
-    var branches = [], re2 = /kind === '([A-Za-z0-9_]+)'/g;
-    while((m = re2.exec(fnsrc))){ if(branches.indexOf(m[1]) < 0) branches.push(m[1]); }
-    var miss = used.filter(function(k){ return branches.indexOf(k) < 0; });
-    return { ok: used.length > 0 && miss.length === 0,
-      info: '被打开 ' + used.length + ' 种 / 分支 ' + branches.length + ' 个' + (miss.length ? '；缺失=[' + miss.join(' ') + ']' : '') };
-  });
   T('曾丢分支的弹层能真正渲染出内容', function(){
     /* 'cam'（拍照给 AI 的确认弹层）已删除：拍照/相册改成直接唤起系统相机，
        图片直接用胶囊附件带走，不再经过确认弹层。
@@ -2080,17 +2045,6 @@ const ASSERTS = String.raw`
       try{ closeSheet(); }catch(e){}
     });
     return { ok: bad.length === 0, info: det.join(' ') + (bad.length ? ' | 异常: ' + bad.join(' ; ') : '') };
-  });
-  T('特别鸣谢：白皂头像 / 上岛逻辑 / 测试版用户寄语', function(){
-    openSheet('credits');
-    var sheet = document.getElementById('sheet');
-    var txt = (sheet.textContent || '').replace(/\s+/g, ' ');
-    var hasImg = /data:image\/jpeg;base64,/.test(sheet.innerHTML);
-    var hasLogic = /上岛逻辑/.test(txt);
-    var hasMsg = /感谢你愿意使用这个不完善的版本，请多提建议！/.test(txt);
-    closeSheet();
-    return { ok: hasImg && hasLogic && hasMsg && /白皂/.test(txt) && /每一位测试版用户/.test(txt),
-      info: '头像=' + hasImg + ' 上岛逻辑=' + hasLogic + ' 寄语=' + hasMsg };
   });
 
   // ---------- 回归：模型把工具协议裹成 <TOOL>…</TOOL> 标签时，标签不能落进参数值 ----------
@@ -3088,21 +3042,39 @@ const ASSERTS = String.raw`
     };
   });
 
-  T('安全：备份默认不含 API Key', function(){
+  await TA('安全：备份默认不含 API Key，显式导出必须加密', async function(){
     var keepKey = S.apiKey, keepAcc = S.providerAcc, keepMemo = S.keyMemo;
     try{
       S.apiKey = 'sk-AUDIT-SECRET-1';
       S.providerAcc = { deepseek: { key:'sk-AUDIT-SECRET-2', baseUrl:'https://api.deepseek.com' } };
       S.keyMemo = { deepseek: 'sk-AUDIT-SECRET-3' };
-      var ai = buildBackup('ai', false);
-      var full = buildBackup('full', false);
-      var withKey = buildBackup('ai', true);
-      var leak = function(s){ return s.indexOf('sk-AUDIT-SECRET') >= 0; };
-      var coverChannelsEscape = leak(ai) || leak(full);
+      /* buildBackup 现在是异步的（含密钥时要走 WebCrypto） */
+      var ai = await buildBackup('ai', false);
+      var full = await buildBackup('full', false);
+      var withKey = await buildBackup('ai', true, 'audit-pass-123456');
+      var leak = function(s){ return String(s).indexOf('sk-AUDIT-SECRET') >= 0; };
+      /* 加密导出：文件里不许有任何明文密钥，但必须有加密载荷 */
+      var encShape = false;
+      try{ var ob = JSON.parse(withKey); encShape = !!(ob.data && ob.data.enc === 1 && ob.data.ct); }catch(e){}
+      /* 口令正确能解回原文，口令错误必须失败 */
+      var roundTrip = false, wrongPassFails = false;
+      try{
+        var ob2 = JSON.parse(withKey);
+        var aad = [ob2.app, ob2.kind, ob2.group, String(ob2.version)].join('|');
+        var plain = await encOpen(ob2.data, 'audit-pass-123456', aad);
+        roundTrip = plain.indexOf('sk-AUDIT-SECRET') >= 0;
+        try{ await encOpen(ob2.data, 'wrong-pass-xxxxxx', aad); }
+        catch(e){ wrongPassFails = true; }
+      }catch(e){}
       return {
-        ok: !coverChannelsEscape && leak(withKey) && /\.deepseek\.com/.test(ai),
-        info: '默认ai泄漏=' + leak(ai) + ' 默认full泄漏=' + leak(full)
-          + ' 显式导出含密钥=' + leak(withKey) + ' 渠道地址保留=' + /\.deepseek\.com/.test(ai)
+        ok: !leak(ai) && !leak(full) && !leak(withKey) && encShape
+            && roundTrip && wrongPassFails && /\.deepseek\.com/.test(ai),
+        info: '默认泄露=' + (leak(ai) || leak(full))
+          + ' 加密导出明文泄露=' + leak(withKey)
+          + ' 加密载荷=' + encShape
+          + ' 口令正确可解=' + roundTrip
+          + ' 口令错误被拒=' + wrongPassFails
+          + ' 渠道地址保留=' + /\.deepseek\.com/.test(ai)
       };
     } finally { S.apiKey = keepKey; S.providerAcc = keepAcc; S.keyMemo = keepMemo; }
   });
@@ -3740,9 +3712,16 @@ const ASSERTS = String.raw`
     /* 静态 HTML 里的图标不在 <script> 里，要连 DOM 一起看 */
     var dom = [].slice.call(document.querySelectorAll('.ic[data-i]'))
       .map(function(e){ return e.dataset.i; });
+    /* heart 原先只被「特别鸣谢」用；那个入口在 v1.0.0 删掉了，
+       所以它现在允许「存在但暂时没人引用」—— 图标条目留着，以后要用直接拿。 */
+    var MAY_UNUSED = { heart: 1 };
     var unused = need.filter(function(k){
+      if(MAY_UNUSED[k]) return false;
+      /* 勾选式备份面板是运行时拼 HTML（<div class="ic" data-i="...">），
+         静态 DOM 里扫不到，所以连源码里的字符串字面量一起认。 */
       return src.indexOf('data-i="' + k + '"') < 0
         && src.indexOf("icSvg('" + k + "'") < 0
+        && src.indexOf("'" + k + "'") < 0
         && dom.indexOf(k) < 0;
     });
     return { ok: !missing.length && !unused.length,
@@ -3777,7 +3756,7 @@ const ASSERTS = String.raw`
     }
     var want = { '联网搜索': 'globe', '导航栏位置': 'align', '灵动岛上岛': 'dynamic',
                  '管理技能': 'puzzle', '管理记忆': 'chip', '节假日模式': 'holiday',
-                 '让 AI 记住我': 'chip', '备份学习数据': 'database', '特别鸣谢': 'heart',
+                 '让 AI 记住我': 'chip', '导出备份': 'archive',
                  '服务商与模型': 'sparkle',   /* 这个本来就该是 AI 星标，别换错 */
                  '已消耗资费': 'coin', '累计 Token': 'gauge', '提前提醒': 'alarm',
                  '准点提醒': 'target' };

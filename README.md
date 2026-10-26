@@ -1,5 +1,8 @@
 # 学径
 
+> **本项目已归档，不再维护。** 最终版本 **v1.0.0**（MIT 协议）。
+> 代码与安装包会继续保留，可自由下载、使用、修改。
+
 > 书山有径而学海无涯，循此学径，读万卷书，行万里路。
 
 一个**本地优先**的 Android 学习管理应用：课表、专注计时、上课提醒、待办、笔记、AI 对话与行程规划。
@@ -110,29 +113,31 @@ node tools/domtest.mjs
 
 ## 开源协议
 
-本项目采用 [GNU Affero General Public License v3.0](LICENSE)（AGPL-3.0）发布。
+本项目采用 [MIT License](LICENSE) 发布。
 
 ```
 学径 / XueJing
-Copyright (C) 2026 烟墟
+Copyright (c) 2026 yyygssr
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, subject to the following conditions:
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 ```
 
-**关于 AGPL 第 13 条（网络交互）**：学径本身不提供任何网络服务，用户交互都发生在本地设备上，
-所以这一条目前不构成额外义务。但如果你基于本项目改出**通过网络向用户提供服务**的版本，
-该条款会要求你向这些用户提供对应版本的完整源代码。
+简单说：**你可以拿去做任何事** —— 商用、闭源、修改、再发布，都不需要经过同意，
+只需保留上面的版权声明。
+
+> **历史说明**：v0.4.x 及更早版本以 AGPL-3.0 发布，该授权不可撤销；
+> 自 v1.0.0 起改为 MIT。如果你使用的是旧版本，仍适用当时的 AGPL-3.0。
 
 ## 贡献
 

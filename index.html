@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
-<title>学径 · v1.1.2</title>
+<title>学径 · v1.0.0</title>
 <style>
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   :root{
@@ -1079,8 +1079,22 @@
        opacity:0 + pointer-events:none 已经等于「看不见也点不着」，够稳。 */
   .view{position:absolute;left:0;right:0;top:46px;bottom:0;background:var(--bg);z-index:30;
     display:flex;flex-direction:column;
-    opacity:0;pointer-events:none;
-    transition:opacity .22s ease}
+    /* ⚠️ 2026-10-26 真机事故（WebView 146.0.7680.177 / Android 17）：
+       原来这里只有 opacity:0，实测**不生效** —— 23 个 .view 的不透明背景
+       照样参与合成，叠在 z-index:30 上把整个主界面盖死。因为
+       pointer-events:none，点击还能穿透到底下的底栏，于是表现为
+       「整屏只剩背景色，但底栏位置点了有反应、二级页动画也正常」。
+       修法与 #view-focus 早就采用的一致：隐藏态补 visibility:hidden，
+       让它**结构性地**退出绘制树。
+
+       ⚠️⚠️ 但 visibility 不能**立刻**生效：closeView 会先摘 .show 再播退场动画，
+       靠 WAAPI 的 fill:both 压住 CSS 的 opacity:0 保住可见性。而 visibility
+       是离散属性、不在 WAAPI 的覆盖范围内 —— 立刻隐藏等于把退场动画整个抹掉
+       （真机症状：返回时二级页"啪"一下消失，没有滑出/收缩）。
+       所以这里用 transition 把 visibility 的切换**延迟到退场动画之后**：
+       基础态 visibility:hidden 但 transition-delay = 动画时长，动画期间仍是 visible。 */
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .22s ease,visibility 0s linear .34s}
   /* ⚠️ pointer-events 必须**立刻**跟着 .show 走，不能等 opacity 过渡完。
      .view 有 transition:opacity .22s，摘掉 .show 之后 opacity 是平滑滑回 0 的：
      如果 pointer-events 也在这个过渡里（或者内联 opacity 被动画/竞态写成了 1），
@@ -1091,7 +1105,9 @@
      这里把它写进基础态而不是只靠 .show 覆盖，是为了让「摘 show = 立刻不吃事件」
      成为结构上成立的事，不依赖任何一处 JS 的收尾是否漏了。 */
   .view:not(.show){pointer-events:none !important}
-  .view.show{opacity:1;pointer-events:auto}
+  /* 显示态：visibility 必须**立刻**生效（不能有 delay），否则进场第一帧还是藏的 */
+  .view.show{opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity .22s ease,visibility 0s}
   /* 二级页四角统一收到应用圆角（--view-r）。
      之前只有底部两角是 40px、顶部直角，所以展开动画里"边是直的"。
      顶边在 top:46px，四角成圆之后它读起来是一块浮起的面板 —— 与 Pro 的
@@ -3385,22 +3401,13 @@ html.ui-pro .page{animation:none}
       <div class="list">
         <div class="li" style="padding:12px 14px">
           <div class="tx" style="font-size:11.5px;color:var(--sub);line-height:1.65">
-            学习数据和 AI 服务分成两份：换手机时只带课程与专注记录，就不必把 API Key 一起发出去。
+            导出时自己勾选要带走的内容。勾了 API Key 就需要设一个口令加密，否则只能明文。
           </div>
         </div>
-        <div class="li tap" onclick="doBackup('study')">
-          <div class="ic" data-i="database"></div><div class="tx"><b>备份学习数据</b><small>课表、专注记录、行程、偏好与个人资料</small></div><div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li tap" onclick="doBackup('ai')">
-          <div class="ic" data-i="key"></div><div class="tx"><b>备份 AI 服务配置</b><small>服务商、模型选择与地址（<b style="color:var(--brand)">不含</b> API Key，换机后需重填）</small></div><div class="val"><span class="arrow">›</span></div>
-        </div>
-        <!-- 含密钥导出单独一行：默认路径永远不带密钥，要用的人得自己找到这里、
-             再经过一次风险确认（审计 H-14）。 -->
-        <div class="li tap" onclick="backupSecretConfirm('ai')">
-          <div class="ic" data-i="alarm"></div><div class="tx"><b>连 API Key 一起导出</b><small>等同于账户密码，只在换机时用</small></div><div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li tap" onclick="doBackup('full')">
-          <div class="ic" data-i="archive"></div><div class="tx"><b>导出完整备份</b><small>上面两份合成一个文件</small></div><div class="val"><span class="arrow">›</span></div>
+        <div class="li tap" onclick="openBackupPicker()">
+          <div class="ic" data-i="archive"></div>
+          <div class="tx"><b>导出备份</b><small>勾选要带走的内容，生成一个文件</small></div>
+          <div class="val"><span class="arrow">›</span></div>
         </div>
         <div class="li tap" onclick="document.getElementById('restoreFile').click()" style="border-bottom:0">
           <div class="ic" data-i="restore"></div><div class="tx"><b>从文件恢复</b><small>自动识别是学习数据、AI 服务还是完整备份</small></div><div class="val"><span class="arrow">›</span></div>
@@ -3411,7 +3418,7 @@ html.ui-pro .page{animation:none}
       <div class="h2">关于</div>
       <div class="list">
         <div class="li tap" onclick="openView('about')" style="border-bottom:0">
-          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v0.3.4 · beta · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
+          <div class="ic" data-i="appmark"></div><div class="tx"><b>关于学径</b><small>v1.0.0 · 清空数据在这里</small></div><div class="val"><span class="arrow">›</span></div>
         </div>
       </div>
       <div style="height:6px"></div>
@@ -3804,7 +3811,7 @@ html.ui-pro .page{animation:none}
       <div class="about-hero">
         <div class="about-logo" id="aboutLogo"></div>
         <div class="about-name">学径</div>
-        <div class="about-ver">v0.3.4 · beta</div>
+        <div class="about-ver">v1.0.0</div>
       </div>
 
       <div class="about-motto">
@@ -3812,21 +3819,6 @@ html.ui-pro .page{animation:none}
       </div>
 
       <div class="list">
-        <div class="li tap" onclick="openSheet('diag')">
-          <div class="ic" data-i="log"></div>
-          <div class="tx"><b>运行日志 · 问题报告</b><small>记录所有报错与操作，一键生成可直接贴进 Issue 的报告</small></div>
-          <div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li tap" onclick="openSheet('privacy')">
-          <div class="ic" data-i="device"></div>
-          <div class="tx"><b>隐私政策</b><small>学径无服务器，数据只在本机</small></div>
-          <div class="val"><span class="arrow">›</span></div>
-        </div>
-        <div class="li tap" onclick="openSheet('credits')">
-          <div class="ic" data-i="heart"></div>
-          <div class="tx"><b>特别鸣谢</b><small>协助完成本应用的伙伴</small></div>
-          <div class="val"><span class="arrow">›</span></div>
-        </div>
         <div class="li tap" onclick="clearAll()">
           <div class="ic" style="color:var(--danger);background:rgba(224,80,90,.12)" data-i="trash"></div>
           <div class="tx"><b style="color:var(--danger)">清空本机数据</b>
@@ -3836,8 +3828,7 @@ html.ui-pro .page{animation:none}
       </div>
 
       <div class="about-foot">
-        对学径有什么想法，或者遇到了问题，<br/>都欢迎直接告诉作者。
-        <div style="margin-top:8px;opacity:.85">powered by 烟墟</div>
+        <div style="opacity:.85">powered by 烟墟</div>
       </div>
     </div>
     </div>
@@ -4058,7 +4049,7 @@ html.ui-pro .page{animation:none}
    - 原生壳桥接：返回手势、计时通知、上课提醒调度、文件选择
    ============================================================ */
 
-var APP_VER = 'v0.3.4';
+var APP_VER = 'v1.0.0';
 var KEY = 'xuejing-v3';
 var OLDKEY = 'xuejing-v2';
 /* 应用图标（与桌面图标同一张图）的 base64 dataURL，由构建时脚本灌入。
@@ -7457,11 +7448,15 @@ function openView(id){
     var pid = o.id.replace(/^view-/, '');
     if(!VIEW_PARENT[id]) VIEW_PARENT[id] = pid;
     o.style.transition = ''; o.style.opacity = ''; o.style.transform = '';
+    o.style.visibility = '';
     o.classList.remove('show', 'anim-in', 'anim-out');
   });
   v.style.transition = '';
   v.style.opacity = '';
   v.style.transform = '';
+  /* 上一次退场时写过 inline visibility:visible，这里必须清掉，
+     否则这一页以后永远"隐藏不掉"（可见性被内联值钉住了）。 */
+  v.style.visibility = '';
   if(id === 'focus'){
     v.classList.remove('anim-out', 'anim-in');
     /* 专注页也要那一层背景模糊 —— .scrim 才是挂 backdrop-filter 的那层，
@@ -7566,6 +7561,8 @@ function closeView(id){
      之前 v0.3.x 踩过同一类（先摘 show 再摘 anim-out 会闪），这次的顺序是
      「样式先改、动画覆盖、结束再清」，两件事互不依赖。 */
   v.style.transition = 'none';
+  /* ⚠️ 内联 transition:none 会把 CSS 里 visibility 的延迟也一起干掉，
+     所以退场期间的可见性由下面这段 JS 显式接管（见 _hideAfter）。 */
   /* 从哪一格长出来的，就缩回哪一格；没有来源才向下滑走。 */
   var _from = VIEW_FROM[id];
   var _a = (_from && _from.isConnected && _from.classList.contains('g-tile'))
@@ -7576,12 +7573,28 @@ function closeView(id){
   v.classList.remove('show');
   if(_a){
     /* ⚠️ 这里以前写死 215ms。几何收缩要 300ms，于是每次从卡片返回都被砍掉三分之一，
-       真机上就是"没有返回动画、直接消失"。现在按动画自己的时长来收尾。 */
+       真机上就是"没有返回动画、直接消失"。现在按动画自己的时长来收尾。
+       ⚠️⚠️ 收尾时必须**同时**把 visibility 打回 hidden：
+       基础态是 visibility:hidden（.show 摘掉后要靠动画 fill:both 撑住可见性），
+       而 WAAPI 的 fill:both **不覆盖 visibility**。所以：
+         · 动画期间：显式写 inline visibility:visible，让动画真的看得见
+         · 动画结束：cancel + 清掉 inline，元素回到 CSS 的 hidden
+       这两步缺一不可，否则要么动画看不见，要么动画播完还留在屏幕上。 */
+    v.style.visibility = 'visible';
     var _dur = 240;
     try{ _dur = (_a.effect.getTiming().duration) || 240; }catch(e){}
     setTimeout(function(){
+      /* ⚠️ 顺序很关键，这是「UI Pro 下动画播完闪一下」的根因：
+         先 cancel() 再改 visibility，中间会有一帧「动画已撤、元素还 visible」——
+         那一刻它按 CSS 初始态以 opacity:1 画出来，就是整块面板闪一下。
+         先写回 CSS 的隐藏态（visibility 交还给样式表），再 cancel 动画，
+         元素在动画撤销的瞬间已经是 hidden，看不到任何过渡帧。 */
+      try{ v.style.visibility = ''; }catch(e){}
       try{ _a.cancel(); }catch(e){}
     }, _dur + 12);
+  } else {
+    /* 没有动画（MOTION 被关掉/不支持）：立刻隐藏，别让它留在屏幕上 */
+    try{ v.style.visibility = ''; }catch(e){}
   }
   /* 关掉之后回到哪儿，三种情况按优先级：
      ① VIEW_BACK 里写死的特殊返回（aihub 要连带重开配置页）；
@@ -7981,7 +7994,10 @@ function healGhostViews(){
       /* 只处理「被写脏了」的：有内联残留，或真的在吃事件 */
       var dirty = el.style.opacity !== '' || el.style.transform !== ''
         || el.style.clipPath !== '' || el.style.willChange !== ''
-        || el.style.borderRadius !== '' || el.style.transition !== '';
+        || el.style.borderRadius !== '' || el.style.transition !== ''
+        /* 退场时为了保住动画可见性会临时写 inline visibility，
+           如果收尾没跑到（进程被杀、动画被打断），这条也要能被自愈清掉 */
+        || el.style.visibility !== '';
       var cs = null;
       try{ cs = getComputedStyle(el); }catch(e){}
       var eating = !!cs && (cs.pointerEvents !== 'none' || Number(cs.opacity) > 0.01);
@@ -7994,6 +8010,7 @@ function healGhostViews(){
       el.style.willChange = '';
       el.style.borderRadius = '';
       el.style.transition = '';
+      el.style.visibility = '';
       fixed.push(id);
     });
     /* 非 .view 的全屏层：同样按「业务状态为空但 DOM 还开着」判脏。
@@ -8129,10 +8146,20 @@ function collapseFocusView(done){
        修法：代号过期只代表「别去动导航层」，清理自己那份状态照样要做，
        而且必须幂等（两次调用结果一样）。 */
     var stale = (gen !== _focusAnimGen);
-    try{ a && a.cancel(); }catch(e){}
-    view.classList.remove('show', 'anim-out');
+    /* ⚠️ 顺序：先摘 .show 和清内联样式，**最后**才 cancel 动画。
+       反过来（先 cancel 再摘 show）会露出一帧「动画已撤、元素还按 CSS 初始态
+       以 opacity:1 画着」—— 那就是 Pro 皮肤下「动画播完闪一下」的来源。 */
+    view.classList.remove('show', 'anim-out', 'anim-in');
     view.style.opacity = '';
     view.style.transform = '';
+    try{ a && a.cancel(); }catch(e){}
+    /* 再收一次 CSS 动画：取消 WAAPI 之后，.anim-out 的 CSS animation
+       可能被样式重算重新启动（时长 0 的残留），虽然看不见，但会一直挂在
+       getAnimations() 里，让「是否还有动画在跑」这类判断失真。 */
+    try{
+      var _as = view.getAnimations();
+      for(var _i=0;_i<_as.length;_i++){ try{ _as[_i].cancel(); }catch(e2){} }
+    }catch(e3){}
     /* scrim 留到动画播完再收：收得比页面早，关闭途中背景会突然变「清」 */
     document.body.classList.remove('view-open');
     if(done) done();
@@ -8189,120 +8216,9 @@ function closeSheet(){
   if(sheet) sheet.style.transform = '';
   syncBack();
 }
-/* ---------- 隐私政策 ----------
-   两套文案：正式版按通行写法分条，方便对外交代；
-   「省流」版把同一件事说成人话，左上角随时切换。 */
-var PRIVACY_FULL = [
-  '<div class="muted" style="font-size:11.5px;margin-top:10px;line-height:1.9">',
-  '<b>生效日期：2026 年 1 月 1 日</b>（本测试版适用）<br/><br/>',
-  '<b>一、引言</b><br/>',
-  '学径（以下简称「本应用」）是一款本地优先的学习管理工具。我们尊重并保护您的个人信息，',
-  '并遵循《中华人民共和国个人信息保护法》《中华人民共和国数据安全法》《中华人民共和国网络安全法》',
-  '以及相关法律法规的规定，制定本隐私政策。<br/>',
-  '本政策说明我们在何种情形下收集何种信息、信息如何被使用与存储、您可以如何行使自己的权利。',
-  '请您在使用本应用前仔细阅读并充分理解本政策。若不同意本政策的任何内容，请停止使用本应用。<br/><br/>',
-  '<b>二、我们收集的信息</b><br/>',
-  '1. <b>本地存储的应用数据</b>：为提供课表、待办、笔记、专注计时、行程规划等功能，本应用会在',
-  '您的设备本地存储您主动录入或生成的内容，包括但不限于课程安排、待办事项、笔记、专注与番茄钟记录、',
-  'AI 记忆条目、个人资料（昵称、头像、称呼）及各项偏好设置。<br/>',
-  '2. <b>设备权限</b>：为实现必要功能，本应用可能申请下列系统权限。您可以随时在系统设置中关闭，',
-  '关闭后对应功能不可用，但不影响其它功能的正常使用。<br/>',
-  '　· <b>通知</b>：上课/下课提醒、专注计时通知；<br/>',
-  '　· <b>精确闹钟</b>：保证课前提醒准点；<br/>',
-  '　· <b>日历（只读）</b>：读取系统日历中的法定节假日，用于在放假当天自动隐藏课程；<br/>',
-  '　· <b>音量控制</b>：上课期间静音；<br/>',
-  '　· <b>网络</b>：仅在您主动使用 AI 功能或拉取模型列表时发起请求。<br/>',
-  '3. <b>我们不收集的信息</b>：本应用不收集您的通讯录、短信、通话记录、位置、相册中的其它照片、',
-  '设备识别码或任何用于用户画像的追踪信息。<br/><br/>',
-  '<b>三、我们如何使用信息</b><br/>',
-  '1. 本地数据仅用于在本机实现您所使用的功能，例如展示课表、统计专注时长、生成行程与周总结。<br/>',
-  '2. 本应用<b>不运营任何服务端</b>，不存在将上述数据回传至开发者服务器的通道，',
-  '因此我们不掌握、也无法访问您设备上的任何应用数据。<br/>',
-  '3. 部分系统权限由系统层面强制使用，例如通知权限仅在系统通知栏展示您设定的提醒内容。<br/><br/>',
-  '<b>四、信息的存储与保留</b><br/>',
-  '1. 全部应用数据保存在您设备的应用私有存储区域，由操作系统实施隔离保护。<br/>',
-  '2. 除非您主动导出备份文件，数据不会离开您的设备。<br/>',
-  '3. 您可以随时通过「关于学径 → 清空本机数据」删除全部应用数据；该操作不可撤销。',
-  '为防止误触，执行前需要您手动输入确认词。<br/><br/>',
-  '<b>五、信息的共享、转让与公开披露</b><br/>',
-  '1. 我们不会出售、出租、共享或以其他方式向任何第三方提供您的个人信息。<br/>',
-  '2. <b>第三方 AI 服务</b>：当您主动使用 AI 对话、识图导入、行程规划、周总结等功能时，',
-  '相关文本内容（可能包含您的对话内容与学习档案摘要）会被发送至<b>您自行选择并配置的 AI 服务商</b>。',
-  '该等信息的处理适用该服务商自身的隐私政策，与本应用开发者无关。<br/>',
-  '3. API Key 由您自行填入，仅保存在本机，并仅用于向您所配置的服务商发起鉴权请求。',
-  '本应用不会将其发送至任何其他地址。<br/>',
-  '4. 除法律法规或司法、行政机关的强制性要求外，我们不会向任何第三方披露您的信息。',
-  '由于我们不掌握任何数据，此类情形实际上无法发生。<br/><br/>',
-  '<b>六、信息安全</b><br/>',
-  '1. 我们采取合理的技术措施保护数据在设备本地的安全性，包括使用系统应用沙箱与私有存储。<br/>',
-  '2. 请您妥善保管设备本身与解锁凭证，并自行审慎选择可信的 AI 服务商。',
-  '若因设备丢失、越狱/Root、或向不可信服务提交内容而造成的信息泄露，本应用无法控制。<br/><br/>',
-  '<b>七、您的权利</b><br/>',
-  '1. <b>查阅与更正</b>：您可以随时在本应用内查阅、修改课程、待办、笔记、个人资料与各项设置。<br/>',
-  '2. <b>删除</b>：您可以通过「清空本机数据」删除全部信息，或逐项删除具体条目（如记忆、聊天记录）。<br/>',
-  '3. <b>导出</b>：您可以通过「备份」将学习数据或 AI 配置导出为文件，保存至您指定的位置。<br/>',
-  '4. <b>撤回授权</b>：您可以在系统设置中关闭已授予的权限，或停止使用依赖该权限的功能。<br/><br/>',
-  '<b>八、未成年人保护</b><br/>',
-  '若您是未满十四周岁的未成年人，请在监护人的陪同下阅读本政策并使用本应用。',
-  '若监护人认为未成年人在未获同意的情况下向本应用提供了个人信息，可联系开发者予以处理。<br/><br/>',
-  '<b>九、本政策的更新</b><br/>',
-  '本政策可能不时修订。更新后的政策将在本页面公布并标注新的生效日期。',
-  '若您在修订后继续使用本应用，即表示您同意接受更新后的政策。<br/><br/>',
-  '<b>十、联系我们</b><br/>',
-  '如您对本政策有任何疑问、意见或投诉，可通过应用内「关于学径」页面提供的渠道与开发者联系。',
-  '我们将在收到后十五个工作日内予以答复。',
-  '</div>'
-].join('');
 
-var PRIVACY_PLAIN = [
-  '<div class="muted" style="font-size:11.5px;margin-top:10px;line-height:1.95">',
-  '<b>简要版</b><br/><br/>',
-  '· <b>数据保存在你自己的手机上。</b>课表、待办、笔记、专注记录与各项设置都只存储在本机；学径没有服务器，开发者无法访问你的任何内容。<br/><br/>',
-  '· <b>不使用 AI 时完全离线。</b>手动录入课表、番茄钟、上课提醒、节假日这些功能都不联网。<br/><br/>',
-  '· <b>使用 AI 时，相关内容会发送给你自行配置的服务商。</b>你在应用内填写了哪一家的密钥，对话内容与学习档案摘要就会发送给该服务商，如何处理由对方的隐私政策决定。建议配置前先了解对方的政策。<br/><br/>',
-  '· <b>API Key 只保存在本机</b>，仅用于向你填写的接口地址鉴权，不会发送到其它地方。<br/><br/>',
-  '· <b>日历权限为只读。</b>仅用于识别法定节假日、在放假当天隐藏课程，不会修改你的日历。<br/><br/>',
-  '· <b>不会出售你的数据。</b>数据不在开发者手中，也不会被用于广告或用户画像。<br/><br/>',
-  '· <b>你可以随时删除全部数据。</b>在「关于 → 清空本机数据」一键清除，删除后无法恢复，因此需要手动输入确认词。<br/><br/>',
-  '· 如有疑问，欢迎直接联系作者。',
-  '</div>'
-].join('');
 
-function togglePrivacyPlain(){
-  window.__privacyPlain = !window.__privacyPlain;
-  openSheet('privacy');
-}
-function renderPrivacySheet(){
-  var plain = !!window.__privacyPlain;
-  return '<div class="sh"></div>'
-    + '<div style="display:flex;align-items:center;gap:10px;margin-top:2px">'
-    + '<div class="badge ' + (plain ? 'green' : 'plain') + '" style="cursor:pointer;flex:none" '
-    + 'onclick="togglePrivacyPlain()">' + (plain ? '看正式版' : '看简要版') + '</div>'
-    + '<h3 style="margin:0;flex:1;min-width:0">隐私政策</h3>'
-    + '</div>'
-    + (plain ? PRIVACY_PLAIN : PRIVACY_FULL)
-    + '<div class="btn primary" style="margin-top:16px" onclick="closeSheet()">知道了</div>';
-}
 
-/* 特别鸣谢里白皂的头像：源图由用户提供，居中裁剪成 128x128 的 JPEG 再转 base64 内联，
-   单文件应用不带外链，离线也能显示。 */
-var CREDITS_AVATAR_BAIZAO = 'data:image/jpeg;base64,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';
-function renderCreditsSheet(){
-  return '<div class="sh"></div><h3>特别鸣谢</h3>'
-    + '<div class="muted" style="font-size:12px;margin-top:6px;line-height:1.9">'
-    + '感谢每一位帮助过学径的人。</div>'
-    + '<div class="list" style="margin-top:14px">'
-    + '<div class="li" style="align-items:flex-start">'
-    + '<div class="ic" style="background-image:url(' + CREDITS_AVATAR_BAIZAO + ');'
-    + 'background-size:cover;background-position:center;border-radius:11px"></div>'
-    + '<div class="tx"><b>白皂</b><small>上岛逻辑</small></div></div>'
-    + '<div class="li" style="align-items:flex-start">'
-    + '<div class="ic">' + icSvg('user', 17) + '</div>'
-    + '<div class="tx"><b>每一位测试版用户</b>'
-    + '<small>感谢你愿意使用这个不完善的版本，请多提建议！</small></div></div>'
-    + '</div>'
-    + '<div class="btn primary" style="margin-top:14px" onclick="closeSheet()">关闭</div>';
-}
 
 /* ---------- 清空数据：必须手输 delete ----------
    删完就找不回来了，一个「确认清空」按钮太容易误触。
@@ -8332,18 +8248,67 @@ function clearConfirmCheck(){
 function renderSheet(kind, data){
   window.__sheetKind = kind || '';
   var sheet = document.getElementById('sheet');
+  if(kind === 'backupPick'){
+    sheet.innerHTML = '<div class="sh"></div><h3>导出备份</h3>'
+      + '<div class="muted" style="font-size:11.5px;line-height:1.7;margin:4px 0 10px">'
+      + '勾选要带走的内容。换手机时通常三项都勾。'
+      + '</div>'
+      + '<div class="list" id="bkPickBox"></div>'
+      + '<div id="bkPickFoot" style="margin-top:14px"></div>';
+    renderBackupPick();
+    return;
+  }
+  if(kind === 'plainWarn'){
+    var pg = (data && data.g) || 'full';
+    window.__plainG = pg;
+    sheet.innerHTML = '<div class="sh"></div><h3 style="color:var(--danger)">明文导出？</h3>'
+      + '<div class="muted" style="font-size:12px;line-height:1.85;margin:8px 0 4px">'
+      + '你跳过了口令。这份文件里的 <b>API Key 是明文</b>，任何拿到它的人'
+      + '都能用你的账号、消耗你的额度。'
+      + '<br><br>微信、QQ、网盘、邮件 —— 这些渠道都会留副本。'
+      + '<br><br>只有「这台手机直接插线拷到另一台、文件不经过任何第三方」时才建议这么做。'
+      + '</div>'
+      + '<div class="btn danger" style="margin-top:14px" onclick="doPlainBackup()">'
+      + '我知道风险，仍然明文导出</div>'
+      + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet();'
+      + 'openSheet(\'secretExport\',{g:\'' + pg + '\'})">返回，还是设个口令</div>';
+    return;
+  }
+  if(kind === 'restorePass'){
+    sheet.innerHTML = '<div class="sh"></div>'
+      + '<h3>这份备份已加密</h3>'
+      + '<div class="muted" style="font-size:12px;line-height:1.8;margin:6px 0 4px">'
+      + '输入导出时设的口令才能解开。'
+      + '</div>'
+      + '<div class="field" style="margin-top:12px"><label>口令</label>'
+      + '<input class="f" id="rpPass" type="password" autocomplete="off" '
+      + 'placeholder="导出时设置的口令" /></div>'
+      + '<div class="btn primary" style="margin-top:14px" onclick="doRestoreUnlock()">解锁并继续</div>'
+      + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet()">取消</div>';
+    return;
+  }
   if(kind === 'secretExport'){
     var sg = (data && data.g === 'full') ? 'full' : 'ai';
     sheet.innerHTML = '<div class="sh"></div>'
-      + '<h3>连 API Key 一起导出？</h3>'
+      + '<h3>连 API Key 一起导出</h3>'
       + '<div class="muted" style="font-size:12px;line-height:1.8;margin:6px 0 4px">'
-      + '导出的文件里会有你的密钥明文。把它发给任何人、或存在共享网盘里，'
-      + '都等于把 AI 账户交给对方 —— 对方可以用你的额度、也能看到你的用量。'
-      + '<br><br>只有「换手机、且只想一次搬完」时才需要这样做。'
+      + '密钥会用**你设的口令**加密后再写进文件（AES-256-GCM）。'
+      + '没有口令的人即使拿到文件也读不出 Key。'
       + '</div>'
+      + '<div class="field" style="margin-top:12px"><label>设置一个口令（至少 6 位）</label>'
+      + '<input class="f" id="bpPass" type="password" autocomplete="new-password" '
+      + 'placeholder="例如：只有你自己知道的一句话" /></div>'
+      + '<div class="field" style="margin-top:10px"><label>再输一次</label>'
+      + '<input class="f" id="bpPass2" type="password" autocomplete="new-password" '
+      + 'placeholder="重复输入" /></div>'
+      + '<div class="note2" style="margin-top:10px;color:var(--danger)">'
+      + '⚠️ 口令丢了就**永远**解不开这份备份 —— 没有找回功能，也没有后门。'
+      + '恢复时需要输入同一个口令。</div>'
       + '<div class="btn danger" style="margin-top:14px" '
-      + 'onclick="closeSheet();doBackup(\'' + sg + '\',true)">我明白，包含密钥导出</div>'
-      + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet()">取消，按安全方式导出</div>';
+      + 'onclick="doBackup(\'' + sg + '\',true,pickBackupPass())">加密导出</div>'
+      + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet()">取消</div>'
+      + '<div class="ob-skip" style="color:var(--danger)" '
+      + 'onclick="closeSheet();confirmPlainBackup(\'' + sg + '\')">跳过口令，直接明文导出</div>';
     return;
   }
   if(kind === 'schedEdit'){ sheet.innerHTML = renderSchedEdit(); return; }
@@ -8656,14 +8621,7 @@ function renderSheet(kind, data){
     sheet.innerHTML = renderWebSearchSheet();
     return;
   }
-  if(kind === 'privacy'){
-    sheet.innerHTML = renderPrivacySheet();
-    return;
-  }
-  if(kind === 'credits'){
-    sheet.innerHTML = renderCreditsSheet();
-    return;
-  } else if(kind === 'clear'){
+  if(kind === 'clear'){
     sheet.innerHTML = renderClearSheet();
     return;
   } else if(kind === 'focusSettings'){
@@ -8686,6 +8644,11 @@ function renderSheet(kind, data){
       + '<div class="list" style="margin-top:12px;max-height:230px;overflow:auto">'
       + (data.rows || '<div class="li"><div class="tx"><b style="font-size:12.5px">（空）</b></div></div>')
       + '</div>'
+      + (data.plainSecret
+          ? '<div class="note2" style="margin-top:12px;color:var(--danger);line-height:1.7">'
+            + '这份备份里的 API Key 是<b>明文</b>。恢复完成后建议把文件删掉，'
+            + '并在「AI 服务」里重新设一个口令导出一次。</div>'
+          : '')
       + '<div class="btn primary" style="margin-top:16px" onclick="applyRestore()">确认恢复</div>'
       + '<div class="btn ghost" style="margin-top:8px" onclick="closeSheet()">取消</div>';
   } else if(kind === 'diag'){
@@ -8833,7 +8796,7 @@ function copyBugReport(){
 }
 function clearRunLog(){
   logClear();
-  openSheet('diag');
+  toast('运行日志已清空');
 }
 /* 复制到剪贴板的**唯一出口**。原来 copyBugReport / copyRunLog 各写了一份
    「原生 → navigator.clipboard → 放弃」的兜底，链一模一样；
@@ -8945,7 +8908,10 @@ function showAlert(kind, info){
       + '<div class="btn ghost" onclick="skipClass()">跳过这节</div></div>';
     window.__pending = info;
   } else if(kind === 'end'){
-    var f = S.focus, min = Math.round(f.elapsed/60);
+    /* ⚠️ 口径必须是「已过秒数」：上课专注走**倒计时**（dir='down'），
+       elapsed 恒为 0（见 startClass），用它算出来永远是 0 分钟。
+       全项目统一的算法是 total - secs（同 completeRound / stopFocus）。 */
+    var f = S.focus, min = Math.round((f.dir === 'up' ? f.elapsed : (f.total - f.secs)) / 60);
     h = '<div class="row between"><span class="badge green">下课提醒</span>'
       + '<span class="muted" style="font-size:11px">' + nowHM() + '</span></div>'
       + '<div style="font-size:19px;font-weight:800;margin:10px 0 5px">' + esc(f.label) + '</div>'
@@ -9014,13 +8980,31 @@ function skipClass(){
 }
 function confirmEndClass(){
   closeAlert();
-  var f = S.focus, min = Math.round(f.elapsed/60);
-  addFocusMin(min, 0);
-  if(f.courseId) S.classes[f.courseId] = {status:'done', min:((S.classes[f.courseId]||{}).min||0)+min};
+  var f = S.focus;
+  /* ⚠️ 用 total - secs，不是 elapsed（倒计时下 elapsed 恒 0，会记成 0 分钟）。
+     maked 才真正落账，所以先把 courseId 存下来。 */
+  var spent = f.dir === 'up' ? f.elapsed : (f.total - f.secs);
+  var min = Math.round(spent / 60);
+  if(f.courseId){
+    /* 课程专注按「实际专注到下课提醒这一刻」记账。
+       至少记 1 分钟：用户点「结束并保存」本身就是明确意图，
+       记 0 会让整节课在总结里凭空消失。 */
+    if(spent > 0 && min < 1) min = 1;
+    var prev = S.classes[f.courseId] || {};
+    S.classes[f.courseId] = {
+      status: 'done',
+      min: (prev.min || 0) + min
+    };
+  }
+  /* 先停原生计时器：它自己也会结算一次，但我们已经在上面按同一口径写过了，
+     所以走 stopFocus 之后要把它可能补进来的那条吞掉（syncFocusFromNative 内部
+     会按 sessionId 去重，不会重复记）。 */
+  try{ nat('stopFocus'); }catch(e){}
+  if(min > 0) addFocusMin(min, 0);
   resetFocus();
   save(); refreshAll();
   closeView('focus');
-  toast('下课！本次专注 ' + fmtMin(min) + ' 已记入本周总结');
+  toast(min > 0 ? ('下课！本次专注 ' + fmtMin(min) + ' 已记入本周总结') : '已结束，本次没有可记录的时间');
 }
 function extendClass(){
   closeAlert();
@@ -16334,9 +16318,26 @@ function doClearAll(){
     return;
   }
   closeSheet();
-  logIt('数据', '清空全部本地数据');
-  try{ localStorage.removeItem(KEY); localStorage.removeItem(OLDKEY); }catch(e){}
-  nat('stopFocus');
+  /* ⚠️ 以前只删 KEY / OLDKEY 两个键，其余全留着 —— 用户看到的是
+     「清空数据」但手写画布、运行日志、底栏偏好、资料库文档全都还在，
+     换机恢复时又会把这些旧东西带回来。现在按前缀彻底清。 */
+  try{ logIt('数据', '清空全部本地数据'); }catch(e){}
+  try{
+    /* 先收集再删：边遍历边删会漏项（removeItem 会改变 key 索引） */
+    var drop = [];
+    for(var i=0;i<localStorage.length;i++){
+      var k = localStorage.key(i);
+      if(k && k.indexOf('xuejing') === 0) drop.push(k);
+    }
+    for(var j=0;j<drop.length;j++) localStorage.removeItem(drop[j]);
+    /* 兜底：万一有历史拼写差异，把这两个明确的也删掉 */
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(OLDKEY);
+  }catch(e){}
+  /* 原生侧还有两块独立存储：计时器状态、资料库文档 */
+  try{ nat('stopFocus'); }catch(e){}
+  try{ nat('docClear'); }catch(e){}
+  /* localStorage 已清空；页面内存里还拿着旧 S / RUNTIME_LOG，直接重载最干净 */
   location.reload();
 }
 
@@ -16405,6 +16406,111 @@ function backupKeysOf(g){
    原来备份**默认把 API Key 明文写进 JSON**，而备份文件是要发给别人的
    （换机中转、发给客服排查）。一旦导出，Key 就等于泄漏。
    现在默认剥离，只有显式 includeSecrets 才带上 —— 而且 UI 上要二次确认。 */
+/* ============================================================
+   备份加密（2026-10-26）
+   ------------------------------------------------------------
+   旧行为：含密钥的备份是**明文 JSON**，文件一旦外传（微信、网盘、
+   邮件、U 盘）等于把 API Key 直接交出去。
+   新行为：含密钥的备份用**口令加密**，格式是标准 JWE 那种思路，
+   但只依赖 WebCrypto，不引第三方库：
+
+     KDF      PBKDF2-HMAC-SHA256, 310000 轮, 16 字节随机盐
+     加密     AES-256-GCM, 12 字节随机 IV, 附加认证数据 = 明文头部
+     口令     用户自己定（导出时输入，恢复时再输一次）
+     校验     GCM 的认证标签自带完整性校验，口令错或文件被改都会解密失败
+
+   ⚠️ 口令丢了就**永远**解不回来 —— 这是有意的：没有后门、没有找回。
+   导出面板上必须把这句话写清楚。
+
+   加密后的文件仍然是 JSON（外面那层），只是 data 字段变成了
+   {enc:1, kdf, iter, salt, iv, ct}，所以旧的明文备份依然能正常恢复。
+   ============================================================ */
+var XJ_ENC = {
+  kdf: 'PBKDF2-SHA256',
+  iter: 310000,
+  cipher: 'AES-256-GCM'
+};
+
+function encReady(){
+  return !!(window.crypto && window.crypto.subtle && window.crypto.subtle.importKey);
+}
+function b64FromBuf(buf){
+  var b = new Uint8Array(buf), s = '';
+  for(var i=0;i<b.length;i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+}
+function bufFromB64(b64){
+  var s = atob(b64), a = new Uint8Array(s.length);
+  for(var i=0;i<s.length;i++) a[i] = s.charCodeAt(i);
+  return a;
+}
+/* 从口令派生 AES-GCM 密钥。salt 每次导出都换新的（同一个口令不会派生出同一把钥匙）。 */
+function encDeriveKey(pass, salt, iter){
+  var enc = new TextEncoder();
+  return crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey'])
+    .then(function(base){
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: salt, iterations: iter, hash: 'SHA-256' },
+        base,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+    });
+}
+/**
+ * 把一段明文加密成可放进 JSON 的对象。
+ * aad 用明文的头部（app/kind/group/version），这样有人偷换 group 也会解密失败。
+ */
+function encSeal(plainText, pass, aad){
+  if(!encReady()) return Promise.reject(new Error('这台设备的 WebView 不支持网页加密接口'));
+  if(!pass || String(pass).length < 6) return Promise.reject(new Error('口令至少 6 位'));
+  var salt = crypto.getRandomValues(new Uint8Array(16));
+  var iv = crypto.getRandomValues(new Uint8Array(12));
+  var iter = XJ_ENC.iter;
+  return encDeriveKey(String(pass), salt, iter).then(function(key){
+    return crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv, additionalData: new TextEncoder().encode(aad || ''), tagLength: 128 },
+      key,
+      new TextEncoder().encode(plainText)
+    );
+  }).then(function(ct){
+    return {
+      enc: 1,
+      kdf: XJ_ENC.kdf,
+      iter: iter,
+      cipher: XJ_ENC.cipher,
+      salt: b64FromBuf(salt),
+      iv: b64FromBuf(iv),
+      ct: b64FromBuf(ct)
+    };
+  });
+}
+/** 解密。口令错 / 文件被改 → reject（GCM 认证失败）。 */
+function encOpen(obj, pass, aad){
+  if(!encReady()) return Promise.reject(new Error('这台设备的 WebView 不支持网页加密接口'));
+  if(!obj || obj.enc !== 1) return Promise.reject(new Error('这不是加密备份'));
+  var iter = Number(obj.iter) || XJ_ENC.iter;
+  /* 上限保护：恶意文件可以写 iter=1e12 把手机算到死 */
+  if(iter > 2000000) return Promise.reject(new Error('备份文件的迭代次数异常，已拒绝'));
+  var salt, iv, ct;
+  try{
+    salt = bufFromB64(obj.salt); iv = bufFromB64(obj.iv); ct = bufFromB64(obj.ct);
+  }catch(e){ return Promise.reject(new Error('备份文件已损坏（编码错误）')); }
+  return encDeriveKey(String(pass), salt, iter).then(function(key){
+    return crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv, additionalData: new TextEncoder().encode(aad || ''), tagLength: 128 },
+      key,
+      ct
+    );
+  }).then(function(buf){
+    return new TextDecoder().decode(buf);
+  }).catch(function(){
+    /* 不要区分「口令错」和「被篡改」—— 两者对用户来说都是"打不开"，
+       而且区分开等于告诉攻击者"口令对了但文件坏了"。 */
+    throw new Error('口令不对，或备份文件已损坏');
+  });
+}
 var SECRET_KEYS = ['apiKey', 'keyMemo', 'providerAcc', 'webSearch', 'urlMemo'];
 
 /* 保留结构、只把密钥字段清空：恢复后渠道/地址/模型都还在，只是要重填 Key。
@@ -16439,7 +16545,14 @@ function backupHasSecrets(k){
   if(k === 'webSearch') return !!(v && v.key);
   return false;
 }
-function buildBackup(g, includeSecrets){
+/**
+ * 生成备份文本。**返回 Promise**（含密钥时要走异步加密）。
+ *   includeSecrets=false → 明文 JSON，密钥字段被清空（保持旧行为）
+ *   includeSecrets=true  → data 整体加密，文件里没有任何明文 Key
+ * 明文头（app/kind/group/version）不加密，因为恢复时要靠它判断文件类型；
+ * 但它同时作为 AES-GCM 的附加认证数据，被改过就解密失败。
+ */
+function buildBackup(g, includeSecrets, pass){
   var data = {};
   backupKeysOf(g).forEach(function(k){
     if(S[k] === undefined) return;
@@ -16447,19 +16560,38 @@ function buildBackup(g, includeSecrets){
     if(!includeSecrets && SECRET_KEYS.indexOf(k) >= 0){ data[k] = stripSecrets(S[k], k); return; }
     data[k] = S[k];
   });
-  return JSON.stringify({
+  var head = {
     app: '学径',
     kind: 'xuejing-backup',   // 恢复时用它判断文件是不是我们的
     group: g,
-    version: 1,
+    version: 2,               // v2 = 支持加密载荷
     exportedAt: new Date().toISOString(),
     /* 这个字段让用户在「恢复确认页」上就能看出这份备份带不带密钥 */
     secretsIncluded: !!includeSecrets,
+    encrypted: !!includeSecrets,
     warning: includeSecrets
-      ? '这份备份包含 API Key，等同于账户密码，请勿外传'
-      : (g === 'study' ? '' : '不含 API Key，恢复到新设备后需要重新填写'),
-    data: data
-  }, null, 2);
+      ? '这份备份包含 API Key，已用你的口令加密。口令丢失将无法恢复。'
+      : (g === 'study' ? '' : '不含 API Key，恢复到新设备后需要重新填写')
+  };
+  /* 不含密钥 → 明文，密钥字段已被清空（旧行为，永远安全） */
+  if(!includeSecrets){
+    head.data = data;
+    return Promise.resolve(JSON.stringify(head, null, 2));
+  }
+  /* 含密钥但用户没给口令 → **明文**（用户已在警告页明确确认过）。
+     这时 encrypted=false，恢复方一眼能看出这份文件是裸的。 */
+  if(!pass){
+    head.encrypted = false;
+    head.warning = '这份备份以明文保存了 API Key，请勿外传；用完请删除';
+    head.data = data;
+    return Promise.resolve(JSON.stringify(head, null, 2));
+  }
+  /* 含密钥 + 有口令 → 整体加密。aad 用明文头，防止有人偷换 group。 */
+  var aad = [head.app, head.kind, head.group, String(head.version)].join('|');
+  return encSeal(JSON.stringify(data), pass, aad).then(function(sealed){
+    head.data = sealed;
+    return JSON.stringify(head, null, 2);
+  });
 }
 /* 真机上导出必须走原生：WebView 里 <a download> + blob 是下载不下来的 */
 function exportText(name, text){
@@ -16477,17 +16609,123 @@ function exportText(name, text){
 /* withSecrets 只有「二次确认过的入口」才传 true。
    默认 false = 备份里没有任何密钥（审计 H-14：备份文件会离开设备，
    明文 Key 跟着走等于把账户交出去）。 */
-function doBackup(g, withSecrets){
-  var name = '学径-' + backupTag(g) + '-' + backupStamp() + (withSecrets ? '-含密钥' : '') + '.json';
-  logIt('数据', '导出备份 · ' + backupTag(g) + (withSecrets ? '（含密钥）' : ''));
-  exportText(name, buildBackup(g, !!withSecrets));
-  setTimeout(function(){
-    toast(withSecrets ? '已含 API Key，等同于账户密码，请勿外传' : '不含 API Key，换机后需重新填写');
-  }, 1400);
+function doBackup(g, withSecrets, pass){
+  var name = '学径-' + backupTag(g) + '-' + backupStamp()
+    + (withSecrets ? (pass ? '-含密钥-加密' : '-含密钥-明文') : '') + '.json';
+  logIt('数据', '导出备份 · ' + backupTag(g)
+    + (withSecrets ? (pass ? '（含密钥·加密）' : '（含密钥·明文）') : ''));
+  buildBackup(g, !!withSecrets, pass).then(function(text){
+    exportText(name, text);
+    setTimeout(function(){
+      if(!withSecrets) toast('不含 API Key，换机后需重新填写');
+      else if(pass)    toast('已加密导出，口令丢了就打不开，请自己记牢');
+      else             toast('已明文导出，用完请把文件删掉');
+    }, 1400);
+  }).catch(function(e){
+    toast('导出失败：' + (e && e.message ? e.message : e));
+  });
 }
 /* 含密钥导出的二次确认：单独一个入口，说明清楚风险再放行 */
+/* ============================================================
+   勾选式导出（2026-10-26 改版）
+   ------------------------------------------------------------
+   旧版把「学习数据 / AI 服务 / 含密钥 / 完整备份」摊成四个入口，
+   用户得先理解"分组"这个概念才能选对，而且「AI 服务」和「含密钥」
+   两条路径的差别只在有没有 Key —— 很容易点错。
+   现在改成一个面板 + 勾选：
+     ① 学习数据        课程、专注、笔记、待办、错题、外观…
+     ② AI 服务配置     服务商、模型、地址、自定义渠道（不含 Key）
+     ③ API Key         只有勾了才需要口令；不勾就永远是干净配置
+   三个勾分别对应 study / ai / ai+secrets 的组合，不再有"完整备份"这个
+   需要用户自己拼的概念。
+   ============================================================ */
+window.__bkSel = { study: true, ai: false, key: false };
+
+function openBackupPicker(){
+  window.__bkSel = { study: true, ai: false, key: false };
+  openSheet('backupPick', {});
+}
+function bkToggle(which){
+  var v = window.__bkSel;
+  v[which] = !v[which];
+  /* 勾 Key 必须先勾 AI 服务：Key 是 AI 配置的一部分，单独导出一把 Key 没有意义 */
+  if(which === 'ai' && !v.ai) v.key = false;
+  if(which === 'key' && v.key) v.ai = true;
+  renderBackupPick();
+}
+function renderBackupPick(){
+  var v = window.__bkSel;
+  var host = document.getElementById('bkPickBox');
+  if(!host) return;
+  var row = function(which, icon, title, desc, extra){
+    var on = !!v[which];
+    return '<div class="li tap" onclick="bkToggle(\'' + which + '\')" style="align-items:flex-start">'
+      + '<div class="ic" data-i="' + icon + '"></div>'
+      + '<div class="tx" style="padding-top:2px"><b>' + title + '</b>'
+      + '<small style="line-height:1.6">' + desc + '</small>'
+      + (extra || '') + '</div>'
+      + '<div class="val"><span class="badge ' + (on ? 'green' : 'plain') + '" style="font-size:10px">'
+      + (on ? '已选' : '不含') + '</span></div>'
+      + '</div>';
+  };
+  host.innerHTML =
+      row('study', 'database', '学习数据',
+          '课表、专注记录、笔记、待办、错题本、考试、资料库索引、外观与偏好')
+    + row('ai', 'key', 'AI 服务配置',
+          '服务商、模型选择、接口地址、自建渠道、定价与用量（不含 API Key）',
+          v.ai ? '' : '<div style="font-size:10.5px;color:var(--sub);margin-top:4px">换机后需要重新填 Key</div>')
+    + row('key', 'alarm', 'API Key',
+          '连同你的密钥一起带走。勾选后必须设一个口令加密',
+          v.key ? '<div style="font-size:10.5px;color:var(--danger);margin-top:4px">'
+                  + '等同于账户密码，别把这个文件发给任何人</div>' : '');
+  /* 图标是 innerHTML 现填的，renderIcons 只在启动时跑过一次 */
+  try{ renderIcons(); }catch(e){}
+  var foot = document.getElementById('bkPickFoot');
+  if(foot){
+    var any = v.study || v.ai;
+    foot.innerHTML = '<div class="btn primary" style="' + (any ? '' : 'opacity:.45;pointer-events:none') + '" '
+      + 'onclick="bkExport()">' + (v.key ? '设置口令并导出' : '导出备份') + '</div>'
+      + '<div class="muted" style="font-size:10.5px;text-align:center;margin-top:8px;line-height:1.6">'
+      + (any ? '生成一个 JSON 文件，可以用「从文件恢复」导回来' : '至少勾一项')
+      + '</div>';
+  }
+}
+/* 勾了 Key 走口令流程；没勾直接导出 */
+function bkExport(){
+  var v = window.__bkSel;
+  if(!v.study && !v.ai){ toast('至少勾一项'); return; }
+  var g = (v.study && v.ai) ? 'full' : (v.ai ? 'ai' : 'study');
+  if(v.key){
+    openSheet('secretExport', { g: g });
+    return;
+  }
+  closeSheet();
+  doBackup(g, false);
+}
 function backupSecretConfirm(g){
   openSheet('secretExport', { g: g });
+}
+/* 从面板里读口令并校验一致性。返回 null 表示校验没过（已提示）。 */
+/* 用户选择「不要口令」时的最后一道确认。
+   不做成静默放行：明文 Key 一旦发出去，等于把 AI 账户交出去。 */
+function confirmPlainBackup(g){
+  openSheet('plainWarn', { g: g });
+}
+function doPlainBackup(){
+  var g = (window.__plainG || 'full');
+  closeSheet();
+  doBackup(g, true, null);   /* pass=null → 明文 */
+}
+function pickBackupPass(){
+  var a = document.getElementById('bpPass');
+  var b = document.getElementById('bpPass2');
+  var p1 = a ? String(a.value || '') : '';
+  var p2 = b ? String(b.value || '') : '';
+  if(p1.length < 6){ toast('口令至少 6 位'); return null; }
+  if(p1 !== p2){ toast('两次输入的口令不一样'); return null; }
+  if(!encReady()){ toast('这台设备的 WebView 不支持加密，无法导出密钥'); return null; }
+  closeSheet();
+  return p1;
 }
 /* ============================================================
    备份恢复的 schema 校验（审计 M-12 / H-1 / H-14）
@@ -16620,6 +16858,47 @@ function onRestoreFile(inp){
     if(!o || o.kind !== 'xuejing-backup' || !o.data){
       toast('这不是学径的备份文件'); return;
     }
+    /* 加密备份：先要口令，解开之后再走原来的校验流程。
+       data 是 {enc:1,...}，不是正常的键值表，直接喂给 validateRestore 会整包被拒。 */
+    if(o.data && o.data.enc === 1){
+      askRestorePass(o);
+      return;
+    }
+    continueRestore(o);
+  };
+  fr.readAsText(f);
+}
+/* 让用户输入口令解开加密备份。解开后把明文 data 塞回 o，再走同一条校验链。 */
+function askRestorePass(o){
+  var aad = [o.app, o.kind, o.group, String(o.version)].join('|');
+  openSheet('restorePass', {});
+  window.__pendingEncRestore = { head: o, aad: aad };
+}
+/* 面板上「解锁」按钮走这里 */
+function doRestoreUnlock(){
+  var p = window.__pendingEncRestore;
+  if(!p){ toast('没有待解锁的备份'); return; }
+  var el = document.getElementById('rpPass');
+  var pass = el ? String(el.value || '') : '';
+  if(!pass){ toast('请输入口令'); return; }
+  toast('正在解密…');
+  encOpen(p.head.data, pass, p.aad).then(function(plain){
+    var data = null;
+    try{ data = JSON.parse(plain); }catch(e){}
+    if(!data || typeof data !== 'object'){
+      toast('解密成功但内容不是有效备份'); return;
+    }
+    var o = p.head;
+    o.data = data;
+    window.__pendingEncRestore = null;
+    closeSheet();
+    continueRestore(o);
+  }).catch(function(e){
+    toast((e && e.message) || '解密失败');
+  });
+}
+function continueRestore(o){
+  {
     /* ★ 审计 M-12：先整体校验，全部通过才继续。
        任何一条不合格就整包拒绝 —— 不做「部分恢复」，
        那会留下一个半坏的状态（用户既没恢复成功，也回不到原样）。 */
@@ -16630,8 +16909,12 @@ function onRestoreFile(inp){
       return;
     }
     /* 用**净化后**的数据覆盖待恢复对象：后续 applyRestore 拿到的就是干净的 */
+    /* encrypted===false 且 secretsIncluded===true → 用户当时选了明文导出。
+       恢复时提示一句，让他知道"这个文件里 Key 是裸的，用完了该删"。 */
+    var plainSecret = (o.secretsIncluded === true && o.encrypted === false);
     window.__restore = { kind:'xuejing-backup', group: vr.group, data: vr.data,
-                         exportedAt: o.exportedAt, secretsIncluded: !!o.secretsIncluded };
+                         exportedAt: o.exportedAt, secretsIncluded: !!o.secretsIncluded,
+                         plainSecret: plainSecret };
     o = window.__restore;
     var g = vr.group;
     var keys = Object.keys(vr.data);
@@ -16642,9 +16925,10 @@ function onRestoreFile(inp){
             + (BACKUP_LABELS[k] || k) + '</b></div></div>';
         }).join('')
       : '<div class="li"><div class="tx"><b style="font-size:12.5px">文件里没有可用的字段</b></div></div>';
-    openSheet('restore', { group: g, rows: rows, when: String(o.exportedAt || '').slice(0,16).replace('T',' ') });
-  };
-  fr.readAsText(f);
+    openSheet('restore', { group: g, rows: rows,
+      when: String(o.exportedAt || '').slice(0,16).replace('T',' '),
+      plainSecret: plainSecret });
+  }
 }
 function applyRestore(){
   var o = window.__restore, keys = window.__restoreKeys;

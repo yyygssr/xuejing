@@ -117,7 +117,24 @@ public class ReminderScheduler {
                     String detail = t + (loc.isEmpty() ? "" : (" · " + loc));
                     long now = System.currentTimeMillis();
 
-                    int codeStart = REQ_BASE + day * 100 + i * 2;
+                    /* ⚠️ requestCode 分段（2026-10-26 修）：
+                       旧写法 codeStart = REQ_BASE + day*100 + i*2，
+                                codeBegin = REQ_BASE + day*100 + 200 + i。
+                       PendingIntent 只按 requestCode 区分（buildPi 的 Intent 没有
+                       action/data，filterEquals 认不出 extras），所以只要
+                       i % 2 == 0 且 i >= 200，codeStart(day, i) 就会等于
+                       codeBegin(day, i-200)。同一门课的两条闹钟互相覆盖，
+                       extras 被顶掉 —— 表现就是「课前提醒变成正点上课」，
+                       或者「预约了却从不自动开始专注」。
+                       现在改成每类各占 100 的整数段，且 i 上限按 100 截断，
+                       任何两类之间都不可能相交：
+                         每类各占 100 个号，一天占 400 个号：
+                           day*400 + 0..99    课前提醒
+                           day*400 + 100..199 上课
+                           day*400 + 200..299 下课
+                         7 天用到 1000+7*400=3800 以内，与补课段 71000+ 完全不交。 */
+                    if (i < 0 || i >= 100) continue;
+                    int codeStart = REQ_BASE + day * 400 + i;
                     /* 课前提醒：start - before。
                        若已进入提醒窗口但尚未上课，说明这次提醒**已经发生过**（要么刚在
                        onReceive 里弹过，要么 App 是课前不久才启动）——这时**不要**再补发。
@@ -136,12 +153,8 @@ public class ReminderScheduler {
                         /* remindAt <= now：本次提醒窗口已过，不排 —— 静默跳过 */
                     }
                     /* 正点再排一条「上课」：预约专注在原生侧自动开始也要靠它。
-                       code 段必须与 codeStart/codeEnd 完全隔离 —— 旧写法用 `80 + i`，
-                       而 codeStart 是 `i * 2`，于是 `2i == 80 + j` 时两条闹钟拿到同一个 code
-                       （i∈[40,140] 共 101 对），PendingIntent 被 FLAG_UPDATE_CURRENT 覆盖：
-                       extras 里的 before 被对方顶掉，课前提醒就变成了正点上课，或反过来。
-                       同一天的 i 现在极少超过 15，所以线上没炸；但这是定时炸弹，直接换段隔开。 */
-                    int codeBegin = REQ_BASE + day * 100 + 200 + i;
+                       分段见上面 codeStart 处：100/200/300 三个整段互不相交。 */
+                    int codeBegin = REQ_BASE + day * 400 + 100 + i;
                     if (startAt > now) {
                         /* 预约过的课：这一条到点是「启动前台服务自动开专注」的，走 urgent 档。
                            否则 Android 12+ 上广播里启动前台服务会被拒 ——
@@ -151,7 +164,7 @@ public class ReminderScheduler {
                         codes.add(String.valueOf(codeBegin));
                     }
                     if (endRemind && endAt > now) {
-                        int codeEnd = REQ_BASE + day * 100 + i * 2 + 1;
+                        int codeEnd = REQ_BASE + day * 400 + 200 + i;
                         set(c, am, codeEnd, endAt, false, name, detail, before, w);
                         codes.add(String.valueOf(codeEnd));
                     }
