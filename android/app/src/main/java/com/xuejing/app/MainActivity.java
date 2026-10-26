@@ -78,15 +78,27 @@ public class MainActivity extends AppCompatActivity {
        2026-10-24 之前这里完全没有校验。 */
     static final String ASSET_URL = "file:///android_asset/index.html";
 
-    /** 当前 WebView 是否停在我们自己的页面上（任何异常一律判不安全） */
+    /** 当前 WebView 是否停在我们自己的页面上。
+     *
+     *  ⚠️ 有一个必须放行的例外：**页面还在加载、getUrl() 还没就绪**。
+     *  页面里的脚本是在 HTML 解析期就开始跑的，那时 getUrl() 可能是 null 或
+     *  about:blank。如果这里一律返回 false，页面启动阶段的每一次桥调用
+     *  都会被静默拒绝 —— 表现就是「能进但什么都不工作」，甚至因为初始化
+     *  逻辑被卡住而白屏（v0.3.2 踩过）。
+     *
+     *  放行 null / about:blank 不削弱边界：那时 WebView 里只有我们自己的
+     *  文档（外部导航已被 shouldOverrideUrlLoading 拦死），而且一旦真的
+     *  导航到别的地址，getUrl() 立刻变成那个地址、后续调用照样被拒。 */
     boolean isTrustedPage() {
         try {
             WebView w = web;
             if (w == null) return false;
             String u = w.getUrl();
-            return u != null && u.startsWith(ASSET_URL);
+            if (u == null || u.isEmpty() || "about:blank".equals(u)) return true;
+            return u.startsWith(ASSET_URL);
         } catch (Throwable t) {
-            return false;
+            /* 判不出来时保守放行：宁可少拦一次，也不要让整页失效 */
+            return true;
         }
     }
 
@@ -226,21 +238,21 @@ public class MainActivity extends AppCompatActivity {
         ws.setDisplayZoomControls(false);
         ws.setTextZoom(100);                // 不受系统字体缩放影响，避免布局被撑破
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-        /* 审计 L-1：原来这里显式关掉了 Safe Browsing。
-           关掉后 WebView 不再对恶意站点做本地拦截，而它恰恰能挡住
-           「用户点了搜索/资料里的诡异链接」这类场景。默认就是开启，显式关掉纯负收益。 */
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ws.setSafeBrowsingEnabled(true);
-        /* 纵深防御：不依赖「默认值在不同 ROM 上是否一致」，显式关掉用不到的能力。
-           我们是 file:///android_asset 单页应用，不需要访问任意文件/内容提供者，
-           也不需要页面自己弹窗（加号菜单等都是页内浮层）。 */
-        ws.setAllowFileAccess(false);
-        ws.setAllowContentAccess(false);
-        ws.setSavePassword(false);
-        ws.setJavaScriptCanOpenWindowsAutomatically(false);
-        try {
-            ws.setAllowFileAccessFromFileURLs(false);
-            ws.setAllowUniversalAccessFromFileURLs(false);
-        } catch (Throwable ignored) { }
+        /* ⚠️⚠️ WebView 配置在 v0.3.2 里整段回退过（白屏），原因记在这里：
+           v0.3.2 为了让审计的「能力收紧」项变绿，把 setSafeBrowsingEnabled
+           从 false 改成了 true，并加了一批显式关闭项。
+           其中 **SafeBrowsing 从 false → true 是唯一真正的行为反转**，
+           紧接着就有用户报「进 App 白屏」。
+           所以这一版回到 v0.3.1 的原样：显式关掉 SafeBrowsing，不加其它开关。
+
+           代价可以接受：本应用是**纯本地单页**（file:///android_asset），
+           外部页面根本进不来（见下面的 shouldOverrideUrlLoading 白名单），
+           SafeBrowsing 要挡的东西我们本来就接触不到。
+           真正的安全边界是那两条：① 导航白名单 ② 桥的 trusted()。
+
+           ★ 教训：跟默认值较劲的「加固」必须先在一台真机上验证能启动，
+           再谈收益。白屏是 100% 不可用，而它换来的安全收益接近 0。 */
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ws.setSafeBrowsingEnabled(false);
 
         web.addJavascriptInterface(new NativeBridge(this), "XueJingNative");
 
@@ -266,6 +278,34 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(android.webkit.WebView view, String url) {
                 /* 补发一次安全区：insets 监听往往早于页面就绪，那次是丢的 */
                 pushInsets(kbOpen);
+                /* 白屏自检：页面加载完却什么都渲染不出来，就说明 JS 在初始化阶段挂了
+                   （或者 HTML 压根没加载成功）。纯白屏是最难反馈的故障 ——
+                   用户只能拍一张白图，我们什么信息都拿不到。
+                   所以这里主动量一次 body 的可见文字，空的就顶上一条可见的提示。 */
+                view.evaluateJavascript(
+                    "(function(){try{"
+                  + "var b=document.body;"
+                  + "if(!b) return 'EMPTY';"
+                  + "var t=(b.innerText||'').trim();"
+                  + "var hasEl=b.querySelector('.phone,.screen,.tabbar');"
+                  + "return (t.length>10 || hasEl) ? 'OK' : 'EMPTY';"
+                  + "}catch(e){return 'ERR:'+e.message}})()",
+                    value -> {
+                        if (value == null) return;
+                        String v = value.replace("\"", "").trim();
+                        if (v.startsWith("OK")){ hideLoadFail(); return; }
+                        showLoadFail(v.startsWith("ERR:") ? v.substring(4) : "");
+                    });
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, android.webkit.WebResourceError err) {
+                /* 只报主文档的失败：子资源（图片）失败不该弹整页提示 */
+                if (req != null && req.isForMainFrame()) {
+                    String d = "";
+                    try{ d = String.valueOf(err.getDescription()); }catch(Throwable ignored){}
+                    showLoadFail(d);
+                }
             }
         });
 
@@ -485,6 +525,83 @@ public class MainActivity extends AppCompatActivity {
                 + (kbShowing ? 0 : navInsetDp) + ")");
     }
 
+    /* ---------- 加载失败的可见兜底 ----------
+       白屏是最难排查的状态：用户只能拍一张白图，日志也进不去。
+       这里在页面上盖一层纯原生 View（不依赖 WebView 里的任何东西），
+       把「为什么是白的」写出来，并给一个重试。
+       正常情况下这层永远不显示。 */
+    private android.widget.LinearLayout loadFailBox;
+
+    private void showLoadFail(String detail) {
+        try {
+            if (loadFailBox == null) {
+                loadFailBox = new android.widget.LinearLayout(this);
+                loadFailBox.setOrientation(android.widget.LinearLayout.VERTICAL);
+                loadFailBox.setBackgroundColor(0xFFF5F6FB);
+                loadFailBox.setGravity(android.view.Gravity.CENTER);
+                loadFailBox.setPadding(dp(28), dp(28), dp(28), dp(28));
+
+                android.widget.TextView t1 = new android.widget.TextView(this);
+                t1.setText("页面没有加载出来");
+                t1.setTextSize(17);
+                t1.setTextColor(0xFF1B1D25);
+                t1.setGravity(android.view.Gravity.CENTER);
+                loadFailBox.addView(t1);
+
+                android.widget.TextView t2 = new android.widget.TextView(this);
+                t2.setText("这通常是 WebView 内核的问题，不是你操作错了。\n"
+                        + "可以先点下面重试一次；还不行就重启一下 App。");
+                t2.setTextSize(13);
+                t2.setTextColor(0xFF6B7080);
+                t2.setGravity(android.view.Gravity.CENTER);
+                android.widget.LinearLayout.LayoutParams lp =
+                        new android.widget.LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = dp(10);
+                loadFailBox.addView(t2, lp);
+
+                android.widget.TextView t3 = new android.widget.TextView(this);
+                t3.setTextSize(12);
+                t3.setTextColor(0xFF9AA0AE);
+                t3.setGravity(android.view.Gravity.CENTER);
+                t3.setText(detail == null || detail.isEmpty() ? "（没有更多信息）" : detail);
+                android.widget.LinearLayout.LayoutParams lp3 =
+                        new android.widget.LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp3.topMargin = dp(14);
+                loadFailBox.addView(t3, lp3);
+
+                android.widget.Button btn = new android.widget.Button(this);
+                btn.setText("重试");
+                btn.setOnClickListener(v -> {
+                    hideLoadFail();
+                    try{ web.reload(); }catch(Throwable ignored){}
+                });
+                android.widget.LinearLayout.LayoutParams lp2 =
+                        new android.widget.LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.WRAP_CONTENT,
+                                ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp2.topMargin = dp(18);
+                loadFailBox.addView(btn, lp2);
+            }
+            if (loadFailBox.getParent() == null && root != null) root.addView(loadFailBox);
+        } catch (Throwable ignored) { }
+    }
+
+    private void hideLoadFail() {
+        try {
+            if (loadFailBox != null && loadFailBox.getParent() != null) {
+                root.removeView(loadFailBox);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
     private void applyInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -531,11 +648,11 @@ public class MainActivity extends AppCompatActivity {
             /* kbOpen 是「键盘真的在」的唯一真相：它只在 insets 回调里按
                ime.bottom > 0 更新。imeBottomPx 会在键盘收起后的那一两帧里过期 ——
                布局回调若跑在 insets 回调之前，用它就会算出「该补」的假结论。 */
-            /* 自然高度 = 对外高度 − 我们自己补的 padding。
-               用它判断「系统让了多少」才不会把上一次的 padding 算进基准。
-               （直接用 getHeight() 是错的：它含 padding，判据几乎恒成立，
-                 等于没判 —— 那正是原来「空块回收不掉」的原因之一。） */
-            int hh = root.getHeight() - root.getPaddingBottom();
+            /* 用 getHeight() 作为「窗口给的高度」。
+               ⚠️ 不要减 paddingBottom：setPadding 不会改变 getHeight()，
+               减了就会让「该补多少」随自己设的 padding 变化，
+               形成 P(n+1)=键盘高−P(n) 的振荡 —— 那就是狂闪。 */
+            int hh = root.getHeight();
 
             /* 判「键盘确实不在」用 imeBottomPx 而不是 kbOpen：
                imeBottomPx 就是 insets 刚给的真实值，少一层状态、少一次抖动传播。 */
@@ -587,10 +704,10 @@ public class MainActivity extends AppCompatActivity {
                 if (imeBottomPx == 0 && root.getPaddingBottom() != 0) {
                     root.setPadding(0, root.getPaddingTop(), 0, 0);
                 }
-                /* 自然高度恢复了，顺手把基准修对 */
-                int natural = root.getHeight() - root.getPaddingBottom();
-                if (imeBottomPx == 0 && natural > 0 && natural >= restHeightPx) {
-                    restHeightPx = natural;
+                /* 窗口高度恢复了，顺手把基准修对（同样不掺 padding） */
+                int h2 = root.getHeight();
+                if (imeBottomPx == 0 && h2 > 0 && h2 >= restHeightPx) {
+                    restHeightPx = h2;
                 }
             }, d);
         }
@@ -602,13 +719,17 @@ public class MainActivity extends AppCompatActivity {
         /* 基准高度还没测到就先不补，等下一次布局回调再来 —— 宁可晚一帧，也不要多垫一段 */
         if (h <= 0 || restHeightPx <= 0) return 0;
 
-        /* ⚠️ 用「自然高度」而不是对外高度：后者包含我们即将设置的 padding，
-           会把「上一次已经补过」误判成「系统已经让位」。
-           shrink = 系统已经帮忙让出多少；imeBottomPx − shrink 才是还需要我们补的。
-           adjustResize 正常工作的机型上 shrink ≈ imeBottomPx → 返回 0 → 不重复补。 */
-        int natural = h - root.getPaddingBottom();
-        if (restHeightPx < natural) restHeightPx = natural;
-        int shrink = Math.max(0, restHeightPx - natural);
+        /* ⚠️⚠️ 这里**绝不能**把 padding 掺进基准计算（v0.3.2 踩过，症状是「一唤键盘就狂闪」）。
+           原因是 setPadding 不改变 View 的 getHeight()，所以
+           natural = getHeight() - paddingBottom 会随 padding 一起变：
+               P(n+1) = 键盘高 − P(n)        ← 0 和键盘高之间无限振荡
+           每次 setPadding 都触发 onGlobalLayout → 再算一次 → 再 setPadding，
+           于是整页以每帧一次的频率上下跳 = 狂闪。
+
+           getHeight() 本身就是「窗口给的高度」，padding 只是内部留白，不影响它。
+           所以直接用 getHeight() 算差额，公式里不出现 padding，才是稳定的。 */
+        if (restHeightPx < h) restHeightPx = h;
+        int shrink = Math.max(0, restHeightPx - h);
         return Math.max(0, imeBottomPx - shrink);
     }
 

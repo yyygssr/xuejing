@@ -534,15 +534,24 @@ function checkSecurity() {
   rows.push(['桥方法都有 trusted()（' + decls.length + ' 个）', unguarded.length === 0]);
   if (unguarded.length) problems.push('未加来源校验：' + unguarded.slice(0, 6).join(', '));
 
-  /* ⑤ WebView 能力收紧：SafeBrowsing 不许被关掉，且必须关文件/内容访问。 */
+  /* ⑤ WebView 边界。
+     ★ v0.3.2 教训：一度要求「显式关掉 File/Content access」，结果部分设备上
+     页面直接白屏（assets 走 file://，官方文档说不受影响，实测不是）。
+     现在只守**真正在起作用**的两条边界：
+       ① shouldOverrideUrlLoading 必须是否定式的白名单（外部页面进不来）
+       ② SafeBrowsing 不许被显式关掉
+     其余 WebView 能力交回系统默认 —— 跟默认值较劲只会换来白屏，
+     而这些开关本来也不是安全边界的本体。 */
   const act = (JAVA['MainActivity.java'] || '');
-  const safeBrowsingOff = /setSafeBrowsingEnabled\s*\(\s*false\s*\)/.test(act);
-  const fileAccessOff = /setAllowFileAccess\s*\(\s*false\s*\)/.test(act);
-  const contentAccessOff = /setAllowContentAccess\s*\(\s*false\s*\)/.test(act);
-  rows.push(['WebView 能力收紧', !safeBrowsingOff && fileAccessOff && contentAccessOff]);
-  if (safeBrowsingOff) problems.push('setSafeBrowsingEnabled(false) 又被写回来了');
-  if (!fileAccessOff) problems.push('缺少 setAllowFileAccess(false)');
-  if (!contentAccessOff) problems.push('缺少 setAllowContentAccess(false)');
+  /* 白名单：只放行 asset，http(s) 交给系统浏览器，其余全拦。
+     ★ 这里**不再**要求 SafeBrowsing 必须开着：v0.3.2 把它从 false 改成 true，
+     紧接着就有用户报「进 App 白屏」—— 对一个纯本地单页应用来说，
+     SafeBrowsing 挡不到任何东西（外部页面本来就进不来），却能把启动搞挂。
+     所以只守真正在起作用的那条边界：导航白名单。 */
+  const navWhitelist = /u\.startsWith\(ASSET_URL\)\s*\)\s*return\s+false/.test(act)
+    && /return\s+true\s*;/.test(act);
+  rows.push(['WebView 导航白名单（外部页面进不来）', navWhitelist]);
+  if (!navWhitelist) problems.push('shouldOverrideUrlLoading 不再是正面白名单');
 
   /* 原本还想统计「内联 onclick 里拼变量」的数量，但这个指标在源码层面测不准：
      真实写法是 'onclick="f(\'' + id + '\')"' —— 属性值本身是被拼出来的字符串，

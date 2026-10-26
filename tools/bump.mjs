@@ -3,10 +3,18 @@
 // ⚠️ 代码里「v0.2.9 重定」这类历史注释不许跟着替换 —— 那是「语义在哪一版定的」，
 //    跟着改等于把历史改掉。
 import fs from 'fs';
-const [cur, next] = ['0.4.6', '0.4.7'];
 let g = fs.readFileSync('android/app/build.gradle', 'utf8');
 const vc = /versionCode\s+(\d+)/.exec(g);
 if (!vc) { console.error('读不到 versionCode'); process.exit(8); }
+/* ⚠️ 当前版本也必须从 gradle 读，不能写死（真踩过两次）：
+   写死的话，发布时把 versionName 从 0.4.x 改回 0.3.x 之后，
+   脚本里的 cur 就和实际值对不上 → 锚点找不到 → 半途退出、
+   versionCode 已经 +1 但 versionName 没变。 */
+const vm = /versionName\s+"([\d.]+)"/.exec(g);
+if (!vm) { console.error('读不到 versionName'); process.exit(8); }
+const cur = vm[1];
+const curParts = cur.split('.').map(Number);
+const next = curParts[0] + '.' + curParts[1] + '.' + (curParts[2] + 1);
 /* versionCode 从 gradle 自己读再 +1：写死数字的话第二次跑会因为
    「锚点是上一版的值」而静默不生效（真踩过：versionName 升了、code 没升）。 */
 const code = Number(vc[1]) + 1;
