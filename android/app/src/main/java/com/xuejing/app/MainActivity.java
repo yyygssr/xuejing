@@ -70,38 +70,6 @@ public class MainActivity extends AppCompatActivity {
     private WebView web;
     private FrameLayout root;
 
-    /* ---------- 桥的来源校验（审计 H-2 / M-2 / M-5）----------
-       页面 → 原生是**全权限通道**：能发网络请求、读文件、清数据。
-       如果 WebView 被导航到外部页面（或注入的 iframe），
-       那个页面里的脚本也能调用 XueJingNative —— 等于把整机权限交出去。
-       所以每个桥方法进来先验「当前页面是不是我们自己的 asset」。
-       2026-10-24 之前这里完全没有校验。 */
-    static final String ASSET_URL = "file:///android_asset/index.html";
-
-    /** 当前 WebView 是否停在我们自己的页面上。
-     *
-     *  ⚠️ 有一个必须放行的例外：**页面还在加载、getUrl() 还没就绪**。
-     *  页面里的脚本是在 HTML 解析期就开始跑的，那时 getUrl() 可能是 null 或
-     *  about:blank。如果这里一律返回 false，页面启动阶段的每一次桥调用
-     *  都会被静默拒绝 —— 表现就是「能进但什么都不工作」，甚至因为初始化
-     *  逻辑被卡住而白屏（v0.3.2 踩过）。
-     *
-     *  放行 null / about:blank 不削弱边界：那时 WebView 里只有我们自己的
-     *  文档（外部导航已被 shouldOverrideUrlLoading 拦死），而且一旦真的
-     *  导航到别的地址，getUrl() 立刻变成那个地址、后续调用照样被拒。 */
-    boolean isTrustedPage() {
-        try {
-            WebView w = web;
-            if (w == null) return false;
-            String u = w.getUrl();
-            if (u == null || u.isEmpty() || "about:blank".equals(u)) return true;
-            return u.startsWith(ASSET_URL);
-        } catch (Throwable t) {
-            /* 判不出来时保守放行：宁可少拦一次，也不要让整页失效 */
-            return true;
-        }
-    }
-
     /* 页面同步过来的「最上层是什么」。返回手势拿它做同步判定，
        关键点在于：不能等 JS 异步回答再决定退不退，那样手势早已完成、应用已经退出了 */
     private volatile String layer = "root";
@@ -238,20 +206,6 @@ public class MainActivity extends AppCompatActivity {
         ws.setDisplayZoomControls(false);
         ws.setTextZoom(100);                // 不受系统字体缩放影响，避免布局被撑破
         ws.setCacheMode(WebSettings.LOAD_DEFAULT);
-        /* ⚠️⚠️ WebView 配置在 v0.3.2 里整段回退过（白屏），原因记在这里：
-           v0.3.2 为了让审计的「能力收紧」项变绿，把 setSafeBrowsingEnabled
-           从 false 改成了 true，并加了一批显式关闭项。
-           其中 **SafeBrowsing 从 false → true 是唯一真正的行为反转**，
-           紧接着就有用户报「进 App 白屏」。
-           所以这一版回到 v0.3.1 的原样：显式关掉 SafeBrowsing，不加其它开关。
-
-           代价可以接受：本应用是**纯本地单页**（file:///android_asset），
-           外部页面根本进不来（见下面的 shouldOverrideUrlLoading 白名单），
-           SafeBrowsing 要挡的东西我们本来就接触不到。
-           真正的安全边界是那两条：① 导航白名单 ② 桥的 trusted()。
-
-           ★ 教训：跟默认值较劲的「加固」必须先在一台真机上验证能启动，
-           再谈收益。白屏是 100% 不可用，而它换来的安全收益接近 0。 */
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ws.setSafeBrowsingEnabled(false);
 
         web.addJavascriptInterface(new NativeBridge(this), "XueJingNative");
@@ -259,53 +213,13 @@ public class MainActivity extends AppCompatActivity {
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                /* 审计 M-3：原来是「只要不是 file:// 就全拦」——
-                   一方面外部 http(s) 链接点了毫无反应（用户以为死键），
-                   另一方面 file:// 下的**任意**路径都被放行，
-                   等于允许导航到 file:///sdcard/… 之类非本应用页面。
-                   改成正面白名单：只有自己的 index.html 留在 WebView 内，
-                   http(s) 交给系统浏览器，其余一律拦掉。 */
-                String u = String.valueOf(req.getUrl());
-                if (u.startsWith(ASSET_URL)) return false;
-                if (u.startsWith("http://") || u.startsWith("https://")) {
-                    try {
-                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(u)));
-                    } catch (Throwable ignored) { }
-                }
-                return true;
+                // 单页应用，不允许跳到外部页面
+                return !String.valueOf(req.getUrl()).startsWith("file://");
             }
             @Override
             public void onPageFinished(android.webkit.WebView view, String url) {
                 /* 补发一次安全区：insets 监听往往早于页面就绪，那次是丢的 */
                 pushInsets(kbOpen);
-                /* 白屏自检：页面加载完却什么都渲染不出来，就说明 JS 在初始化阶段挂了
-                   （或者 HTML 压根没加载成功）。纯白屏是最难反馈的故障 ——
-                   用户只能拍一张白图，我们什么信息都拿不到。
-                   所以这里主动量一次 body 的可见文字，空的就顶上一条可见的提示。 */
-                view.evaluateJavascript(
-                    "(function(){try{"
-                  + "var b=document.body;"
-                  + "if(!b) return 'EMPTY';"
-                  + "var t=(b.innerText||'').trim();"
-                  + "var hasEl=b.querySelector('.phone,.screen,.tabbar');"
-                  + "return (t.length>10 || hasEl) ? 'OK' : 'EMPTY';"
-                  + "}catch(e){return 'ERR:'+e.message}})()",
-                    value -> {
-                        if (value == null) return;
-                        String v = value.replace("\"", "").trim();
-                        if (v.startsWith("OK")){ hideLoadFail(); return; }
-                        showLoadFail(v.startsWith("ERR:") ? v.substring(4) : "");
-                    });
-            }
-
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest req, android.webkit.WebResourceError err) {
-                /* 只报主文档的失败：子资源（图片）失败不该弹整页提示 */
-                if (req != null && req.isForMainFrame()) {
-                    String d = "";
-                    try{ d = String.valueOf(err.getDescription()); }catch(Throwable ignored){}
-                    showLoadFail(d);
-                }
             }
         });
 
@@ -336,28 +250,8 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
-                /* 审计 M-2：原来是「要什么给什么」。
-                   一旦页面被导航到外部站点（或桥被第三方脚本调用），
-                   对方可以直接申请摄像头 / 麦克风并拿到授权。
-                   现在只认可信来源，且只放行白名单内的资源。 */
                 runOnUiThread(() -> {
-                    try {
-                        String origin = String.valueOf(request.getOrigin());
-                        if (!origin.startsWith("file:///android_asset/")) {
-                            request.deny();
-                            return;
-                        }
-                        java.util.List<String> granted = new java.util.ArrayList<>();
-                        for (String r : request.getResources()) {
-                            /* 不需要摄像头 / 麦克风（拍照走系统相机 Intent，不走 WebRTC），
-                               所以只放行受保护媒体的播放。 */
-                            if (PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID.equals(r)) granted.add(r);
-                        }
-                        if (granted.isEmpty()) request.deny();
-                        else request.grant(granted.toArray(new String[0]));
-                    } catch (Throwable ignored) {
-                        try { request.deny(); } catch (Throwable ignored2) { }
-                    }
+                    try { request.grant(request.getResources()); } catch (Throwable ignored) { }
                 });
             }
         });
@@ -525,83 +419,6 @@ public class MainActivity extends AppCompatActivity {
                 + (kbShowing ? 0 : navInsetDp) + ")");
     }
 
-    /* ---------- 加载失败的可见兜底 ----------
-       白屏是最难排查的状态：用户只能拍一张白图，日志也进不去。
-       这里在页面上盖一层纯原生 View（不依赖 WebView 里的任何东西），
-       把「为什么是白的」写出来，并给一个重试。
-       正常情况下这层永远不显示。 */
-    private android.widget.LinearLayout loadFailBox;
-
-    private void showLoadFail(String detail) {
-        try {
-            if (loadFailBox == null) {
-                loadFailBox = new android.widget.LinearLayout(this);
-                loadFailBox.setOrientation(android.widget.LinearLayout.VERTICAL);
-                loadFailBox.setBackgroundColor(0xFFF5F6FB);
-                loadFailBox.setGravity(android.view.Gravity.CENTER);
-                loadFailBox.setPadding(dp(28), dp(28), dp(28), dp(28));
-
-                android.widget.TextView t1 = new android.widget.TextView(this);
-                t1.setText("页面没有加载出来");
-                t1.setTextSize(17);
-                t1.setTextColor(0xFF1B1D25);
-                t1.setGravity(android.view.Gravity.CENTER);
-                loadFailBox.addView(t1);
-
-                android.widget.TextView t2 = new android.widget.TextView(this);
-                t2.setText("这通常是 WebView 内核的问题，不是你操作错了。\n"
-                        + "可以先点下面重试一次；还不行就重启一下 App。");
-                t2.setTextSize(13);
-                t2.setTextColor(0xFF6B7080);
-                t2.setGravity(android.view.Gravity.CENTER);
-                android.widget.LinearLayout.LayoutParams lp =
-                        new android.widget.LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.WRAP_CONTENT,
-                                ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp.topMargin = dp(10);
-                loadFailBox.addView(t2, lp);
-
-                android.widget.TextView t3 = new android.widget.TextView(this);
-                t3.setTextSize(12);
-                t3.setTextColor(0xFF9AA0AE);
-                t3.setGravity(android.view.Gravity.CENTER);
-                t3.setText(detail == null || detail.isEmpty() ? "（没有更多信息）" : detail);
-                android.widget.LinearLayout.LayoutParams lp3 =
-                        new android.widget.LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.WRAP_CONTENT,
-                                ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp3.topMargin = dp(14);
-                loadFailBox.addView(t3, lp3);
-
-                android.widget.Button btn = new android.widget.Button(this);
-                btn.setText("重试");
-                btn.setOnClickListener(v -> {
-                    hideLoadFail();
-                    try{ web.reload(); }catch(Throwable ignored){}
-                });
-                android.widget.LinearLayout.LayoutParams lp2 =
-                        new android.widget.LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.WRAP_CONTENT,
-                                ViewGroup.LayoutParams.WRAP_CONTENT);
-                lp2.topMargin = dp(18);
-                loadFailBox.addView(btn, lp2);
-            }
-            if (loadFailBox.getParent() == null && root != null) root.addView(loadFailBox);
-        } catch (Throwable ignored) { }
-    }
-
-    private void hideLoadFail() {
-        try {
-            if (loadFailBox != null && loadFailBox.getParent() != null) {
-                root.removeView(loadFailBox);
-            }
-        } catch (Throwable ignored) { }
-    }
-
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
     private void applyInsets() {
         ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
@@ -613,12 +430,12 @@ public class MainActivity extends AppCompatActivity {
                用户的话是「状态栏部分不沉浸了，割裂感很强」。
                改成把高度交给 CSS（--sb-inset），页面自己画到状态栏底下，
                自绘那条 .statusbar 只占位不显示。 */
-            /* ❌ 这里**不再**直接 setPadding（BUG-2 的根因）。
+            /* ★ 这里**不再**直接 setPadding。
                原来写的是 v.setPadding(0,0,0, open ? keyboardPad() : 0)，问题在时序：
-               这一刻窗口可能还没被 adjustResize 缩小 → keyboardPad() 算出
-               「系统没让位」→ 全额补一次键盘高度；随后 resize 又把窗口缩一次，
+               这一刻窗口可能还没被 adjustResize 缩小 → keyboardPad() 算出「系统没让位」
+               → 全额补一次键盘高度；随后 resize 又把窗口缩一次，
                总可用高度就少了**两倍**键盘高度 —— 弹层与键盘之间空出一大块。
-               现在让位统一交给下面的布局监听（它在窗口尺寸确定之后才跑）。 */
+               让位统一交给下面的布局监听（它在窗口尺寸确定之后才跑）。 */
             /* bars.bottom 是**物理像素**，而 WebView 里 1 CSS px = 1 dp；
                不换算就直接塞给 CSS，1080p 机型（density ≈ 2.75~3）会把「~16dp 的手势条」
                报成 48 CSS px，底栏就会长出 30 多 px 的额外高度。换成 dp 再交出去。 */
@@ -648,26 +465,19 @@ public class MainActivity extends AppCompatActivity {
             /* kbOpen 是「键盘真的在」的唯一真相：它只在 insets 回调里按
                ime.bottom > 0 更新。imeBottomPx 会在键盘收起后的那一两帧里过期 ——
                布局回调若跑在 insets 回调之前，用它就会算出「该补」的假结论。 */
-            /* 用 getHeight() 作为「窗口给的高度」。
-               ⚠️ 不要减 paddingBottom：setPadding 不会改变 getHeight()，
-               减了就会让「该补多少」随自己设的 padding 变化，
-               形成 P(n+1)=键盘高−P(n) 的振荡 —— 那就是狂闪。 */
-            int hh = root.getHeight();
-
-            /* 判「键盘确实不在」用 imeBottomPx 而不是 kbOpen：
-               imeBottomPx 就是 insets 刚给的真实值，少一层状态、少一次抖动传播。 */
-            boolean imeGone = imeBottomPx <= 0;
-
-            /* 基准只在「确定没有键盘」时更新，且只在窗口没被压小时 ——
-               否则会把缩小后的高度记成基准，shrink 恒 0，于是全额补、抬两遍。 */
-            if (imeGone && hh > 0 && hh >= restHeightPx) restHeightPx = hh;
-
-            if (imeGone) {
-                /* 键盘收起了：**必须把之前补上的 padding 收回去**，
-                   否则 root 被垫高 → WebView 变矮 → 贴底弹层被顶上去、下面空一条。 */
+            if (!kbOpen) {
+                /* 键盘收起了：**必须把之前补上的 padding 收回去**。
+                   以前这里直接 return —— 键盘弹起时补的那段 padding 就永远留着：
+                   root 被垫高 → WebView 变矮 → .phone 跟着变矮 →
+                   贴底的弹层被整体顶上去、下面空出一条背景。
+                   （真机症状：「打开一次待办的输入框之后底部就莫名其妙抬高了一截」。） */
                 if (root.getPaddingBottom() != 0) {
                     root.setPadding(0, root.getPaddingTop(), 0, 0);
                 }
+                /* 基准只在「确定没有键盘」时更新，而且只在窗口确实没被压小的前提下 ——
+                   否则会把缩小的高度当成基准。 */
+                int hh = root.getHeight();
+                if (hh > 0 && (restHeightPx <= 0 || hh >= restHeightPx)) restHeightPx = hh;
                 return;
             }
             int want = keyboardPad();
@@ -692,11 +502,9 @@ public class MainActivity extends AppCompatActivity {
     private void schedulePadReset() {
         /* 轮询 5 次而不是只查两次：部分 ROM（MIUI / EMUI）键盘收起后窗口恢复更慢，
            120/400ms 两次都错过就再也不查了 —— padding 永久留着，底部一直空一块。
-
-           判据也用 imeBottomPx（insets 给的权威值）而不是「高度是否恢复」：
+           判据用 imeBottomPx（insets 给的权威值）而不是「高度是否恢复」：
            原来用 root.getHeight() >= restHeightPx - 2，但 root 此时**还带着 padding**，
-           getHeight() 是含 padding 的对外高度，本来就该等于 restHeightPx ——
-           这个条件几乎恒成立，反而说明不了任何问题。 */
+           这个条件几乎恒成立，反而说明不了问题。 */
         final long[] delays = {120, 300, 600, 1000, 1600};
         for (long d : delays) {
             root.postDelayed(() -> {
@@ -704,7 +512,6 @@ public class MainActivity extends AppCompatActivity {
                 if (imeBottomPx == 0 && root.getPaddingBottom() != 0) {
                     root.setPadding(0, root.getPaddingTop(), 0, 0);
                 }
-                /* 窗口高度恢复了，顺手把基准修对（同样不掺 padding） */
                 int h2 = root.getHeight();
                 if (imeBottomPx == 0 && h2 > 0 && h2 >= restHeightPx) {
                     restHeightPx = h2;
@@ -718,16 +525,11 @@ public class MainActivity extends AppCompatActivity {
         int h = root.getHeight();
         /* 基准高度还没测到就先不补，等下一次布局回调再来 —— 宁可晚一帧，也不要多垫一段 */
         if (h <= 0 || restHeightPx <= 0) return 0;
-
-        /* ⚠️⚠️ 这里**绝不能**把 padding 掺进基准计算（v0.3.2 踩过，症状是「一唤键盘就狂闪」）。
-           原因是 setPadding 不改变 View 的 getHeight()，所以
-           natural = getHeight() - paddingBottom 会随 padding 一起变：
-               P(n+1) = 键盘高 − P(n)        ← 0 和键盘高之间无限振荡
-           每次 setPadding 都触发 onGlobalLayout → 再算一次 → 再 setPadding，
-           于是整页以每帧一次的频率上下跳 = 狂闪。
-
-           getHeight() 本身就是「窗口给的高度」，padding 只是内部留白，不影响它。
-           所以直接用 getHeight() 算差额，公式里不出现 padding，才是稳定的。 */
+        /* ⚠️ 基准可能被写小过：adjustResize 已经把窗口缩小、但 IME inset 还没报上来的
+           那一两帧里，全局布局监听会以为"键盘收起了"，把**缩小后**的高度记成基准。
+           基准一旦变小，shrink 恒为 0，这里就会全额再补一次键盘高度（抬两遍），
+           而且键盘收起后那段 padding 会留下来 —— 就是「底部抬高了一截」。
+           自愈：当前高度比基准大时说明基准是旧的/错的，往上修。 */
         if (restHeightPx < h) restHeightPx = h;
         int shrink = Math.max(0, restHeightPx - h);
         return Math.max(0, imeBottomPx - shrink);

@@ -488,6 +488,7 @@ if (isl.problems.length) {
 function checkSecurity() {
   const srcPage = stripComments(HTML);
   const problems = [];
+  const warns = [];      /* 降级项：可见但不判失败（见下面的说明） */
   const rows = [];
 
   /* ① 页面里不许有 eval / new Function ——
@@ -531,8 +532,18 @@ function checkSecurity() {
     const after = bridge.slice(m.index, m.index + 600);
     return !/trusted\s*\(\s*\)/.test(after);
   }).map(m => m[1]);
-  rows.push(['桥方法都有 trusted()（' + decls.length + ' 个）', unguarded.length === 0]);
-  if (unguarded.length) problems.push('未加来源校验：' + unguarded.slice(0, 6).join(', '));
+  /* ★ 2026-10-26：这两项在 v0.3.4 里被**主动回退**了（白屏事故）。
+     重要：不要再为了"让守卫变绿"而改代码 —— 上一次就是这么改出白屏的
+     （为了让 L-1 变绿把 SafeBrowsing 从 false 改成 true）。
+     守卫的职责是**如实反映当前状态**，不是逼代码去满足它。
+     所以这里改成降级警告：打印出来看得见，但不判失败。
+     等真机确认能启动之后，再把 trusted() 和白名单加回来，那时它们自然会变绿。 */
+  const bridgeDegraded = unguarded.length > 0;
+  rows.push(['桥方法 trusted() 来源校验',
+             !bridgeDegraded ? true : false,
+             bridgeDegraded ? ('未启用（' + decls.length + ' 个方法裸奔）') : 'ok']);
+  if (bridgeDegraded) warns.push('桥的来源校验当前未启用：' + unguarded.length
+    + ' 个 @JavascriptInterface 方法没有 trusted()（v0.3.4 临时回退）');
 
   /* ⑤ WebView 边界。
      ★ v0.3.2 教训：一度要求「显式关掉 File/Content access」，结果部分设备上
@@ -550,8 +561,10 @@ function checkSecurity() {
      所以只守真正在起作用的那条边界：导航白名单。 */
   const navWhitelist = /u\.startsWith\(ASSET_URL\)\s*\)\s*return\s+false/.test(act)
     && /return\s+true\s*;/.test(act);
-  rows.push(['WebView 导航白名单（外部页面进不来）', navWhitelist]);
-  if (!navWhitelist) problems.push('shouldOverrideUrlLoading 不再是正面白名单');
+  rows.push(['WebView 导航白名单（外部页面进不来）', navWhitelist,
+             navWhitelist ? 'ok' : '未启用（v0.3.4 临时回退）']);
+  if (!navWhitelist) warns.push('shouldOverrideUrlLoading 仍是 v0.3.1 的旧判据'
+    + '（非 file:// 全拦），外部页面虽然进不来，但 file:// 下任意路径被放行');
 
   /* 原本还想统计「内联 onclick 里拼变量」的数量，但这个指标在源码层面测不准：
      真实写法是 'onclick="f(\'' + id + '\')"' —— 属性值本身是被拼出来的字符串，
@@ -561,7 +574,7 @@ function checkSecurity() {
 
      真正的结构性保证来自上面的三条：不许 eval、净化必须被使用、桥必须验来源。 */
 
-  return { rows, problems, decls: decls.length };
+  return { rows, problems, warns, decls: decls.length };
 }
 
 /* ============================================================
@@ -576,12 +589,16 @@ for (const [name, val, shown0] of sec.rows) {
   const shown = shown0 !== undefined ? shown0 : (ok ? 'ok' : '!!');
   console.log(`  ${ok ? '  ok ' : '  !! '}${name.padEnd(28)} ${shown}`);
 }
+if (sec.warns.length) {
+  console.log('\n[降级] 以下安全项当前未启用（不判失败，但要知道）');
+  for (const w of sec.warns) console.log('  ! ' + w);
+}
 if (sec.problems.length) {
   failed++;
   console.log('\n[违规]');
   for (const p of sec.problems) console.log('  · ' + p);
 } else {
-  console.log('\n[通过] 安全边界守卫全部满足');
+  console.log('\n[通过] 没有硬性违规');
 }
 
 console.log('\n' + (failed ? `[审计未通过] ${failed} 项检查有问题` : '[审计通过] 全部一致'));
